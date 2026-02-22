@@ -10,7 +10,7 @@ from .const import DEFAULT_PORT, DOMAIN
 from .tpap import AuthError, TapoVacuumClient
 
 STEP_SCHEMA = vol.Schema({
-    vol.Required(CONF_HOST,     default="192.168.69.85"): str,
+    vol.Required(CONF_HOST): str,
     vol.Required(CONF_USERNAME, default=""): str,
     vol.Required(CONF_PASSWORD, default=""): str,
 })
