@@ -27,8 +27,6 @@ views:
         entity: vacuum.jarvis
         map_source:
           camera: camera.jarvis_map
-        calibration_source:
-          camera: true
         rotate: 0
         two_finger_pan: true
         map_scale: 1
