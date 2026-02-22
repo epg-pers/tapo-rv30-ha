@@ -182,6 +182,14 @@ class TapoCoordinator(DataUpdateCoordinator):
         except Exception as exc:
             raise UpdateFailed(f"Failed to fetch Jarvis status: {exc}") from exc
 
+        try:
+            data["consumables"] = await self.hass.async_add_executor_job(
+                self.client.get_consumables
+            )
+        except Exception as exc:
+            _LOGGER.debug("Consumables fetch failed: %s", exc)
+            data["consumables"] = {}
+
         # Refresh map on first load and every MAP_INTERVAL seconds
         self._map_tick += 1
         if self.map_image_bytes is None or self._map_tick >= self._map_cycles:

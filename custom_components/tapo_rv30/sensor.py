@@ -140,35 +140,28 @@ class TapoConsumableSensor(CoordinatorEntity[TapoCoordinator], SensorEntity):
         self._attr_unique_id      = f"{entry.entry_id}_consumable_{ckey}"
         self._attr_device_info    = device_info
         self._attr_icon           = "mdi:wrench"
-        self._consumable_data: dict = {}
-
-    async def async_update(self) -> None:
-        """Fetch consumables separately (less time-critical than status)."""
-        try:
-            self._consumable_data = await self.hass.async_add_executor_job(
-                self.coordinator.client.get_consumables
-            )
-        except Exception as exc:
-            _LOGGER.debug("Consumable fetch failed: %s", exc)
 
     @property
     def native_value(self) -> float | None:
-        raw = self._consumable_data.get(self._ckey)
+        d = self.coordinator.data
+        if not d:
+            return None
+        raw = d.get("consumables", {}).get(self._ckey)
         if raw is None:
             return None
-        used_h   = raw / 60
-        remain_h = max(0.0, self._limit_h - used_h)
-        return round(remain_h, 1)
+        return round(max(0.0, self._limit_h - raw / 60), 1)
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        raw = self._consumable_data.get(self._ckey)
+        d = self.coordinator.data
+        if not d:
+            return {}
+        raw = d.get("consumables", {}).get(self._ckey)
         if raw is None:
             return {}
-        used_h  = raw / 60
-        pct     = min(100, round(used_h / self._limit_h * 100, 1))
+        used_h = raw / 60
         return {
             "used_hours":   round(used_h, 1),
             "limit_hours":  self._limit_h,
-            "percent_used": pct,
+            "percent_used": min(100, round(used_h / self._limit_h * 100, 1)),
         }
