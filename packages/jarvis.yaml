@@ -27,7 +27,6 @@ input_boolean:
 script:
   jarvis_clean_selected_rooms:
     alias: "Jarvis: Clean Selected Rooms"
-    icon: mdi:robot-vacuum
     sequence:
       - variables:
           selected_rooms: >
