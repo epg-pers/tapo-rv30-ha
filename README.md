@@ -22,7 +22,7 @@ No cloud dependency — communicates directly with the vacuum over your LAN.
 - Home Assistant 2024.1+
 - [HACS](https://hacs.xyz) installed
 - Tapo RV30 on firmware **1.3.x+** (TPAP protocol)
-- Python packages (installed automatically by HACS): `requests`, `ecdsa`, `lz4`, `Pillow`
+- Python packages (installed automatically by HACS): `requests`, `ecdsa`, `Pillow`
 
 ## Installation via HACS
 
