@@ -27,6 +27,14 @@ views:
         entity: vacuum.jarvis
         map_source:
           camera: camera.jarvis_map
+        calibration_source:
+          calibration_points:
+            - vacuum: {x: 0,   y: 0}
+              map:    {x: 0,   y: 704}
+            - vacuum: {x: 174, y: 0}
+              map:    {x: 696, y: 704}
+            - vacuum: {x: 0,   y: 176}
+              map:    {x: 0,   y: 0}
         rotate: 0
         two_finger_pan: true
         map_scale: 1
