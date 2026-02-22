@@ -25,35 +25,39 @@ views:
       # ── Map with room buttons ──────────────────────────────────────────────
       - type: custom:xiaomi-vacuum-map-card
         entity: vacuum.jarvis
-        map_camera: camera.jarvis_map
+        map_source:
+          camera: camera.jarvis_map
+        calibration_source:
+          camera: true
         rotate: 0
         two_finger_pan: true
         map_scale: 1
-        rooms:
-          - id: 1
-            name: Hallway
-            icon: mdi:door
-            service_call_data:
-              rooms: ["Hallway"]
-          - id: 5
-            name: Lounge
-            icon: mdi:sofa
-            service_call_data:
-              rooms: ["Lounge"]
-          - id: 4
-            name: Dining Room
-            icon: mdi:table-chair
-            service_call_data:
-              rooms: ["Dining Room"]
-          - id: 3
-            name: Kitchen
-            icon: mdi:countertop
-            service_call_data:
-              rooms: ["Kitchen"]
-        vacuum_clean_service:
-          service: tapo_rv30.clean_rooms
-          service_data:
-            entity_id: vacuum.jarvis
+        map_modes:
+          - name: Clean Room
+            run_immediately: true
+            icon: mdi:broom
+            service_call_schema:
+              service: tapo_rv30.clean_rooms
+              service_data:
+                entity_id: vacuum.jarvis
+                rooms: "[[rooms]]"
+            predefined_selections:
+              - id: 1
+                label: Hallway
+                icon: mdi:door
+                rooms: ["Hallway"]
+              - id: 5
+                label: Lounge
+                icon: mdi:sofa
+                rooms: ["Lounge"]
+              - id: 4
+                label: Dining Room
+                icon: mdi:table-chair
+                rooms: ["Dining Room"]
+              - id: 3
+                label: Kitchen
+                icon: mdi:countertop
+                rooms: ["Kitchen"]
         title: Downstairs
 
       # ── Status row ─────────────────────────────────────────────────────────
