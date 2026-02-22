@@ -58,8 +58,10 @@ views:
         primary: Clean Selected Rooms
         icon: mdi:robot-vacuum
         tap_action:
-          action: call-service
-          service: script.jarvis_clean_selected_rooms
+          action: perform-action
+          perform_action: script.turn_on
+          target:
+            entity_id: script.jarvis_clean_selected_rooms
 
       # ── Status row ─────────────────────────────────────────────────────────
       - type: horizontal-stack

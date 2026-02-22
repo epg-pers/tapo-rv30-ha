@@ -26,7 +26,6 @@ input_boolean:
 
 script:
   jarvis_clean_selected_rooms:
-    alias: "Jarvis: Clean Selected Rooms"
     sequence:
       - variables:
           selected_rooms: >
@@ -36,8 +35,6 @@ script:
             {% if is_state('input_boolean.jarvis_room_dining_room','on') %}{% set ns.r = ns.r + ['Dining Room'] %}{% endif %}
             {% if is_state('input_boolean.jarvis_room_kitchen',    'on') %}{% set ns.r = ns.r + ['Kitchen']     %}{% endif %}
             {{ ns.r }}
-      - condition: template
-        value_template: "{{ selected_rooms | length > 0 }}"
       - service: tapo_rv30.clean_rooms
         data:
           entity_id: vacuum.jarvis
