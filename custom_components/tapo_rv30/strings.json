@@ -1,0 +1,21 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect to Tapo RV30",
+        "data": {
+          "host": "Host (IP address)",
+          "username": "Tapo account email",
+          "password": "Tapo account password"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect — check the IP address and that the vacuum is on",
+      "invalid_auth": "Invalid credentials — check your Tapo email and password"
+    },
+    "abort": {
+      "already_configured": "This device is already configured"
+    }
+  }
+}
