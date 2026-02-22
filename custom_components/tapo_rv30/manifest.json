@@ -4,7 +4,7 @@
   "version": "1.0.0",
   "documentation": "https://github.com/epg-pers/tapo-rv30-ha",
   "issue_tracker": "https://github.com/epg-pers/tapo-rv30-ha/issues",
-  "requirements": ["requests>=2.28", "ecdsa>=0.18", "lz4>=4.0", "Pillow>=10.0"],
+  "requirements": ["requests>=2.28", "ecdsa>=0.18", "Pillow>=10.0"],
   "codeowners": [],
   "config_flow": true,
   "iot_class": "local_polling"

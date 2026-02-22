@@ -6,7 +6,6 @@ import logging
 from datetime import timedelta
 from typing import Any
 
-import lz4.block
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from PIL import Image, ImageDraw, ImageFont
@@ -25,6 +24,43 @@ from .tpap import TapoVacuumClient
 _LOGGER = logging.getLogger(__name__)
 
 MAP_SCALE = 4   # px per vacuum grid cell → ~700×700 output image
+
+
+def _lz4_block_decompress(data: bytes, uncompressed_size: int) -> bytes:
+    """Pure-Python LZ4 block decompressor — no C extension needed."""
+    out = bytearray(uncompressed_size)
+    src = 0
+    dst = 0
+    n = len(data)
+    while src < n:
+        token = data[src]; src += 1
+        # Literal run
+        lit_len = token >> 4
+        if lit_len == 15:
+            while src < n:
+                extra = data[src]; src += 1
+                lit_len += extra
+                if extra != 255:
+                    break
+        out[dst:dst + lit_len] = data[src:src + lit_len]
+        src += lit_len
+        dst += lit_len
+        if src >= n:
+            break
+        # Match copy
+        offset = data[src] | (data[src + 1] << 8); src += 2
+        match_len = (token & 0xF) + 4
+        if match_len == 19:  # 4 + 15
+            while src < n:
+                extra = data[src]; src += 1
+                match_len += extra
+                if extra != 255:
+                    break
+        match_pos = dst - offset
+        for i in range(match_len):
+            out[dst + i] = out[match_pos + i]
+        dst += match_len
+    return bytes(out)
 FONT_SIZE  = 14
 
 
@@ -42,7 +78,7 @@ def _render_map_image(map_data: dict) -> bytes:
     pix_len = map_data["pix_len"]
 
     raw     = base64.b64decode(map_data["map_data"])
-    pixels  = lz4.block.decompress(raw, uncompressed_size=pix_len)
+    pixels  = _lz4_block_decompress(raw, uncompressed_size=pix_len)
 
     rooms = [a for a in map_data.get("area_list", []) if a.get("type") == "room"]
     sorted_ids  = sorted(r["id"] for r in rooms)
