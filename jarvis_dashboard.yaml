@@ -1,0 +1,109 @@
+# Jarvis Dashboard
+# Requires HACS cards:
+#   - mushroom (https://github.com/piitaya/lovelace-mushroom)
+#   - xiaomi-vacuum-map-card (https://github.com/PiotrMachowski/lovelace-xiaomi-vacuum-map-card)
+#
+# Add as a new dashboard view in HA → Settings → Dashboards → Add Dashboard
+# (or paste the cards into an existing view)
+
+title: Jarvis
+views:
+  - title: Jarvis
+    icon: mdi:robot-vacuum
+    cards:
+
+      # ── Main controls ──────────────────────────────────────────────────────
+      - type: custom:mushroom-vacuum-card
+        entity: vacuum.jarvis
+        show_toolbar_clean: true
+        show_toolbar_locate: false
+        show_toolbar_stop: true
+        show_toolbar_return_home: true
+        tap_action:
+          action: more-info
+
+      # ── Map with room buttons ──────────────────────────────────────────────
+      - type: custom:xiaomi-vacuum-map-card
+        entity: vacuum.jarvis
+        map_camera: camera.jarvis_map
+        rotate: 0
+        two_finger_pan: true
+        map_scale: 1
+        rooms:
+          - id: 1
+            name: Hallway
+            icon: mdi:door
+            service_call_data:
+              rooms: ["Hallway"]
+          - id: 5
+            name: Lounge
+            icon: mdi:sofa
+            service_call_data:
+              rooms: ["Lounge"]
+          - id: 4
+            name: Dining Room
+            icon: mdi:table-chair
+            service_call_data:
+              rooms: ["Dining Room"]
+          - id: 3
+            name: Kitchen
+            icon: mdi:countertop
+            service_call_data:
+              rooms: ["Kitchen"]
+        vacuum_clean_service:
+          service: tapo_rv30.clean_rooms
+          service_data:
+            entity_id: vacuum.jarvis
+        title: Downstairs
+
+      # ── Status row ─────────────────────────────────────────────────────────
+      - type: horizontal-stack
+        cards:
+          - type: custom:mushroom-entity-card
+            entity: sensor.jarvis_battery
+            icon: mdi:battery
+            name: Battery
+          - type: custom:mushroom-entity-card
+            entity: sensor.jarvis_status
+            icon: mdi:information-outline
+            name: Status
+          - type: custom:mushroom-entity-card
+            entity: sensor.jarvis_last_clean_area
+            icon: mdi:texture-box
+            name: Last Area
+
+      # ── Fan speed selector ─────────────────────────────────────────────────
+      - type: custom:mushroom-select-card
+        entity: vacuum.jarvis
+        name: Fan Speed
+        icon: mdi:fan
+        # mushroom-select-card uses the vacuum's set_fan_speed service
+        # Tap the card to cycle through Quiet → Standard → Turbo → Max → Ultra
+
+      # ── Consumables ────────────────────────────────────────────────────────
+      - type: entities
+        title: Consumables
+        icon: mdi:wrench
+        entities:
+          - type: custom:mushroom-entity-card
+            entity: sensor.jarvis_main_brush_remaining
+            icon: mdi:brush
+            name: Main Brush
+            secondary_info: attribute
+            attribute: percent_used
+          - type: custom:mushroom-entity-card
+            entity: sensor.jarvis_side_brush_remaining
+            icon: mdi:rotate-right
+            name: Side Brush
+          - type: custom:mushroom-entity-card
+            entity: sensor.jarvis_filter_remaining
+            icon: mdi:air-filter
+            name: Filter
+          - type: custom:mushroom-entity-card
+            entity: sensor.jarvis_sensor_remaining
+            icon: mdi:eye
+            name: Sensor
+          - type: custom:mushroom-entity-card
+            entity: sensor.jarvis_charge_contacts_remaining
+            icon: mdi:lightning-bolt
+            name: Charge Contacts

@@ -1,0 +1,12 @@
+{
+  "domain": "tapo_rv30",
+  "name": "Tapo RV30 Robot Vacuum",
+  "version": "1.0.0",
+  "documentation": "https://github.com/python-kasa/python-kasa/pull/1592",
+  "issue_tracker": "",
+  "requirements": ["requests>=2.28", "ecdsa>=0.18", "lz4>=4.0", "Pillow>=10.0"],
+  "dependencies": [],
+  "codeowners": [],
+  "config_flow": true,
+  "iot_class": "local_polling"
+}

@@ -1,0 +1,22 @@
+clean_rooms:
+  name: Clean specific rooms
+  description: Send Jarvis to clean one or more named rooms.
+  target:
+    entity:
+      domain: vacuum
+      integration: tapo_rv30
+  fields:
+    rooms:
+      name: Rooms
+      description: List of room names to clean (partial match, case-insensitive).
+      required: true
+      example: ["Kitchen", "Hallway"]
+      selector:
+        object:
+    map:
+      name: Map
+      description: Optional map name to search in (e.g. "Downstairs"). Defaults to current map.
+      required: false
+      example: "Downstairs"
+      selector:
+        text:
