@@ -27,7 +27,7 @@ No cloud dependency — communicates directly with the vacuum over your LAN.
 ## Installation via HACS
 
 1. In HACS → **Integrations** → ⋮ menu → **Custom repositories**
-2. Add `https://github.com/YOUR_USERNAME/tapo-rv30-ha` as category **Integration**
+2. Add `https://github.com/epg-pers/tapo-rv30-ha` as category **Integration**
 3. Install **Tapo RV30 Robot Vacuum**
 4. Restart Home Assistant
 5. **Settings → Devices & Services → + Add Integration → Tapo RV30**
