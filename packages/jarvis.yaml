@@ -1,0 +1,45 @@
+# Jarvis (Tapo RV30) — HA helpers and scripts
+#
+# Installation:
+#   1. Copy this file to /config/packages/jarvis.yaml
+#   2. Add the following to your configuration.yaml if not already present:
+#        homeassistant:
+#          packages: !include_dir_named packages
+#   3. Restart Home Assistant
+#
+# Customise the room names to match your setup — they must match
+# the room names your vacuum was taught (visible in the Tapo app).
+
+input_boolean:
+  jarvis_room_hallway:
+    name: "Hallway"
+    icon: mdi:door
+  jarvis_room_lounge:
+    name: "Lounge"
+    icon: mdi:sofa
+  jarvis_room_dining_room:
+    name: "Dining Room"
+    icon: mdi:table-chair
+  jarvis_room_kitchen:
+    name: "Kitchen"
+    icon: mdi:countertop
+
+script:
+  jarvis_clean_selected_rooms:
+    alias: "Jarvis: Clean Selected Rooms"
+    icon: mdi:robot-vacuum
+    sequence:
+      - variables:
+          selected_rooms: >
+            {% set ns = namespace(r=[]) %}
+            {% if is_state('input_boolean.jarvis_room_hallway',    'on') %}{% set ns.r = ns.r + ['Hallway']     %}{% endif %}
+            {% if is_state('input_boolean.jarvis_room_lounge',     'on') %}{% set ns.r = ns.r + ['Lounge']      %}{% endif %}
+            {% if is_state('input_boolean.jarvis_room_dining_room','on') %}{% set ns.r = ns.r + ['Dining Room'] %}{% endif %}
+            {% if is_state('input_boolean.jarvis_room_kitchen',    'on') %}{% set ns.r = ns.r + ['Kitchen']     %}{% endif %}
+            {{ ns.r }}
+      - condition: template
+        value_template: "{{ selected_rooms | length > 0 }}"
+      - service: tapo_rv30.clean_rooms
+        data:
+          entity_id: vacuum.jarvis
+          rooms: "{{ selected_rooms }}"

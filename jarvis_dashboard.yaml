@@ -38,45 +38,28 @@ views:
         two_finger_pan: true
         title: Downstairs
 
-      # ── Room buttons ───────────────────────────────────────────────────────
-      - type: horizontal-stack
-        cards:
-          - type: custom:mushroom-template-card
-            primary: Hallway
+      # ── Room selector ──────────────────────────────────────────────────────
+      - type: custom:mushroom-chips-card
+        chips:
+          - type: entity
+            entity: input_boolean.jarvis_room_hallway
             icon: mdi:door
-            tap_action:
-              action: call-service
-              service: tapo_rv30.clean_rooms
-              service_data:
-                entity_id: vacuum.jarvis
-                rooms: ["Hallway"]
-          - type: custom:mushroom-template-card
-            primary: Lounge
+          - type: entity
+            entity: input_boolean.jarvis_room_lounge
             icon: mdi:sofa
-            tap_action:
-              action: call-service
-              service: tapo_rv30.clean_rooms
-              service_data:
-                entity_id: vacuum.jarvis
-                rooms: ["Lounge"]
-          - type: custom:mushroom-template-card
-            primary: Dining Room
+          - type: entity
+            entity: input_boolean.jarvis_room_dining_room
             icon: mdi:table-chair
-            tap_action:
-              action: call-service
-              service: tapo_rv30.clean_rooms
-              service_data:
-                entity_id: vacuum.jarvis
-                rooms: ["Dining Room"]
-          - type: custom:mushroom-template-card
-            primary: Kitchen
+          - type: entity
+            entity: input_boolean.jarvis_room_kitchen
             icon: mdi:countertop
-            tap_action:
-              action: call-service
-              service: tapo_rv30.clean_rooms
-              service_data:
-                entity_id: vacuum.jarvis
-                rooms: ["Kitchen"]
+
+      - type: custom:mushroom-template-card
+        primary: Clean Selected Rooms
+        icon: mdi:robot-vacuum
+        tap_action:
+          action: call-service
+          service: script.jarvis_clean_selected_rooms
 
       # ── Status row ─────────────────────────────────────────────────────────
       - type: horizontal-stack
