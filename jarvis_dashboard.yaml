@@ -22,7 +22,7 @@ views:
         tap_action:
           action: more-info
 
-      # ── Map with room buttons ──────────────────────────────────────────────
+      # ── Map ────────────────────────────────────────────────────────────────
       - type: custom:xiaomi-vacuum-map-card
         entity: vacuum.jarvis
         map_source:
@@ -35,36 +35,48 @@ views:
               map:    {x: 696, y: 704}
             - vacuum: {x: 0,   y: 176}
               map:    {x: 0,   y: 0}
-        rotate: 0
         two_finger_pan: true
-        map_scale: 1
-        map_modes:
-          - name: Clean Room
-            run_immediately: true
-            icon: mdi:broom
-            service_call_schema:
+        title: Downstairs
+
+      # ── Room buttons ───────────────────────────────────────────────────────
+      - type: horizontal-stack
+        cards:
+          - type: custom:mushroom-template-card
+            primary: Hallway
+            icon: mdi:door
+            tap_action:
+              action: call-service
               service: tapo_rv30.clean_rooms
               service_data:
                 entity_id: vacuum.jarvis
-                rooms: "[[rooms]]"
-            predefined_selections:
-              - id: 1
-                label: Hallway
-                icon: mdi:door
                 rooms: ["Hallway"]
-              - id: 5
-                label: Lounge
-                icon: mdi:sofa
+          - type: custom:mushroom-template-card
+            primary: Lounge
+            icon: mdi:sofa
+            tap_action:
+              action: call-service
+              service: tapo_rv30.clean_rooms
+              service_data:
+                entity_id: vacuum.jarvis
                 rooms: ["Lounge"]
-              - id: 4
-                label: Dining Room
-                icon: mdi:table-chair
+          - type: custom:mushroom-template-card
+            primary: Dining Room
+            icon: mdi:table-chair
+            tap_action:
+              action: call-service
+              service: tapo_rv30.clean_rooms
+              service_data:
+                entity_id: vacuum.jarvis
                 rooms: ["Dining Room"]
-              - id: 3
-                label: Kitchen
-                icon: mdi:countertop
+          - type: custom:mushroom-template-card
+            primary: Kitchen
+            icon: mdi:countertop
+            tap_action:
+              action: call-service
+              service: tapo_rv30.clean_rooms
+              service_data:
+                entity_id: vacuum.jarvis
                 rooms: ["Kitchen"]
-        title: Downstairs
 
       # ── Status row ─────────────────────────────────────────────────────────
       - type: horizontal-stack
