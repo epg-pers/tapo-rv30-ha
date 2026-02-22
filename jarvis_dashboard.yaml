@@ -1,7 +1,19 @@
-# Jarvis Dashboard
+# Example Dashboard — Tapo RV30
+#
+# ⚠️  ENTITY IDs ARE SPECIFIC TO THIS EXAMPLE
+#   All entity IDs below contain "jarvis" because that vacuum was named "Jarvis".
+#   Replace every occurrence of "jarvis" with your vacuum's name
+#   (lowercase, spaces replaced with underscores).
+#   e.g. if your vacuum is named "Hoover":
+#     vacuum.jarvis        → vacuum.hoover
+#     camera.jarvis_map    → camera.hoover_map
+#     sensor.jarvis_*      → sensor.hoover_*
+#
 # Requires HACS cards:
 #   - mushroom (https://github.com/piitaya/lovelace-mushroom)
 #   - xiaomi-vacuum-map-card (https://github.com/PiotrMachowski/lovelace-xiaomi-vacuum-map-card)
+#
+# Room toggles + script require packages/jarvis.yaml (see that file for setup).
 #
 # Add as a new dashboard view in HA → Settings → Dashboards → Add Dashboard
 # (or paste the cards into an existing view)

@@ -34,12 +34,16 @@ class TapoMapCamera(CoordinatorEntity[TapoCoordinator], Camera):
     def __init__(self, coordinator: TapoCoordinator, entry: ConfigEntry) -> None:
         CoordinatorEntity.__init__(self, coordinator)
         Camera.__init__(self)
-        self._attr_unique_id  = f"{entry.entry_id}_map"
-        self._attr_device_info = {
-            "identifiers": {(DOMAIN, entry.entry_id)},
-            "name": "Jarvis",
-            "manufacturer": "TP-Link",
-            "model": "Tapo RV30 Max Plus",
+        self._attr_unique_id = f"{entry.entry_id}_map"
+        self._entry          = entry
+
+    @property
+    def device_info(self):
+        return {
+            "identifiers": {(DOMAIN, self._entry.entry_id)},
+            "name":        self.coordinator.device_name,
+            "manufacturer":"TP-Link",
+            "model":       "Tapo RV30 Max Plus",
         }
 
     async def async_camera_image(

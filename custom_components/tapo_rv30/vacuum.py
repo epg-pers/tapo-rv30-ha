@@ -56,9 +56,12 @@ class TapoVacuumEntity(CoordinatorEntity[TapoCoordinator], StateVacuumEntity):
         super().__init__(coordinator)
         self._entry          = entry
         self._attr_unique_id = f"{entry.entry_id}_vacuum"
-        self._attr_device_info = {
-            "identifiers": {(DOMAIN, entry.entry_id)},
-            "name":        "Jarvis",
+
+    @property
+    def device_info(self):
+        return {
+            "identifiers": {(DOMAIN, self._entry.entry_id)},
+            "name":        self.coordinator.device_name,
             "manufacturer":"TP-Link",
             "model":       "Tapo RV30 Max Plus",
         }

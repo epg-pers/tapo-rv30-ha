@@ -1,6 +1,6 @@
 clean_rooms:
   name: Clean specific rooms
-  description: Send Jarvis to clean one or more named rooms.
+  description: Send the vacuum to clean one or more named rooms.
   target:
     entity:
       domain: vacuum

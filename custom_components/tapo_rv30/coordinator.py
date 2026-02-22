@@ -175,12 +175,23 @@ class TapoCoordinator(DataUpdateCoordinator):
         self.map_image_bytes: bytes | None = None
         self.rooms:  list[dict] = []   # current rooms (area_list, type==room)
         self.map_id: int | None = None # current map_id
+        self.device_name:  str = "Tapo RV30"
+        self._name_fetched = False
 
     async def _async_update_data(self) -> dict[str, Any]:
+        if not self._name_fetched:
+            try:
+                self.device_name = await self.hass.async_add_executor_job(
+                    self.client.get_nickname
+                )
+                self._name_fetched = True
+            except Exception:
+                pass
+
         try:
             data = await self.hass.async_add_executor_job(self.client.get_status)
         except Exception as exc:
-            raise UpdateFailed(f"Failed to fetch Jarvis status: {exc}") from exc
+            raise UpdateFailed(f"Failed to fetch vacuum status: {exc}") from exc
 
         try:
             data["consumables"] = await self.hass.async_add_executor_job(

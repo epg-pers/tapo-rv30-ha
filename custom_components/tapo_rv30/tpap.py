@@ -353,6 +353,14 @@ class TapoVacuumClient:
             "clean_percent":info.get("clean_percent", 0),
         }
 
+    def get_nickname(self) -> str:
+        import base64
+        raw = self.send("getDeviceInfo")["result"].get("nickname", "")
+        try:
+            return base64.b64decode(raw).decode(errors="replace").strip() or "Tapo RV30"
+        except Exception:
+            return raw or "Tapo RV30"
+
     def get_consumables(self) -> dict:
         return self.send("getConsumablesInfo")["result"]
 

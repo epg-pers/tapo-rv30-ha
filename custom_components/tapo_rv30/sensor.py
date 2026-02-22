@@ -88,22 +88,16 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     coordinator: TapoCoordinator = hass.data[DOMAIN][entry.entry_id]
-    device_info = {
-        "identifiers": {(DOMAIN, entry.entry_id)},
-        "name": "Jarvis",
-        "manufacturer": "TP-Link",
-        "model": "Tapo RV30 Max Plus",
-    }
 
     entities: list[SensorEntity] = [
-        TapoStatusSensor(coordinator, entry, _STATUS_SENSOR, device_info),
-        TapoStatusSensor(coordinator, entry, _BATTERY_SENSOR, device_info),
-        TapoStatusSensor(coordinator, entry, _AREA_SENSOR, device_info),
+        TapoStatusSensor(coordinator, entry, _STATUS_SENSOR),
+        TapoStatusSensor(coordinator, entry, _BATTERY_SENSOR),
+        TapoStatusSensor(coordinator, entry, _AREA_SENSOR),
     ]
 
     for ckey, clabel in CONSUMABLE_LABELS.items():
         entities.append(
-            TapoConsumableSensor(coordinator, entry, ckey, clabel, device_info)
+            TapoConsumableSensor(coordinator, entry, ckey, clabel)
         )
 
     async_add_entities(entities)
@@ -112,11 +106,20 @@ async def async_setup_entry(
 class TapoStatusSensor(CoordinatorEntity[TapoCoordinator], SensorEntity):
     _attr_has_entity_name = True
 
-    def __init__(self, coordinator, entry, desc: TapoSensorDescription, device_info) -> None:
+    def __init__(self, coordinator, entry, desc: TapoSensorDescription) -> None:
         super().__init__(coordinator)
-        self.entity_description  = desc
-        self._attr_unique_id     = f"{entry.entry_id}_{desc.key}"
-        self._attr_device_info   = device_info
+        self.entity_description = desc
+        self._attr_unique_id    = f"{entry.entry_id}_{desc.key}"
+        self._entry             = entry
+
+    @property
+    def device_info(self):
+        return {
+            "identifiers": {(DOMAIN, self._entry.entry_id)},
+            "name":        self.coordinator.device_name,
+            "manufacturer":"TP-Link",
+            "model":       "Tapo RV30 Max Plus",
+        }
 
     @property
     def native_value(self) -> Any:
@@ -132,14 +135,23 @@ class TapoConsumableSensor(CoordinatorEntity[TapoCoordinator], SensorEntity):
     _attr_native_unit_of_measurement = UnitOfTime.HOURS
     _attr_state_class                = SensorStateClass.MEASUREMENT
 
-    def __init__(self, coordinator, entry, ckey: str, label: str, device_info) -> None:
+    def __init__(self, coordinator, entry, ckey: str, label: str) -> None:
         super().__init__(coordinator)
-        self._ckey                = ckey
-        self._limit_h             = CONSUMABLE_LIMITS_H[ckey]
-        self._attr_name           = f"{label} Remaining"
-        self._attr_unique_id      = f"{entry.entry_id}_consumable_{ckey}"
-        self._attr_device_info    = device_info
-        self._attr_icon           = "mdi:wrench"
+        self._ckey             = ckey
+        self._limit_h          = CONSUMABLE_LIMITS_H[ckey]
+        self._attr_name        = f"{label} Remaining"
+        self._attr_unique_id   = f"{entry.entry_id}_consumable_{ckey}"
+        self._attr_icon        = "mdi:wrench"
+        self._entry            = entry
+
+    @property
+    def device_info(self):
+        return {
+            "identifiers": {(DOMAIN, self._entry.entry_id)},
+            "name":        self.coordinator.device_name,
+            "manufacturer":"TP-Link",
+            "model":       "Tapo RV30 Max Plus",
+        }
 
     @property
     def native_value(self) -> float | None:

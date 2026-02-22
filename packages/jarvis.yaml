@@ -1,14 +1,22 @@
-# Jarvis (Tapo RV30) — HA helpers and scripts
+# Tapo RV30 — HA helpers and script for multi-room cleaning
+#
+# ⚠️  CUSTOMISE BEFORE USE
+#   1. Rename this file to match your vacuum, e.g. my_vacuum.yaml
+#   2. Replace every "jarvis" in entity IDs with your vacuum's name
+#      (lowercase, spaces → underscores)
+#   3. Replace room names ("Hallway", "Lounge" etc.) with your actual room names
+#      as shown in the Tapo app
+#   4. Add/remove input_boolean entries to match your number of rooms
 #
 # Installation:
-#   1. Copy this file to /config/packages/jarvis.yaml
-#   2. Add the following to your configuration.yaml if not already present:
+#   1. Copy this file to /config/packages/<your_name>.yaml
+#   2. Add to configuration.yaml if not already present:
 #        homeassistant:
 #          packages: !include_dir_named packages
 #   3. Restart Home Assistant
 #
-# Customise the room names to match your setup — they must match
-# the room names your vacuum was taught (visible in the Tapo app).
+# Alternatively, create helpers and the script manually via the HA UI —
+# see the README for instructions.
 
 input_boolean:
   jarvis_room_hallway:
