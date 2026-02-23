@@ -379,12 +379,13 @@ class TapoVacuumClient:
 
     def clean_rooms(self, room_ids: list[int], map_id: int) -> None:
         self.send("setSwitchClean", {
-            "clean_mode":  2,
+            "clean_mode":  3,
             "clean_on":    True,
             "clean_order": True,
             "force_clean": False,
             "map_id":      map_id,
-            "rooms":       [{"id": rid, "order": i} for i, rid in enumerate(room_ids)],
+            "room_list":   list(room_ids),
+            "start_type":  1,
         })
 
     def pause(self) -> None:

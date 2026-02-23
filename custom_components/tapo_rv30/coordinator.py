@@ -222,17 +222,41 @@ class TapoCoordinator(DataUpdateCoordinator):
         _LOGGER.debug("Map rendered: %d bytes, %d rooms",
                       len(self.map_image_bytes), len(self.rooms))
 
-    def resolve_room_ids(self, name_patterns: list[str]) -> list[int]:
-        """Match partial room names → list of room IDs. Raises ValueError on no match."""
+    def resolve_rooms_live(
+        self, name_patterns: list[str], map_name: str | None = None
+    ) -> tuple[list[int], int]:
+        """Fetch rooms live from device, resolve names → (room_ids, map_id).
+
+        Uses map_name (partial match) if given, otherwise current map.
+        Raises ValueError if map or any room is not found.
+        """
+        current_map_id, map_list = self.client.get_map_info()
+
+        if map_name:
+            target_id = next(
+                (m["map_id"] for m in map_list
+                 if map_name.lower() in _b64name(m.get("map_name", "")).lower()),
+                None,
+            )
+            if target_id is None:
+                available = [_b64name(m.get("map_name", "")) for m in map_list]
+                raise ValueError(f"Map '{map_name}' not found. Available: {available}")
+        else:
+            target_id = current_map_id
+
+        map_data = self.client.get_map_data(target_id)
+        rooms = [a for a in map_data.get("area_list", []) if a.get("type") == "room"]
+
         matched: list[int] = []
         seen: set[int] = set()
         for pat in name_patterns:
-            hits = [r for r in self.rooms
+            hits = [r for r in rooms
                     if pat.lower() in _b64name(r.get("name", "")).lower()]
             if not hits:
-                available = [_b64name(r.get("name", "")) for r in self.rooms]
+                available = [_b64name(r.get("name", "")) for r in rooms]
                 raise ValueError(f"No room matching '{pat}'. Available: {available}")
             for r in hits:
                 if r["id"] not in seen:
                     seen.add(r["id"]); matched.append(r["id"])
-        return matched
+
+        return matched, target_id

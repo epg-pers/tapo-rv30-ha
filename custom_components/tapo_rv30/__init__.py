@@ -31,7 +31,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     async def handle_clean_rooms(call: ServiceCall) -> None:
         """Service: tapo_rv30.clean_rooms."""
         entity_ids: list[str] = call.data.get("entity_id", [])
-        rooms:      list[str] = call.data.get("rooms", [])
+        rooms_raw = call.data.get("rooms", [])
+        map_name: str | None = call.data.get("map")
+
+        # Normalise rooms to a list — HA templates can produce a string when only
+        # one room is selected, and iterating a string gives individual characters.
+        if isinstance(rooms_raw, str):
+            rooms: list[str] = [rooms_raw]
+        else:
+            rooms = list(rooms_raw)
+
         if not rooms:
             _LOGGER.error("clean_rooms: 'rooms' field is required")
             return
@@ -47,13 +56,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             coord = coordinator   # fallback to first/only
 
         try:
-            room_ids = coord.resolve_room_ids(rooms)
-            map_id   = coord.map_id
-            if map_id is None:
-                _LOGGER.error("clean_rooms: map not loaded yet, try again in a moment")
-                return
+            # Fetch rooms live from the device so we always use the correct map_id
+            # and support the optional map_name filter.
+            room_ids, map_id = await hass.async_add_executor_job(
+                coord.resolve_rooms_live, rooms, map_name
+            )
             await hass.async_add_executor_job(coord.client.clean_rooms, room_ids, map_id)
-            # Trigger a map refresh after a short delay so the in-progress path shows
+            # Trigger a map refresh so the in-progress path shows promptly
             await coordinator.async_request_refresh()
         except ValueError as exc:
             _LOGGER.error("clean_rooms: %s", exc)
