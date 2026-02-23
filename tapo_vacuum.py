@@ -503,12 +503,13 @@ class TapoVacuum:
             map_id, _ = self._resolve_map(map_name)
         rooms, map_id = self._resolve_rooms(room_name_patterns, map_id)
         return self.send("setSwitchClean", {
-            "clean_mode":  2,
+            "clean_mode":  3,
             "clean_on":    True,
             "clean_order": True,
             "force_clean": False,
             "map_id":      map_id,
-            "rooms":       [{"id": r["id"], "order": i} for i, r in enumerate(rooms)],
+            "room_list":   [r["id"] for r in rooms],
+            "start_type":  1,
         })
 
     def pause(self):
