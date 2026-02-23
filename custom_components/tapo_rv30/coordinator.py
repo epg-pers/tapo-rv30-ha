@@ -250,8 +250,9 @@ class TapoCoordinator(DataUpdateCoordinator):
         matched: list[int] = []
         seen: set[int] = set()
         for pat in name_patterns:
-            hits = [r for r in rooms
-                    if pat.lower() in _b64name(r.get("name", "")).lower()]
+            decoded = [_b64name(r.get("name", "")) for r in rooms]
+            exact = [r for r, n in zip(rooms, decoded) if n.lower() == pat.lower()]
+            hits = exact or [r for r, n in zip(rooms, decoded) if pat.lower() in n.lower()]
             if not hits:
                 available = [_b64name(r.get("name", "")) for r in rooms]
                 raise ValueError(f"No room matching '{pat}'. Available: {available}")
