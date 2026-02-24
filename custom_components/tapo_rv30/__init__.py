@@ -12,7 +12,7 @@ from .coordinator import TapoCoordinator
 from .tpap import TapoVacuumClient
 
 _LOGGER = logging.getLogger(__name__)
-PLATFORMS = [Platform.VACUUM, Platform.SENSOR, Platform.CAMERA]
+PLATFORMS = [Platform.VACUUM, Platform.SENSOR, Platform.CAMERA, Platform.SELECT]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
