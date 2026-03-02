@@ -23,7 +23,7 @@ No cloud dependency — communicates directly with the vacuum over your LAN.
 
 - Home Assistant 2024.1+
 - [HACS](https://hacs.xyz) installed
-- Tapo RV30 on firmware **1.3.x+** (TPAP protocol)
+- Tapo RV30 or RV20 on firmware **1.2.x+** (TPAP protocol)
 - Python packages (installed automatically by HACS): `requests`, `ecdsa`, `Pillow`
 
 ## Installation via HACS
@@ -60,9 +60,10 @@ python3 tapo_vacuum.py clean kitchen lounge
 
 ## Supported Models
 
-Tested on **RV30 Max Plus (EU)** firmware 1.3.2. Should work on any Tapo RobovAC using TPAP.
-
+- **RV30 Max Plus (EU)** firmware 1.3.2
 - **RV20 Max Plus (EU)** firmware 1.2.0
+
+Should work on any Tapo RobovAC using TPAP.
 
 ## Protocol notes — room cleaning
 
