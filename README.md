@@ -12,8 +12,10 @@ No cloud dependency — communicates directly with the vacuum over your LAN.
 - **Room-by-room cleaning** via `tapo_rv30.clean_rooms` service
 - Live colour **map image** rendered from LZ4 pixel data (refreshes every 5 min)
 - Fan speed selection (Quiet / Standard / Turbo / Max / Ultra)
-- Water level, clean passes
+- Water level select (Off / Low / Medium / High)
+- Clean passes select (1 / 2 / 3)
 - Battery sensor
+- Error state sensor (e.g. "Ok", "Dust Bin Removed", "Trapped")
 - Consumable wear sensors (main brush, side brush, filter, sensor, charge contacts)
 - Config flow UI — set up from Settings → Devices & Services
 
