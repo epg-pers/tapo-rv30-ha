@@ -29,6 +29,20 @@ FAN_INT_TO_NAME = {v: k.capitalize() for k, v in FAN_NAME_TO_INT.items()}
 WATER_NAME_TO_INT = {"off": 0, "low": 1, "medium": 2, "high": 3}
 WATER_INT_TO_NAME = {v: k for k, v in WATER_NAME_TO_INT.items()}
 
+ERROR_CODES = {
+    0:  "Ok",
+    2:  "Side Brush Stuck",
+    3:  "Main Brush Stuck",
+    4:  "Wheel Blocked",
+    6:  "Trapped",
+    7:  "Trapped (Cliff)",
+    14: "Dust Bin Removed",
+    15: "Unable To Move",
+    16: "Lidar Blocked",
+    21: "Unable To Find Dock",
+    22: "Battery Low",
+}
+
 CONSUMABLE_LIMITS_H = {
     "roll_brush_time":     400,
     "edge_brush_time":     200,

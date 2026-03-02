@@ -21,6 +21,7 @@ from .const import (
     CONSUMABLE_LABELS,
     CONSUMABLE_LIMITS_H,
     DOMAIN,
+    ERROR_CODES,
     VACUUM_STATES,
     WATER_INT_TO_NAME,
     FAN_INT_TO_NAME,
@@ -49,6 +50,15 @@ _BATTERY_SENSOR = TapoSensorDescription(
     device_class=SensorDeviceClass.BATTERY,
     state_class=SensorStateClass.MEASUREMENT,
     value_fn=lambda d: d.get("battery"),
+)
+
+_ERROR_SENSOR = TapoSensorDescription(
+    key="error",
+    name="Error",
+    icon="mdi:alert-circle",
+    value_fn=lambda d: ERROR_CODES.get(
+        (d.get("error_codes") or [0])[0], f"Code({(d.get('error_codes') or [0])[0]})"
+    ),
 )
 
 _AREA_SENSOR = TapoSensorDescription(
@@ -92,6 +102,7 @@ async def async_setup_entry(
     entities: list[SensorEntity] = [
         TapoStatusSensor(coordinator, entry, _STATUS_SENSOR),
         TapoStatusSensor(coordinator, entry, _BATTERY_SENSOR),
+        TapoStatusSensor(coordinator, entry, _ERROR_SENSOR),
         TapoStatusSensor(coordinator, entry, _AREA_SENSOR),
     ]
 
