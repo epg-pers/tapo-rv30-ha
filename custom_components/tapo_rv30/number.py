@@ -72,6 +72,6 @@ class TapoFeatureNumber(CoordinatorEntity[TapoCoordinator], NumberEntity):
 
     async def async_set_native_value(self, value: float) -> None:
         await self.hass.async_add_executor_job(
-            self.coordinator.client.set_feature_value, self._fid, value
+            self.coordinator.client.set_feature_value, self._fid, int(round(value))
         )
         await self.coordinator.async_request_refresh()
