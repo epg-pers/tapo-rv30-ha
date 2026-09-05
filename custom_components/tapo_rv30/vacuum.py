@@ -31,7 +31,6 @@ _FEATURES = (
     | VacuumEntityFeature.STOP
     | VacuumEntityFeature.RETURN_HOME
     | VacuumEntityFeature.FAN_SPEED
-    | VacuumEntityFeature.BATTERY
     | VacuumEntityFeature.STATE
     | VacuumEntityFeature.MAP
 )
@@ -72,11 +71,6 @@ class TapoVacuumEntity(CoordinatorEntity[TapoCoordinator], StateVacuumEntity):
         if d is None:
             return None
         return VACUUM_STATES.get(d.get("status_code", 0), "idle")
-
-    @property
-    def battery_level(self) -> int | None:
-        d = self.coordinator.data
-        return d.get("battery") if d else None
 
     @property
     def fan_speed(self) -> str | None:
