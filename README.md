@@ -17,6 +17,12 @@ No cloud dependency — communicates directly with the vacuum over your LAN.
 - Battery sensor
 - Error state sensor (e.g. "Ok", "Dust Bin Removed", "Trapped")
 - Consumable wear sensors (main brush, side brush, filter, sensor, charge contacts)
+- Locate (beep) and spot clean
+- Zone cleaning via `tapo_rv30.clean_zone` and per-room suction / water / passes via `tapo_rv30.set_room_settings`
+- Empty Bin button and consumable reset buttons
+- Auto Empty, Do Not Disturb (with start / end times), Child Lock and Carpet Boost switches
+- Voice volume control
+- Last Clean sensor with run totals
 - Config flow UI — set up from Settings → Devices & Services
 
 ## Requirements
