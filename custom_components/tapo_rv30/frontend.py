@@ -58,7 +58,7 @@ async def _register_resource(hass: HomeAssistant, url: str) -> None:
             _LOGGER.info("Registered the Tapo RV30 card as a dashboard resource (%s)", url)
             return
     except Exception as exc:
-        _LOGGER.debug("Lovelace resource registration failed (%s); using extra JS", exc)
+        _LOGGER.warning("Lovelace resource registration failed (%r); loading the card via extra JS instead", exc)
     add_extra_js_url(hass, url)
 
 
