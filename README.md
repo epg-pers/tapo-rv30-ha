@@ -95,5 +95,13 @@ Key points:
 
 ## Credits
 
-SPAKE2+ protocol implementation based on reverse engineering by the
-[python-kasa](https://github.com/python-kasa/python-kasa) project.
+The TPAP / SPAKE2+ transport code (`custom_components/tapo_rv30/tpap.py` and
+`tapo_vacuum.py`) is derived from the
+[python-kasa](https://github.com/python-kasa/python-kasa) project
+([PR #1592](https://github.com/python-kasa/python-kasa/pull/1592)), which is
+licensed under GPL-3.0-or-later.
+
+## License
+
+This project is licensed under the GNU General Public License v3.0 or later.
+See [`LICENSE`](LICENSE) for the full text.
