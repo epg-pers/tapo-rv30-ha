@@ -38,7 +38,7 @@ No cloud dependency — communicates directly with the vacuum over your LAN.
 
 ## Requirements
 
-- Home Assistant 2025.1+ (2026.8+ needs v0.4.0 or later)
+- Home Assistant 2025.1+ (2026.8+ needs v0.4.0 or later; the integration icon needs 2026.3+)
 - [HACS](https://hacs.xyz) installed
 - Tapo RV30 or RV20 on firmware **1.2.x+** (TPAP protocol). Models that use the
   older AES scheme (RV30C, RV30C Mop) are detected automatically but untested, see #25.

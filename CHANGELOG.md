@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.8.1
+
+- Integration icon. Home Assistant 2026.3+ serves it straight from `custom_components/tapo_rv30/brand/`, so it shows on the Integrations page and in HACS without a `home-assistant/brands` submission.
+
 ## v0.8.0
 
 ### New
