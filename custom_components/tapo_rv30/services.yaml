@@ -131,3 +131,22 @@ send_raw:
       example: '{"type": "global"}'
       selector:
         object:
+
+get_clean_records:
+  name: Get cleaning history
+  description: >-
+    Return the vacuum's cleaning history (newest first) plus lifetime totals.
+    Use with "Return response" in Developer Tools or response_variable in scripts.
+  target:
+    entity:
+      domain: vacuum
+      integration: tapo_rv30
+  fields:
+    limit:
+      name: Limit
+      description: Only return this many most recent runs.
+      example: 10
+      selector:
+        number:
+          min: 1
+          max: 100

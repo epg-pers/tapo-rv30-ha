@@ -10,9 +10,11 @@ from homeassistant.helpers import entity_registry as er
 
 from .const import DOMAIN, FAN_NAME_TO_INT, WATER_NAME_TO_INT
 from .coordinator import TapoCoordinator
+from .mapdata import decode_clean_record
 
 _LOGGER = logging.getLogger(__name__)
-SERVICES = ("clean_rooms", "set_room_settings", "clean_zone", "run_schedule", "send_raw")
+SERVICES = ("clean_rooms", "set_room_settings", "clean_zone", "run_schedule", "send_raw",
+            "get_clean_records")
 
 
 def _coordinators(hass: HomeAssistant, call: ServiceCall) -> list[TapoCoordinator]:
@@ -87,6 +89,18 @@ async def _resolve(hass: HomeAssistant, call: ServiceCall, coord: TapoCoordinato
         ) from exc
 
 
+def _require_idle(call: ServiceCall, coord: TapoCoordinator) -> None:
+    """A new clean is refused by the robot (-3002) while one is running or
+    paused; say so up front instead of relaying the bare device error."""
+    busy = coord.busy
+    if busy == "cleaning":
+        raise ServiceValidationError(
+            f"{call.service}: {coord.device_name} is already cleaning; stop or pause it first")
+    if busy == "paused":
+        raise ServiceValidationError(
+            f"{call.service}: {coord.device_name} is paused; resume (vacuum.start) or stop it first")
+
+
 async def _send(hass: HomeAssistant, call: ServiceCall, fn, *args) -> None:
     """Run a client write, surfacing device errors to the caller."""
     try:
@@ -102,6 +116,7 @@ def async_setup_services(hass: HomeAssistant) -> None:
 
     async def handle_clean_rooms(call: ServiceCall) -> None:
         for coord in _coordinators(hass, call):
+            _require_idle(call, coord)
             room_ids, map_id = await _resolve(hass, call, coord)
             await _send(hass, call, coord.client.clean_rooms, room_ids, map_id)
             await coord.async_refresh_soon()
@@ -115,6 +130,7 @@ def async_setup_services(hass: HomeAssistant) -> None:
 
     async def handle_clean_zone(call: ServiceCall) -> None:
         coord = _one(hass, call)        # zones are in one map's coordinate frame
+        _require_idle(call, coord)
         g = coord.data or {}
         lv = {"suction": g.get("suction", 3), "cistern": g.get("cistern", 0),
               "clean_number": 1, **_levels(call)}
@@ -129,6 +145,7 @@ def async_setup_services(hass: HomeAssistant) -> None:
     async def handle_run_schedule(call: ServiceCall) -> None:
         """Replays a saved schedule's settings; see services.yaml."""
         coord = _one(hass, call)
+        _require_idle(call, coord)
         sid = call.data.get("schedule_id")
         if sid is None:
             raise ServiceValidationError(f"{call.service}: 'schedule_id' is required")
@@ -158,7 +175,27 @@ def async_setup_services(hass: HomeAssistant) -> None:
             raise HomeAssistantError(f"{call.service}: {method} failed: {exc}") from exc
         return {"result": resp.get("result"), "error_code": resp.get("error_code", 0)}
 
+    async def handle_get_clean_records(call: ServiceCall) -> ServiceResponse:
+        coord = _one(hass, call)
+        try:
+            raw = await hass.async_add_executor_job(coord.client.get_clean_records)
+        except Exception as exc:
+            raise HomeAssistantError(f"{call.service}: {exc}") from exc
+        records = sorted((decode_clean_record(r) for r in raw.get("record_list") or []),
+                         key=lambda r: r["started"] or 0, reverse=True)
+        limit = call.data.get("limit")
+        if limit:
+            records = records[:int(limit)]
+        return {
+            "total_runs": raw.get("total_number"),
+            "total_area": raw.get("total_area"),
+            "total_minutes": raw.get("total_time"),
+            "records": records,
+        }
+
     hass.services.async_register(DOMAIN, "clean_rooms", handle_clean_rooms)
+    hass.services.async_register(DOMAIN, "get_clean_records", handle_get_clean_records,
+                                 supports_response=SupportsResponse.ONLY)
     hass.services.async_register(DOMAIN, "set_room_settings", handle_set_room_settings)
     hass.services.async_register(DOMAIN, "clean_zone", handle_clean_zone)
     hass.services.async_register(DOMAIN, "run_schedule", handle_run_schedule)

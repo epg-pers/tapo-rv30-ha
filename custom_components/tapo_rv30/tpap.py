@@ -165,6 +165,8 @@ class TapoVacuumClient:
         # HA calls us from several executor threads (poll + commands); the session
         # seq/nonce is shared state, so one request at a time.
         self._lock    = threading.RLock()
+        # None = untried, then True/False once the firmware has answered multipleRequest.
+        self._multi_supported: bool | None = None
 
         self._device_mac = ""
         self._tpap_pake: list[int] = []
@@ -344,12 +346,53 @@ class TapoVacuumClient:
                     raise
 
     # ---- High-level API calls -----------------------------------------------
+    # ---- Batched reads --------------------------------------------------------
+    _MULTI_BATCH = 5   # what python-kasa uses against real devices
+
+    def send_multi(self, requests: list[tuple[str, dict | None]]) -> dict[str, dict]:
+        """Run several getters in as few round trips as the firmware allows.
+
+        Returns {method: result} for the ones that succeeded; a getter the
+        model doesn't support is simply absent. Falls back to one call per
+        method if the firmware rejects multipleRequest.
+        """
+        out: dict[str, dict] = {}
+        if self._multi_supported is not False:
+            try:
+                for i in range(0, len(requests), self._MULTI_BATCH):
+                    chunk = requests[i:i + self._MULTI_BATCH]
+                    resp = self.send("multipleRequest", {"requests": [
+                        {"method": m, "params": p or {}} for m, p in chunk]})
+                    for item in (resp.get("result") or {}).get("responses", []):
+                        if item.get("error_code", 0) == 0:
+                            out[item["method"]] = item.get("result") or {}
+                        else:
+                            _LOGGER.debug("%s failed in batch: %s", item.get("method"), item.get("error_code"))
+                self._multi_supported = True
+                return out
+            except RuntimeError as exc:
+                if self._multi_supported is None and "Device error" in str(exc):
+                    _LOGGER.debug("multipleRequest not supported (%s); using single requests", exc)
+                    self._multi_supported = False
+                else:
+                    raise
+        for m, p in requests:
+            try:
+                out[m] = self.send(m, p)["result"] or {}
+            except Exception as exc:
+                _LOGGER.debug("%s failed: %s", m, exc)
+        return out
+
+    _STATUS_REQUESTS = [("getVacStatus", None), ("getBatteryInfo", None), ("getCleanInfo", None),
+                        ("getCleanAttr", {"type": "global"}), ("getMopState", None),
+                        ("getConsumablesInfo", None), ("getAreaUnit", None)]
+
     def get_status(self) -> dict:
-        vac  = self.send("getVacStatus")["result"]
-        batt = self.send("getBatteryInfo")["result"]
-        info = self.send("getCleanInfo")["result"]
-        attr = self.send("getCleanAttr", {"type": "global"})["result"]
-        mop  = self.send("getMopState")["result"]
+        r = self.send_multi(self._STATUS_REQUESTS)
+        if "getVacStatus" not in r:
+            raise RuntimeError("getVacStatus failed")
+        vac, batt, info = r["getVacStatus"], r.get("getBatteryInfo", {}), r.get("getCleanInfo", {})
+        attr, mop = r.get("getCleanAttr", {}), r.get("getMopState", {})
         return {
             "status_code":  vac["status"],
             "error_codes":  vac.get("err_status") or [0],
@@ -361,15 +404,30 @@ class TapoVacuumClient:
             "clean_area":   info.get("clean_area", 0),
             "clean_time":   info.get("clean_time", 0),
             "clean_percent":info.get("clean_percent", 0),
+            "consumables":  r.get("getConsumablesInfo", {}),
+            "area_unit":    r.get("getAreaUnit", {}).get("area_unit", 0),
+        }
+
+    def get_device_info(self) -> dict:
+        """Model, firmware and (decoded) nickname."""
+        import base64
+        raw = self.send("get_device_info")["result"]
+        try:
+            name = base64.b64decode(raw.get("nickname", "")).decode(errors="replace").strip()
+        except Exception:
+            name = raw.get("nickname", "")
+        return {
+            "name":   name or "Tapo RV30",
+            "model":  raw.get("model") or "RV30",
+            "fw_ver": raw.get("fw_ver"),
+            "hw_ver": raw.get("hw_ver"),
         }
 
     def get_nickname(self) -> str:
-        import base64
-        raw = self.send("getDeviceInfo")["result"].get("nickname", "")
-        try:
-            return base64.b64decode(raw).decode(errors="replace").strip() or "Tapo RV30"
-        except Exception:
-            return raw or "Tapo RV30"
+        return self.get_device_info()["name"]
+
+    def get_clean_records(self) -> dict:
+        return self.send("getCleanRecords")["result"]
 
     def get_consumables(self) -> dict:
         return self.send("getConsumablesInfo")["result"]

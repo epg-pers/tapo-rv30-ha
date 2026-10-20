@@ -1,0 +1,40 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect to Tapo RV30",
+        "data": {
+          "host": "Host (IP address)",
+          "username": "Tapo account email",
+          "password": "Tapo account password"
+        }
+      },
+      "reconfigure": {
+        "title": "Update Tapo RV30 connection",
+        "description": "Change the IP address or the Tapo account used for this vacuum.",
+        "data": {
+          "host": "Host (IP address)",
+          "username": "Tapo account email",
+          "password": "Tapo account password"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Re-authenticate Tapo RV30",
+        "description": "The vacuum at {host} rejected the stored credentials. Enter the email and password of the Tapo account it was set up with.",
+        "data": {
+          "username": "Tapo account email",
+          "password": "Tapo account password"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect: check the IP address and that the vacuum is on",
+      "invalid_auth": "Invalid credentials: check your Tapo email and password"
+    },
+    "abort": {
+      "already_configured": "This device is already configured",
+      "reconfigure_successful": "Connection settings updated",
+      "reauth_successful": "Re-authentication successful"
+    }
+  }
+}

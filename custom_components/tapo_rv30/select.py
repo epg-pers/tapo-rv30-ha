@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
 
 from homeassistant.components.select import SelectEntity
 from homeassistant.config_entries import ConfigEntry
@@ -39,13 +38,8 @@ class _TapoSelectBase(CoordinatorEntity[TapoCoordinator], SelectEntity):
         self._entry = entry
 
     @property
-    def device_info(self) -> dict[str, Any]:
-        return {
-            "identifiers": {(DOMAIN, self._entry.entry_id)},
-            "name":        self.coordinator.device_name,
-            "manufacturer":"TP-Link",
-            "model":       "Tapo RV30 Max Plus",
-        }
+    def device_info(self):
+        return self.coordinator.device_info
 
 
 class TapoCleanPassesSelect(_TapoSelectBase):

@@ -34,6 +34,18 @@ _LOGGER = logging.getLogger(__name__)
 class TapoSensorDescription(SensorEntityDescription):
     value_fn: Callable[[dict], Any] = lambda d: None
     attrs_fn: Callable[[dict], dict] | None = None
+    unit_fn: Callable[[dict], str | None] | None = None
+
+
+def _area_unit(d: dict) -> str:
+    return {0: "m²", 1: "ft²", 2: "坪"}.get(d.get("area_unit", 0), "m²")
+
+
+_PROGRESS_SENSOR = TapoSensorDescription(
+    key="clean_progress", name="Clean Progress", icon="mdi:progress-check",
+    native_unit_of_measurement=PERCENTAGE, state_class=SensorStateClass.MEASUREMENT,
+    value_fn=lambda d: d.get("clean_percent"),
+)
 
 
 def _used_h(field: str) -> TapoSensorDescription:
@@ -115,9 +127,9 @@ _AREA_SENSOR = TapoSensorDescription(
     key="clean_area",
     name="Last Clean Area",
     icon="mdi:texture-box",
-    native_unit_of_measurement="m²",
     state_class=SensorStateClass.MEASUREMENT,
     value_fn=lambda d: d.get("clean_area"),
+    unit_fn=_area_unit,
 )
 
 
@@ -154,6 +166,7 @@ async def async_setup_entry(
         TapoStatusSensor(coordinator, entry, _BATTERY_SENSOR),
         TapoStatusSensor(coordinator, entry, _ERROR_SENSOR),
         TapoStatusSensor(coordinator, entry, _AREA_SENSOR),
+        TapoStatusSensor(coordinator, entry, _PROGRESS_SENSOR),
         TapoStatusSensor(coordinator, entry, _LAST_CLEAN_SENSOR),
         TapoStatusSensor(coordinator, entry, _CURRENT_ROOM_SENSOR),
         TapoStatusSensor(coordinator, entry, _SCHEDULES_SENSOR),
@@ -180,12 +193,7 @@ class TapoStatusSensor(CoordinatorEntity[TapoCoordinator], SensorEntity):
 
     @property
     def device_info(self):
-        return {
-            "identifiers": {(DOMAIN, self._entry.entry_id)},
-            "name":        self.coordinator.device_name,
-            "manufacturer":"TP-Link",
-            "model":       "Tapo RV30 Max Plus",
-        }
+        return self.coordinator.device_info
 
     @property
     def native_value(self) -> Any:
@@ -198,6 +206,13 @@ class TapoStatusSensor(CoordinatorEntity[TapoCoordinator], SensorEntity):
     def extra_state_attributes(self) -> dict[str, Any] | None:
         fn = self.entity_description.attrs_fn
         return fn(self.coordinator.data) if fn and self.coordinator.data else None
+
+    @property
+    def native_unit_of_measurement(self) -> str | None:
+        fn = self.entity_description.unit_fn
+        if fn and self.coordinator.data:
+            return fn(self.coordinator.data)
+        return self.entity_description.native_unit_of_measurement
 
 
 class TapoConsumableSensor(CoordinatorEntity[TapoCoordinator], SensorEntity):
@@ -217,12 +232,7 @@ class TapoConsumableSensor(CoordinatorEntity[TapoCoordinator], SensorEntity):
 
     @property
     def device_info(self):
-        return {
-            "identifiers": {(DOMAIN, self._entry.entry_id)},
-            "name":        self.coordinator.device_name,
-            "manufacturer":"TP-Link",
-            "model":       "Tapo RV30 Max Plus",
-        }
+        return self.coordinator.device_info
 
     @property
     def native_value(self) -> float | None:

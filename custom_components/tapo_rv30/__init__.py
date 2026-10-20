@@ -14,8 +14,8 @@ from .services import async_setup_services, async_unload_services
 from .tpap import TapoVacuumClient
 
 _LOGGER = logging.getLogger(__name__)
-PLATFORMS = [Platform.VACUUM, Platform.SENSOR, Platform.CAMERA, Platform.SELECT,
-             Platform.BUTTON, Platform.SWITCH, Platform.TIME, Platform.NUMBER]
+PLATFORMS = [Platform.VACUUM, Platform.SENSOR, Platform.BINARY_SENSOR, Platform.CAMERA,
+             Platform.SELECT, Platform.BUTTON, Platform.SWITCH, Platform.TIME, Platform.NUMBER]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -27,7 +27,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         password=entry.data[CONF_PASSWORD],
         port=DEFAULT_PORT,
     )
-    coordinator = TapoCoordinator(hass, client)
+    coordinator = TapoCoordinator(hass, client, entry)
     await coordinator.async_config_entry_first_refresh()
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator

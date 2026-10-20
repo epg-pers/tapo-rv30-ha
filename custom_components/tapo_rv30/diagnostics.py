@@ -37,6 +37,8 @@ async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: ConfigE
     out["settings"] = coord.settings
     out["map"] = {
         "map_id": coord.map_id,
+        "map_name": coord.map_name,
+        "poll_interval": coord.poll_interval,
         "rooms": [{"id": r.get("id"), "name": b64name(r.get("name", ""))} for r in coord.rooms],
         "position_mm": coord.vac_pos,
         "current_room": coord.current_room,

@@ -11,7 +11,7 @@ from homeassistant.components.vacuum import (
     VacuumEntityFeature,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -65,12 +65,35 @@ class TapoVacuumEntity(CoordinatorEntity[TapoCoordinator], StateVacuumEntity):
 
     @property
     def device_info(self):
-        return {
-            "identifiers": {(DOMAIN, self._entry.entry_id)},
-            "name":        self.coordinator.device_name,
-            "manufacturer":"TP-Link",
-            "model":       "Tapo RV30 Max Plus",
-        }
+        return self.coordinator.device_info
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        self._check_segments_changed()
+        super()._handle_coordinator_update()
+
+    def _check_segments_changed(self) -> None:
+        """Raise a repair issue if the current map's rooms no longer match what
+        the user mapped to areas (room renamed, split, merged, map re-done)."""
+        if self.coordinator.map_id is None or self.registry_entry is None:
+            return
+        try:
+            seen = self.last_seen_segments
+        except RuntimeError:
+            return
+        if not seen:
+            return
+        prefix = f"{self.coordinator.map_id}:"
+        mapped = {s.id: s.name for s in seen if s.id.startswith(prefix)}
+        if not mapped:
+            return
+        current = {f"{prefix}{r['id']}": (b64name(r.get("name", "")) or f"Room {r['id']}")
+                   for r in self.coordinator.rooms}
+        changed = any(current.get(sid) != name for sid, name in mapped.items())
+        signature = (self.coordinator.map_id, tuple(sorted(current.items())))
+        if changed and signature != getattr(self, "_segments_signature", None):
+            self._segments_signature = signature
+            self.async_create_segments_issue()
 
     @property
     def activity(self) -> VacuumActivity | None:

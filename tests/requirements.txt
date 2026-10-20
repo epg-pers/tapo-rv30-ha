@@ -3,3 +3,4 @@ requests
 cryptography
 ecdsa
 pyflakes
+pillow

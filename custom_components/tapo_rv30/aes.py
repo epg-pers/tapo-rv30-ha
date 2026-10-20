@@ -102,3 +102,23 @@ class AesVacuumClient(TapoVacuumClient):
         """Same return shape as the TPAP client: {"error_code": 0, "result": ...}."""
         with self._lock:
             return self._loopthread.run(self._query(method, params))
+
+    async def _query_many(self, requests: list[tuple[str, dict | None]]) -> dict[str, dict]:
+        dev = await self._connect()
+        resp = await dev.protocol.query({m: (p or {}) for m, p in requests})
+        return {m: (resp.get(m) or {}) for m, _ in requests if m in resp}
+
+    def send_multi(self, requests: list[tuple[str, dict | None]]) -> dict[str, dict]:
+        """python-kasa batches a multi-key query into multipleRequest itself."""
+        with self._lock:
+            try:
+                return self._loopthread.run(self._query_many(requests))
+            except Exception as exc:
+                _LOGGER.debug("Batched query failed (%s); falling back to single requests", exc)
+        out = {}
+        for m, p in requests:
+            try:
+                out[m] = self.send(m, p)["result"] or {}
+            except Exception as exc:
+                _LOGGER.debug("%s failed: %s", m, exc)
+        return out

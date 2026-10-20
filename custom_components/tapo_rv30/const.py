@@ -11,8 +11,11 @@ CONF_TRANSPORT = "transport"   # how to talk to the vacuum; picked in the config
 TRANSPORT_TPAP = "tpap"        # SPAKE2+ (RV30 Max Plus, RV20 Max Plus on 1.2.x+)
 TRANSPORT_AES  = "aes"         # python-kasa AES (RV30C, RV30C Mop, ...)
 
-FAST_INTERVAL = 30   # seconds — status / battery / attrs
-MAP_INTERVAL  = 300  # seconds — map image re-render
+FAST_INTERVAL = 30   # seconds — status / battery / attrs (default; see CONF_POLL_INTERVAL)
+MAP_INTERVAL  = 300  # seconds — full map re-render and settings re-read
+CONF_POLL_INTERVAL = "poll_interval"   # entry option, seconds
+MIN_POLL_INTERVAL  = 10
+MAX_POLL_INTERVAL  = 300
 
 # From the Tapo app's RobotStatusType enum (decompiled 2026-10-13).
 # HA vacuum state per code; STATUS_LABELS is the human label for the Status sensor.
@@ -39,6 +42,8 @@ VACUUM_STATES = {
     19: "docked",     # cutting hair
 }
 DOCKED_CODES = {c for c, s in VACUUM_STATES.items() if s == "docked"}
+CLEANING_CODES = {c for c, s in VACUUM_STATES.items() if s == "cleaning"}
+PAUSED_CODES   = {c for c, s in VACUUM_STATES.items() if s == "paused"}
 
 STATUS_LABELS = {
     0: "Standby", 1: "Cleaning", 2: "Mapping", 3: "Remote Control",
@@ -134,3 +139,11 @@ ROOM_PALETTE = [
 WALL_COLOR    = (60,  60,  60)
 UNKNOWN_COLOR = (210, 210, 210)
 FLOOR_COLOR   = (240, 240, 240)
+
+# Map overlay colours (R, G, B[, A])
+FORBID_COLOR       = (230, 60, 60, 90)    # no-go zone fill
+FORBID_OUTLINE     = (200, 30, 30)
+VIRTUAL_WALL_COLOR = (200, 30, 30)
+CARPET_COLOR       = (205, 205, 205)
+ZONE_OUTLINE       = (40, 110, 220)       # saved clean zone
+FURNITURE_OUTLINE  = (120, 120, 120)

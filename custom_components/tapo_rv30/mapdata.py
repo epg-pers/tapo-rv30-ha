@@ -3,6 +3,7 @@ they can be unit-tested without a running HA."""
 from __future__ import annotations
 
 import base64
+import unicodedata
 from typing import Any, Callable
 
 
@@ -75,6 +76,45 @@ def norm(value: Any) -> str:
 _WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
 
 
+def fold(text: str) -> str:
+    """Lower-case and strip accents, so 'kupelna' matches 'Kúpeľňa'."""
+    return "".join(c for c in unicodedata.normalize("NFKD", text) if not unicodedata.combining(c)).lower()
+
+
+def mm_to_grid(map_data: dict, x_mm: float, y_mm: float) -> tuple[float, float]:
+    """Real-world mm (the frame of real_vac_coor, area vertexs, zones) -> map grid cell."""
+    ox, oy = map_data["real_origin_coor"][:2]
+    res = map_data.get("resolution") or 50
+    return (x_mm - ox) / res, (y_mm - oy) / res
+
+
+def dnd_active(dnd: dict | None, now_minutes: int) -> bool:
+    """Is Do Not Disturb in effect at now_minutes (minutes after midnight)?
+    Windows may cross midnight (22:00 -> 08:00)."""
+    if not dnd or not dnd.get("do_not_disturb"):
+        return False
+    start, end = int(dnd.get("s_min", 0)), int(dnd.get("e_min", 0))
+    if start == end:
+        return True
+    if start < end:
+        return start <= now_minutes < end
+    return now_minutes >= start or now_minutes < end
+
+
+def decode_clean_record(rec: dict) -> dict:
+    """One getCleanRecords entry, readable."""
+    return {
+        "started":      rec.get("timestamp"),
+        "minutes":      rec.get("clean_time"),
+        "area":         rec.get("clean_area"),
+        "emptied_bin":  rec.get("dust_collection"),
+        "error":        rec.get("error", 0),
+        "map_id":       rec.get("map_id"),
+        "start_type":   rec.get("start_type"),
+        "rule_name":    b64name(rec.get("rule_name", "")) or None,
+    }
+
+
 def decode_weekdays(mask: int) -> list[str]:
     return [name for i, name in enumerate(_WEEKDAYS) if mask & (1 << i)]
 
@@ -142,8 +182,8 @@ def resolve_rooms(
                 "'map' was given but is empty after trimming; omit it to use the "
                 f"current map. Available maps: {sorted(map_names.values())}"
             )
-        exact = [mid for mid, n in map_names.items() if n.lower() == wanted.lower()]
-        partial = [mid for mid, n in map_names.items() if wanted.lower() in n.lower()]
+        exact = [mid for mid, n in map_names.items() if fold(n) == fold(wanted)]
+        partial = [mid for mid, n in map_names.items() if fold(wanted) in fold(n)]
         hits = exact or partial
         if not hits:
             raise MapNotFound(
@@ -173,8 +213,8 @@ def resolve_rooms(
                 f"Empty room name in 'rooms' on map '{target_name}'. "
                 f"Available rooms: {decoded}"
             )
-        exact = [r for r, n in zip(rooms, decoded) if n.lower() == pat.lower()]
-        hits = exact or [r for r, n in zip(rooms, decoded) if pat.lower() in n.lower()]
+        exact = [r for r, n in zip(rooms, decoded) if fold(n) == fold(pat)]
+        hits = exact or [r for r, n in zip(rooms, decoded) if fold(pat) in fold(n)]
         if not hits:
             raise RoomNotFound(
                 f"No room matching '{pat}' on map '{target_name}'. "

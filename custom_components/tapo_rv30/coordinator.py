@@ -2,181 +2,129 @@
 from __future__ import annotations
 
 import asyncio
-import base64
 import logging
 from datetime import timedelta
 from typing import Any
 
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import ConfigEntryAuthFailed
+from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw
 
 from .const import (
-    DOMAIN,
-    FAST_INTERVAL,
-    MAP_INTERVAL,
-    ROOM_PALETTE,
-    WALL_COLOR,
-    UNKNOWN_COLOR,
-    FLOOR_COLOR,
+    CLEANING_CODES, CONF_POLL_INTERVAL, DOMAIN, FAST_INTERVAL, MAP_INTERVAL, MAX_POLL_INTERVAL,
+    MIN_POLL_INTERVAL, PAUSED_CODES,
 )
-from .mapdata import (
-    b64name, decode_schedule, lz4_block_decompress, resolve_rooms,
-    room_at_vac,
-)
-from .tpap import TapoVacuumClient
+from .mapdata import b64name, decode_schedule, resolve_rooms, room_at_vac
+from .maprender import _dot, _grid_px, _jpeg, render_map
+from .tpap import AuthError, TapoVacuumClient
 
 _LOGGER = logging.getLogger(__name__)
 
-MAP_SCALE = 4   # px per vacuum grid cell -> ~700x700 output image
-FONT_SIZE = 14
+STATUS_RETRIES = 3          # attempts per poll before the entities go unavailable
+STATUS_RETRY_DELAY = 1.5    # seconds, doubled each retry
 
 
-def _render_map_image(map_data: dict) -> bytes:
-    """Decode LZ4 pixel data and produce a JPEG image as bytes."""
-    width   = map_data["width"]
-    height  = map_data["height"]
-    pix_len = map_data["pix_len"]
-
-    raw     = base64.b64decode(map_data["map_data"])
-    pixels  = lz4_block_decompress(raw, uncompressed_size=pix_len)
-
-    rooms = [a for a in map_data.get("area_list", []) if a.get("type") == "room"]
-    sorted_ids  = sorted(r["id"] for r in rooms)
-    room_colors = {rid: ROOM_PALETTE[i % len(ROOM_PALETTE)]
-                   for i, rid in enumerate(sorted_ids)}
-
-    # Build colour lookup table (0-255)
-    lut: list[tuple[int, int, int]] = [UNKNOWN_COLOR] * 256
-    lut[0]   = WALL_COLOR
-    lut[127] = UNKNOWN_COLOR
-    lut[255] = FLOOR_COLOR
-    for rid, color in room_colors.items():
-        if 0 <= rid <= 255:
-            lut[rid] = color
-
-    img = Image.new("RGB", (width * MAP_SCALE, height * MAP_SCALE))
-    draw = ImageDraw.Draw(img)
-
-    # Draw pixels — rows bottom→top, cols left→right
-    for row in range(height - 1, -1, -1):
-        for col in range(width):
-            pv    = pixels[row * width + col]
-            color = lut[pv] if pv < 256 else UNKNOWN_COLOR
-            screen_row = (height - 1 - row) * MAP_SCALE
-            screen_col = col * MAP_SCALE
-            draw.rectangle(
-                [screen_col, screen_row,
-                 screen_col + MAP_SCALE - 1, screen_row + MAP_SCALE - 1],
-                fill=color,
-            )
-
-    # Room name labels centred in each room
-    try:
-        font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-                                  FONT_SIZE)
-    except Exception:
-        font = ImageFont.load_default()
-
-    for room in rooms:
-        rid = room["id"]
-        if rid not in room_colors:
-            continue
-        name = b64name(room.get("name", ""))
-        # Find centroid of all pixels belonging to this room
-        xs, ys = [], []
-        for row in range(height):
-            for col in range(width):
-                if pixels[row * width + col] == rid:
-                    xs.append(col)
-                    ys.append(row)
-        if not xs:
-            continue
-        cx = int(sum(xs) / len(xs)) * MAP_SCALE + MAP_SCALE // 2
-        cy = int((height - 1 - (sum(ys) / len(ys)))) * MAP_SCALE + MAP_SCALE // 2
-
-        # Shadow + white label
-        draw.text((cx + 1, cy + 1), name, fill=(0, 0, 0, 180), font=font, anchor="mm")
-        draw.text((cx, cy),         name, fill=(255, 255, 255), font=font, anchor="mm")
-
-    # Charger and vacuum markers
-    charge = map_data.get("charge_coor")
-    vac    = map_data.get("vac_coor")
-
-    def _dot(gx, gy, color, radius=6):
-        sx = gx * MAP_SCALE + MAP_SCALE // 2
-        sy = (height - 1 - gy) * MAP_SCALE + MAP_SCALE // 2
-        draw.ellipse([sx - radius, sy - radius, sx + radius, sy + radius],
-                     fill=color, outline=(255, 255, 255), width=2)
-
-    if charge:
-        _dot(charge[0], charge[1], (255, 200, 0))   # amber = dock
-    if vac:
-        _dot(vac[0], vac[1], (0, 180, 255))          # cyan = vacuum
-
-    import io
-    buf = io.BytesIO()
-    img.save(buf, format="JPEG", quality=85)
-    return buf.getvalue()
-
-
+# ---------------------------------------------------------------------------
+# Coordinator
+# ---------------------------------------------------------------------------
 class TapoCoordinator(DataUpdateCoordinator):
-    """Polls Jarvis for status + periodically re-renders map."""
+    """Polls the vacuum for status, keeps the map image and settings current."""
 
-    def __init__(self, hass: HomeAssistant, client: TapoVacuumClient) -> None:
-        super().__init__(
-            hass,
-            _LOGGER,
-            name=DOMAIN,
-            update_interval=timedelta(seconds=FAST_INTERVAL),
-        )
-        self.client          = client
-        self._map_tick       = 0      # counts update cycles; refresh map every N
-        self._map_cycles     = MAP_INTERVAL // FAST_INTERVAL
+    def __init__(self, hass: HomeAssistant, client: TapoVacuumClient, entry: ConfigEntry | None = None) -> None:
+        interval = FAST_INTERVAL
+        if entry is not None:
+            interval = int(entry.options.get(CONF_POLL_INTERVAL, FAST_INTERVAL))
+        interval = max(MIN_POLL_INTERVAL, min(MAX_POLL_INTERVAL, interval))
+        super().__init__(hass, _LOGGER, name=DOMAIN, update_interval=timedelta(seconds=interval))
+        self.client = client
+        self.entry = entry
+        self.poll_interval = interval
+        self._map_tick = 0
         self.map_image_bytes: bytes | None = None
-        self.rooms:  list[dict] = []   # current rooms (area_list, type==room)
-        self.map_id: int | None = None # current map_id
-        self.device_name:  str = "Tapo RV30"
-        self._name_fetched = False
-        self.settings: dict = {}       # get_settings(), refreshed with the map
+        self._map_base: Image.Image | None = None     # rendered map without the vacuum marker
+        self.room_geometry: list[dict] = []
+        self.map_geometry: dict = {}
+        self.rooms: list[dict] = []        # current map's rooms (area_list, type == room)
+        self.map_id: int | None = None
+        self.map_name: str | None = None
+        self.device_name: str = "Tapo RV30"
+        self.device_model: str = "RV30"
+        self.fw_version: str | None = None
+        self._info_fetched = False
+        self.settings: dict = {}           # get_settings(), refreshed with the map
         self.schedules: list[dict] = []
         self.vac_pos: list | None = None
         self.current_room: str | None = None
 
+    # ---- shared entity metadata ------------------------------------------------
+    @property
+    def device_info(self) -> DeviceInfo:
+        ident = self.entry.entry_id if self.entry else self.client.host
+        return DeviceInfo(
+            identifiers={(DOMAIN, ident)},
+            name=self.device_name,
+            manufacturer="TP-Link",
+            model=f"Tapo {self.device_model}",
+            sw_version=self.fw_version,
+        )
+
+    @property
+    def status_code(self) -> int | None:
+        return (self.data or {}).get("status_code")
+
+    @property
+    def busy(self) -> str | None:
+        """'cleaning' / 'paused' when a new clean would be refused, else None."""
+        code = self.status_code
+        if code in CLEANING_CODES:
+            return "cleaning"
+        if code in PAUSED_CODES:
+            return "paused"
+        return None
+
+    @property
+    def _map_cycles(self) -> int:
+        return max(1, MAP_INTERVAL // self.poll_interval)
+
+    async def async_set_poll_interval(self, seconds: int) -> None:
+        seconds = max(MIN_POLL_INTERVAL, min(MAX_POLL_INTERVAL, int(seconds)))
+        self.poll_interval = seconds
+        self.update_interval = timedelta(seconds=seconds)
+        if self.entry is not None:
+            self.hass.config_entries.async_update_entry(
+                self.entry, options={**self.entry.options, CONF_POLL_INTERVAL: seconds})
+        self.async_update_listeners()
+
+    # ---- polling -----------------------------------------------------------------
     async def _async_update_data(self) -> dict[str, Any]:
-        if not self._name_fetched:
+        if not self._info_fetched:
             try:
-                self.device_name = await self.hass.async_add_executor_job(
-                    self.client.get_nickname
-                )
-                self._name_fetched = True
-            except Exception:
-                pass
+                info = await self.hass.async_add_executor_job(self.client.get_device_info)
+                self.device_name = info["name"]
+                self.device_model = info["model"]
+                self.fw_version = info.get("fw_ver")
+                self._info_fetched = True
+            except AuthError as exc:
+                raise ConfigEntryAuthFailed(str(exc)) from exc
+            except Exception as exc:
+                _LOGGER.debug("Device info fetch failed: %s", exc)
 
-        try:
-            data = await self.hass.async_add_executor_job(self.client.get_status)
-        except Exception as exc:
-            raise UpdateFailed(f"Failed to fetch vacuum status: {exc}") from exc
+        data = await self._fetch_status()
 
-        try:
-            data["consumables"] = await self.hass.async_add_executor_job(
-                self.client.get_consumables
-            )
-        except Exception as exc:
-            _LOGGER.debug("Consumables fetch failed: %s", exc)
-            data["consumables"] = {}
-
-        # Refresh map on first load and every MAP_INTERVAL seconds; in between,
-        # re-read the map data (no re-render) so position and current room track.
+        # Full map render + settings on first load and every MAP_INTERVAL; in
+        # between, re-read the map data so position and current room track.
         self._map_tick += 1
-        if self.map_image_bytes is None or self._map_tick >= self._map_cycles:
+        if self._map_base is None or self._map_tick >= self._map_cycles:
             self._map_tick = 0
             try:
                 await self.hass.async_add_executor_job(self._refresh_map)
             except Exception as exc:
                 # The robot refuses map data while manoeuvring (-3016); with a
                 # map already rendered that is routine, so keep it out of the log.
-                if self.map_image_bytes is None:
+                if self._map_base is None:
                     _LOGGER.warning("Map refresh failed: %s", exc)
                 else:
                     _LOGGER.debug("Map refresh skipped: %s", exc)
@@ -195,36 +143,22 @@ class TapoCoordinator(DataUpdateCoordinator):
         data["position_mm"] = self.vac_pos
         return data
 
-    def _decode_schedules(self) -> None:
-        names = {r["id"]: b64name(r.get("name", "")) for r in self.rooms}
-        rules = (self.settings.get("schedules") or {}).get("rule_list") or []
-        self.schedules = [decode_schedule(r, names) for r in rules]
-
-    def _refresh_position(self) -> None:
-        map_data = self.client.get_map_data(self.map_id)
-        self.vac_pos = map_data.get("real_vac_coor")
-        self.current_room = room_at_vac(map_data)
-
-    async def async_settings_changed(self) -> None:
-        """Re-read settings right after a write so switches don't wait for the slow cycle."""
-        self.settings = await self.hass.async_add_executor_job(self.client.get_settings)
-        self._decode_schedules()
-        if self.data is not None:
-            self.data["settings"] = self.settings
-            self.data["schedules"] = self.schedules
-        self.async_update_listeners()
-
-    def _refresh_map(self) -> None:
-        current_id, _ = self.client.get_map_info()
-        map_data       = self.client.get_map_data(current_id)
-        self.map_id    = current_id
-        self.vac_pos   = map_data.get("real_vac_coor")
-        self.current_room = room_at_vac(map_data)
-        self.rooms     = [a for a in map_data.get("area_list", [])
-                          if a.get("type") == "room"]
-        self.map_image_bytes = _render_map_image(map_data)
-        _LOGGER.debug("Map rendered: %d bytes, %d rooms",
-                      len(self.map_image_bytes), len(self.rooms))
+    async def _fetch_status(self) -> dict[str, Any]:
+        """get_status with a short retry so one dropped packet doesn't flip
+        every entity to unavailable."""
+        delay = STATUS_RETRY_DELAY
+        for attempt in range(1, STATUS_RETRIES + 1):
+            try:
+                return await self.hass.async_add_executor_job(self.client.get_status)
+            except AuthError as exc:
+                raise ConfigEntryAuthFailed(str(exc)) from exc
+            except Exception as exc:
+                if attempt == STATUS_RETRIES:
+                    raise UpdateFailed(f"Failed to fetch vacuum status: {exc}") from exc
+                _LOGGER.debug("Status fetch failed (attempt %d/%d): %s", attempt, STATUS_RETRIES, exc)
+                await asyncio.sleep(delay)
+                delay *= 2
+        raise UpdateFailed("unreachable")   # pragma: no cover
 
     async def async_refresh_soon(self) -> None:
         """Re-poll at 2, 5 and 10 s after a command.
@@ -237,6 +171,45 @@ class TapoCoordinator(DataUpdateCoordinator):
                 await asyncio.sleep(delay)
                 await self.async_refresh()
         self.hass.async_create_task(_poll())
+
+    async def async_settings_changed(self) -> None:
+        """Re-read settings right after a write so switches don't wait for the slow cycle."""
+        self.settings = await self.hass.async_add_executor_job(self.client.get_settings)
+        self._decode_schedules()
+        if self.data is not None:
+            self.data["settings"] = self.settings
+            self.data["schedules"] = self.schedules
+        self.async_update_listeners()
+
+    def _decode_schedules(self) -> None:
+        names = {r["id"]: b64name(r.get("name", "")) for r in self.rooms}
+        rules = (self.settings.get("schedules") or {}).get("rule_list") or []
+        self.schedules = [decode_schedule(r, names) for r in rules]
+
+    # ---- map ---------------------------------------------------------------------
+    def _refresh_position(self) -> None:
+        map_data = self.client.get_map_data(self.map_id)
+        self._apply_position(map_data)
+
+    def _apply_position(self, map_data: dict) -> None:
+        self.vac_pos = map_data.get("real_vac_coor")
+        self.current_room = room_at_vac(map_data)
+        if self._map_base is not None:
+            img = self._map_base.copy()
+            vac = map_data.get("vac_coor")
+            if vac:
+                _dot(ImageDraw.Draw(img), *_grid_px(vac[0], vac[1], map_data["height"]), (0, 180, 255))
+            self.map_image_bytes = _jpeg(img)
+
+    def _refresh_map(self) -> None:
+        current_id, _ = self.client.get_map_info()
+        map_data = self.client.get_map_data(current_id)
+        self.map_id = current_id
+        self.map_name = b64name(map_data.get("map_name", ""))
+        self.rooms = [a for a in map_data.get("area_list", []) if a.get("type") == "room"]
+        self._map_base, self.room_geometry, self.map_geometry = render_map(map_data)
+        self._apply_position(map_data)
+        _LOGGER.debug("Map rendered: %d bytes, %d rooms", len(self.map_image_bytes or b""), len(self.rooms))
 
     def map_names(self) -> dict[int, str]:
         """{map_id: name} for every map stored on the vacuum."""
