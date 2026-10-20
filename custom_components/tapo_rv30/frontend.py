@@ -43,6 +43,8 @@ async def _register_resource(hass: HomeAssistant, url: str) -> None:
     lovelace = hass.data.get("lovelace")
     resources = getattr(lovelace, "resources", None)
     mode = getattr(lovelace, "mode", None)
+    _LOGGER.warning("DEBUG lovelace=%r mode=%r resources=%r keys=%s", type(lovelace), mode, type(resources),
+                    [k for k in hass.data if "lovelace" in str(k).lower()])
     base = url.split("?", 1)[0]
     try:
         if resources is not None and mode == "storage":
