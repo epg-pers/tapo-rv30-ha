@@ -11,6 +11,8 @@ through python-kasa.
 ## Features
 
 - Full vacuum control — start, pause, stop, dock, locate, spot clean
+- **Bundled Lovelace card**: tap rooms or drag a zone on the live map, presets and controls,
+  zero setup
 - **Room-by-room cleaning** via `tapo_rv30.clean_rooms` service, or the native
   `vacuum.clean_area` action (map rooms to Home Assistant areas in the vacuum
   entity's settings; HA 2026.2+)
@@ -94,6 +96,30 @@ on port 4433 (connection refused or TLS handshake failure) until the robot is po
 TP-Link's forum reply is that third-party local access is unsupported. If polling stops
 after an update on an unchanged network, reboot the vacuum and consider turning off
 automatic firmware updates in the Tapo app. Thanks to @jan-tdy for documenting this.
+
+## The card
+
+![Tapo RV30 card](docs/card.png)
+
+*Mock-up with a made-up house.*
+
+The integration ships its own Lovelace card and registers it for you: after installing
+and restarting, add a card, pick **Tapo RV30 Vacuum** and choose the vacuum. Or in YAML:
+
+```yaml
+type: custom:tapo-rv30-card
+entity: vacuum.robot
+```
+
+- Tap rooms on the live map to select them, then **Clean**; switch to zone mode and drag a
+  rectangle to clean just that area. Taps map to rooms exactly, no calibration.
+- Status, current room, battery and progress in the header; a banner when the robot reports a
+  problem.
+- Preset chips (one per preset saved in the Tapo app), start/pause, stop, dock, locate and
+  empty-bin controls, greyed out when they don't apply.
+- Follows your theme (light and dark). Options: `name`, `show_presets`, `show_controls`.
+
+No separate HACS frontend install, no resources to add.
 
 ## Dashboard
 

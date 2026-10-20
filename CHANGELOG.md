@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.10.0
+
+### New
+
+- **Bundled Lovelace card** (`custom:tapo-rv30-card`). The integration serves it and registers it as a dashboard resource itself, so there is nothing else to install. Live map with tap-to-select rooms and a drag-to-draw zone (taps resolve through a lossless room mask the integration serves, so odd-shaped rooms work and there is no calibration), status / room / battery / progress header, problem banner, preset chips, and start / pause / stop / dock / locate / empty-bin controls. Theme-aware, with a visual editor. Plain JavaScript, no build step.
+- `rooms_mask_url` attribute on the map camera, and `/api/tapo_rv30/<entry_id>/rooms.png` (authenticated) for anyone building their own card.
+
 ## v0.9.0
 
 ### New

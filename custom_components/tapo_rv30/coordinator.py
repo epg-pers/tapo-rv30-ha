@@ -22,7 +22,7 @@ from .mapdata import (
     b64name, clean_transition, decode_clean_record, decode_preset, decode_schedule, fold,
     resolve_rooms, room_at_vac,
 )
-from .maprender import _dot, _grid_px, _jpeg, render_map
+from .maprender import _dot, _grid_px, _jpeg, render_map, room_mask_png
 from .tpap import AuthError, TapoVacuumClient
 
 _LOGGER = logging.getLogger(__name__)
@@ -51,6 +51,8 @@ class TapoCoordinator(DataUpdateCoordinator):
         self._map_base: Image.Image | None = None     # rendered map without the vacuum marker
         self.room_geometry: list[dict] = []
         self.map_geometry: dict = {}
+        self.room_mask: bytes | None = None    # PNG, pixel = room id (for the card)
+        self.map_hash: str | None = None
         self.rooms: list[dict] = []        # current map's rooms (area_list, type == room)
         self.map_id: int | None = None
         self.map_name: str | None = None
@@ -365,6 +367,8 @@ class TapoCoordinator(DataUpdateCoordinator):
         self.map_name = b64name(map_data.get("map_name", ""))
         self.rooms = [a for a in map_data.get("area_list", []) if a.get("type") == "room"]
         self._map_base, self.room_geometry, self.map_geometry = render_map(map_data)
+        self.room_mask = room_mask_png(map_data)
+        self.map_hash = str(map_data.get("map_hash") or len(self.room_mask))
         self._apply_position(map_data)
         _LOGGER.debug("Map rendered: %d bytes, %d rooms", len(self.map_image_bytes or b""), len(self.rooms))
 

@@ -10,6 +10,7 @@ from homeassistant.core import HomeAssistant
 from .aes import AesVacuumClient
 from .const import CONF_TRANSPORT, DEFAULT_PORT, DOMAIN, TRANSPORT_AES
 from .coordinator import TapoCoordinator
+from .frontend import async_setup_frontend
 from .services import async_setup_services, async_unload_services
 from .tpap import TapoVacuumClient
 
@@ -19,6 +20,10 @@ PLATFORMS = [Platform.VACUUM, Platform.SENSOR, Platform.BINARY_SENSOR, Platform.
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    import json
+    from pathlib import Path
+    version = json.loads((Path(__file__).parent / "manifest.json").read_text())["version"]
+    await async_setup_frontend(hass, version)
     # Entries created before transport detection have no CONF_TRANSPORT: TPAP.
     client_cls = AesVacuumClient if entry.data.get(CONF_TRANSPORT) == TRANSPORT_AES else TapoVacuumClient
     client = client_cls(

@@ -156,3 +156,16 @@ def _jpeg(img: Image.Image) -> bytes:
     return buf.getvalue()
 
 
+
+
+def room_mask_png(map_data: dict) -> bytes:
+    """Lossless 8-bit PNG of the room-id grid (same orientation as the map
+    image, 1 px per cell). Pixel value = room id, 0 wall, 255 floor, 127 unknown."""
+    validate_map(map_data)
+    width, height, pix_len = map_data["width"], map_data["height"], map_data["pix_len"]
+    pixels = lz4_block_decompress(base64.b64decode(map_data["map_data"]), pix_len)
+    img = Image.frombytes("L", (width, height), bytes(min(p, 255) for p in pixels))
+    img = img.transpose(Image.Transpose.FLIP_TOP_BOTTOM)
+    buf = io.BytesIO()
+    img.save(buf, format="PNG", optimize=True)
+    return buf.getvalue()
