@@ -24,7 +24,8 @@ from .const import (
     VACUUM_STATES,
     WATER_INT_TO_NAME,
 )
-from .coordinator import TapoCoordinator, _b64name
+from .coordinator import TapoCoordinator
+from .mapdata import b64name
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -88,7 +89,7 @@ class TapoVacuumEntity(CoordinatorEntity[TapoCoordinator], StateVacuumEntity):
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         d = self.coordinator.data or {}
-        rooms = [_b64name(r.get("name", "")) for r in self.coordinator.rooms]
+        rooms = [b64name(r.get("name", "")) for r in self.coordinator.rooms]
         return {
             "water_level":   WATER_INT_TO_NAME.get(d.get("cistern", 0), "off"),
             "clean_passes":  d.get("clean_number", 1),

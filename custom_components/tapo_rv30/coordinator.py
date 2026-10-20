@@ -20,125 +20,16 @@ from .const import (
     UNKNOWN_COLOR,
     FLOOR_COLOR,
 )
+from .mapdata import (
+    MapNotFound, RoomNotFound, b64name, decode_schedule, lz4_block_decompress, resolve_rooms,
+    room_at_vac,
+)
 from .tpap import TapoVacuumClient
 
 _LOGGER = logging.getLogger(__name__)
 
-
-class MapNotFound(ValueError):
-    """The requested map could not be resolved on the vacuum."""
-
-
-class RoomNotFound(ValueError):
-    """A requested room could not be resolved on the chosen map."""
-
-
-MAP_SCALE = 4   # px per vacuum grid cell → ~700×700 output image
-
-
-def _lz4_block_decompress(data: bytes, uncompressed_size: int) -> bytes:
-    """Pure-Python LZ4 block decompressor — no C extension needed."""
-    out = bytearray(uncompressed_size)
-    src = 0
-    dst = 0
-    n = len(data)
-    while src < n:
-        token = data[src]; src += 1
-        # Literal run
-        lit_len = token >> 4
-        if lit_len == 15:
-            while src < n:
-                extra = data[src]; src += 1
-                lit_len += extra
-                if extra != 255:
-                    break
-        out[dst:dst + lit_len] = data[src:src + lit_len]
-        src += lit_len
-        dst += lit_len
-        if src >= n:
-            break
-        # Match copy
-        offset = data[src] | (data[src + 1] << 8); src += 2
-        match_len = (token & 0xF) + 4
-        if match_len == 19:  # 4 + 15
-            while src < n:
-                extra = data[src]; src += 1
-                match_len += extra
-                if extra != 255:
-                    break
-        match_pos = dst - offset
-        for i in range(match_len):
-            out[dst + i] = out[match_pos + i]
-        dst += match_len
-    return bytes(out)
-FONT_SIZE  = 14
-
-
-def _b64name(s: str) -> str:
-    try:
-        return base64.b64decode(s).decode(errors="replace").strip()
-    except Exception:
-        return s
-
-
-def _norm(value: Any) -> str:
-    """Normalise a user-supplied map/room name.
-
-    Templates and scripts often leave surrounding whitespace or a stray pair of
-    quotes around the value; strip both so they still match.
-    """
-    text = str(value).strip()
-    if len(text) >= 2 and text[0] == text[-1] and text[0] in "\"'":
-        text = text[1:-1].strip()
-    return text
-
-
-# Bit n of week_day = that weekday; bit 0 is Sunday (Tapo app convention).
-_WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
-
-
-def _decode_weekdays(mask: int) -> list[str]:
-    return [name for i, name in enumerate(_WEEKDAYS) if mask & (1 << i)]
-
-
-def _decode_schedule(rule: dict, room_names: dict[int, str]) -> dict:
-    """One get_schedule_rules entry as a readable summary (raw rule kept under 'raw')."""
-    attr = rule.get("clean_attr") or {}
-    room_ids = attr.get("room_list") or []
-    s_min = rule.get("s_min", 0)
-    return {
-        "id":            rule.get("id"),
-        "enabled":       rule.get("enable", False),
-        "time":          f"{s_min // 60:02d}:{s_min % 60:02d}",
-        "days":          _decode_weekdays(rule.get("week_day", 0)),
-        "repeat":        rule.get("mode") == "repeat",
-        "rooms":         [room_names.get(rid, f"Room {rid}") for rid in room_ids],
-        "room_ids":      room_ids,
-        "preset_id":     attr.get("custom_rule_id"),
-        "suction":       attr.get("suction"),
-        "water_level":   attr.get("cistern"),
-        "clean_passes":  attr.get("clean_number"),
-        "map_id":        attr.get("map_id"),
-        "raw":           rule,
-    }
-
-
-def _room_at_vac(map_data: dict) -> str | None:
-    """Name of the room the vacuum is in, from vac_coor against the room-id
-    pixel grid getMapData already carries. None off-map or on a non-room pixel."""
-    vac = map_data.get("vac_coor")
-    if not vac:
-        return None
-    width, height = map_data["width"], map_data["height"]
-    gx, gy = int(vac[0]), int(vac[1])
-    if not (0 <= gx < width and 0 <= gy < height):
-        return None
-    pixels = _lz4_block_decompress(base64.b64decode(map_data["map_data"]), map_data["pix_len"])
-    room_id = pixels[gy * width + gx]
-    for a in map_data.get("area_list", []):
-        if a.get("type") == "room" and a.get("id") == room_id:
-            return _b64name(a.get("name", ""))
-    return None
+MAP_SCALE = 4   # px per vacuum grid cell -> ~700x700 output image
+FONT_SIZE = 14
 
 
 def _render_map_image(map_data: dict) -> bytes:
@@ -148,7 +39,7 @@ def _render_map_image(map_data: dict) -> bytes:
     pix_len = map_data["pix_len"]
 
     raw     = base64.b64decode(map_data["map_data"])
-    pixels  = _lz4_block_decompress(raw, uncompressed_size=pix_len)
+    pixels  = lz4_block_decompress(raw, uncompressed_size=pix_len)
 
     rooms = [a for a in map_data.get("area_list", []) if a.get("type") == "room"]
     sorted_ids  = sorted(r["id"] for r in rooms)
@@ -191,7 +82,7 @@ def _render_map_image(map_data: dict) -> bytes:
         rid = room["id"]
         if rid not in room_colors:
             continue
-        name = _b64name(room.get("name", ""))
+        name = b64name(room.get("name", ""))
         # Find centroid of all pixels belonging to this room
         xs, ys = [], []
         for row in range(height):
@@ -283,7 +174,13 @@ class TapoCoordinator(DataUpdateCoordinator):
             try:
                 await self.hass.async_add_executor_job(self._refresh_map)
             except Exception as exc:
-                _LOGGER.warning("Map refresh failed: %s", exc)
+                # The robot refuses map data while manoeuvring (-3016); with a
+                # map already rendered that is routine, so keep it out of the log.
+                if self.map_image_bytes is None:
+                    _LOGGER.warning("Map refresh failed: %s", exc)
+                else:
+                    _LOGGER.debug("Map refresh skipped: %s", exc)
+                    self._map_tick = self._map_cycles - 1   # try again next poll
             self.settings = await self.hass.async_add_executor_job(self.client.get_settings)
             self._decode_schedules()
         elif self.map_id is not None:
@@ -299,14 +196,14 @@ class TapoCoordinator(DataUpdateCoordinator):
         return data
 
     def _decode_schedules(self) -> None:
-        names = {r["id"]: _b64name(r.get("name", "")) for r in self.rooms}
+        names = {r["id"]: b64name(r.get("name", "")) for r in self.rooms}
         rules = (self.settings.get("schedules") or {}).get("rule_list") or []
-        self.schedules = [_decode_schedule(r, names) for r in rules]
+        self.schedules = [decode_schedule(r, names) for r in rules]
 
     def _refresh_position(self) -> None:
         map_data = self.client.get_map_data(self.map_id)
         self.vac_pos = map_data.get("real_vac_coor")
-        self.current_room = _room_at_vac(map_data)
+        self.current_room = room_at_vac(map_data)
 
     async def async_settings_changed(self) -> None:
         """Re-read settings right after a write so switches don't wait for the slow cycle."""
@@ -322,7 +219,7 @@ class TapoCoordinator(DataUpdateCoordinator):
         map_data       = self.client.get_map_data(current_id)
         self.map_id    = current_id
         self.vac_pos   = map_data.get("real_vac_coor")
-        self.current_room = _room_at_vac(map_data)
+        self.current_room = room_at_vac(map_data)
         self.rooms     = [a for a in map_data.get("area_list", [])
                           if a.get("type") == "room"]
         self.map_image_bytes = _render_map_image(map_data)
@@ -344,14 +241,14 @@ class TapoCoordinator(DataUpdateCoordinator):
     def map_names(self) -> dict[int, str]:
         """{map_id: name} for every map stored on the vacuum."""
         _, map_list = self.client.get_map_info()
-        return {m["map_id"]: _b64name(m.get("map_name", "")) for m in map_list}
+        return {m["map_id"]: b64name(m.get("map_name", "")) for m in map_list}
 
     def list_rooms_all_maps(self) -> list[tuple[int, str, list[tuple[int, str]]]]:
         """[(map_id, map_name, [(room_id, room_name), ...]), ...] read live."""
         out = []
         for map_id, map_name in self.map_names().items():
             map_data = self.client.get_map_data(map_id)
-            rooms = [(a["id"], _b64name(a.get("name", "")))
+            rooms = [(a["id"], b64name(a.get("name", "")))
                      for a in map_data.get("area_list", []) if a.get("type") == "room"]
             out.append((map_id, map_name, rooms))
         return out
@@ -366,7 +263,7 @@ class TapoCoordinator(DataUpdateCoordinator):
         ValueError) with the available names in the message.
         """
         current_map_id, map_list = self.client.get_map_info()
-        map_names = {m["map_id"]: _b64name(m.get("map_name", "")) for m in map_list}
+        map_names = {m["map_id"]: b64name(m.get("map_name", "")) for m in map_list}
 
         if map_name is not None:
             wanted = _norm(map_name)
@@ -394,7 +291,7 @@ class TapoCoordinator(DataUpdateCoordinator):
 
         map_data = self.client.get_map_data(target_id)
         rooms = [a for a in map_data.get("area_list", []) if a.get("type") == "room"]
-        decoded = [_b64name(r.get("name", "")) for r in rooms]
+        decoded = [b64name(r.get("name", "")) for r in rooms]
         target_name = map_names.get(target_id, str(target_id))
 
         matched: list[int] = []

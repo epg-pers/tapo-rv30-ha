@@ -24,6 +24,10 @@ clean_rooms:
 set_room_settings:
   name: Set room settings
   description: Per-room suction / water / passes (what the app calls custom cleaning settings).
+  target:
+    entity:
+      domain: vacuum
+      integration: tapo_rv30
   fields:
     rooms:
       name: Rooms
@@ -60,6 +64,10 @@ clean_zone:
   description: >-
     Clean rectangles given as [x1, y1, x2, y2] in the map's real coordinates (mm, same
     frame as the vacuum's position_mm attribute). Starts the robot.
+  target:
+    entity:
+      domain: vacuum
+      integration: tapo_rv30
   fields:
     zones:
       name: Zones
@@ -90,6 +98,10 @@ run_schedule:
     Start the clean a Tapo-app schedule would start, right now. The vacuum has
     no "run schedule" call, so this replays the schedule's rooms / preset,
     suction, water and passes. Get the id from the Schedules sensor's attributes.
+  target:
+    entity:
+      domain: vacuum
+      integration: tapo_rv30
   fields:
     schedule_id:
       name: Schedule ID
@@ -103,6 +115,10 @@ send_raw:
   description: >-
     Send any device method (e.g. getCleanAttr) with optional params and return
     the response. For diagnostics and experimenting; writes can change settings.
+  target:
+    entity:
+      domain: vacuum
+      integration: tapo_rv30
   fields:
     method:
       name: Method

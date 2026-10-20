@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.6.1
+
+### Fixes
+
+- The custom services (`clean_rooms`, `clean_zone`, `set_room_settings`, `run_schedule`, `send_raw`) now act on the vacuum you target. Before, with more than one Tapo vacuum set up, they all went to whichever was set up last, and removing one vacuum removed the services for the others. With a single vacuum the target is still optional.
+- The "Map refresh failed: Device error -3016" warning while the robot is manoeuvring is now a debug message, and the refresh is retried on the next poll.
+
+### New
+
+- Download diagnostics (Settings > Devices & services > the vacuum > three dots > Download diagnostics) for bug reports: model, firmware, status, settings, map summary and schedules, with credentials and identifiers redacted.
+- A pytest suite for the map, room, schedule and crypto helpers runs on every push.
+
 ## v0.6.0
 
 ### New
