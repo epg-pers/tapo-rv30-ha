@@ -6,6 +6,6 @@
   "documentation": "https://github.com/epg-pers/tapo-rv30-ha",
   "iot_class": "local_polling",
   "issue_tracker": "https://github.com/epg-pers/tapo-rv30-ha/issues",
-  "requirements": ["ecdsa>=0.18"],
-  "version": "0.5.0"
+  "requirements": ["ecdsa>=0.18", "python-kasa>=0.10.0"],
+  "version": "0.6.0"
 }

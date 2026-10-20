@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.6.0
+
+### New
+
+- Experimental support for AES-transport models (RV30C, RV30C Mop, and any unit that reports `encrypt_type: AES`), tracked in #25. The config flow tries TPAP first and falls back to AES, which uses python-kasa (already shipped with Home Assistant) for login and transport; every feature then works the same way. **Untested on AES hardware**: it has only been verified that TPAP devices are unaffected and that the AES path fails cleanly. Reports on #25 please. Based on @peggleg's fork.
+
 ## v0.5.0
 
 ### New

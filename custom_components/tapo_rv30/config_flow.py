@@ -1,13 +1,18 @@
 """Config flow for Tapo RV30."""
 from __future__ import annotations
 
+import logging
+
 import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.const import CONF_HOST, CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import HomeAssistant
 
-from .const import DEFAULT_PORT, DOMAIN
+from .aes import AesVacuumClient
+from .const import CONF_TRANSPORT, DEFAULT_PORT, DOMAIN, TRANSPORT_AES, TRANSPORT_TPAP
 from .tpap import AuthError, TapoVacuumClient
+
+_LOGGER = logging.getLogger(__name__)
 
 STEP_SCHEMA = vol.Schema({
     vol.Required(CONF_HOST): str,
@@ -16,18 +21,40 @@ STEP_SCHEMA = vol.Schema({
 })
 
 
-async def _test_connection(hass: HomeAssistant, host: str, user: str, pw: str) -> str | None:
-    """Return None on success, error key string on failure."""
-    def _try():
-        c = TapoVacuumClient(host, user, pw, DEFAULT_PORT)
-        c.authenticate()
+async def _test_connection(
+    hass: HomeAssistant, host: str, user: str, pw: str
+) -> tuple[str | None, str | None]:
+    """Try TPAP, then AES. Returns (transport, error_key); error_key is None on success.
+
+    A confirmed wrong password on TPAP is final: the same credentials would
+    fail on AES too, so it is not tried.
+    """
+    def _try_tpap():
+        TapoVacuumClient(host, user, pw, DEFAULT_PORT).authenticate()
+
+    def _try_aes():
+        c = AesVacuumClient(host, user, pw, DEFAULT_PORT)
+        try:
+            c.authenticate()
+        finally:
+            c.close()
+
     try:
-        await hass.async_add_executor_job(_try)
-        return None
+        await hass.async_add_executor_job(_try_tpap)
+        return TRANSPORT_TPAP, None
     except AuthError:
-        return "invalid_auth"
-    except Exception:
-        return "cannot_connect"
+        return None, "invalid_auth"
+    except Exception as exc:
+        tpap_exc = exc
+
+    try:
+        await hass.async_add_executor_job(_try_aes)
+        return TRANSPORT_AES, None
+    except AuthError:
+        return None, "invalid_auth"
+    except Exception as exc:
+        _LOGGER.debug("Neither transport worked for %s: TPAP %r, AES %r", host, tpap_exc, exc)
+        return None, "cannot_connect"
 
 
 class TapoRV30ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -43,13 +70,14 @@ class TapoRV30ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             await self.async_set_unique_id(host)
             self._abort_if_unique_id_configured()
 
-            err = await _test_connection(self.hass, host, user, pw)
+            transport, err = await _test_connection(self.hass, host, user, pw)
             if err:
                 errors["base"] = err
             else:
                 return self.async_create_entry(
                     title=f"Tapo RV30 ({host})",
-                    data={CONF_HOST: host, CONF_USERNAME: user, CONF_PASSWORD: pw},
+                    data={CONF_HOST: host, CONF_USERNAME: user, CONF_PASSWORD: pw,
+                          CONF_TRANSPORT: transport},
                 )
 
         return self.async_show_form(

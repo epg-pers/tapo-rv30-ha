@@ -8,7 +8,10 @@ from homeassistant.const import CONF_HOST, CONF_PASSWORD, CONF_USERNAME, Platfor
 from homeassistant.core import HomeAssistant, ServiceCall, ServiceResponse, SupportsResponse
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 
-from .const import DEFAULT_PORT, DOMAIN, FAN_NAME_TO_INT, WATER_NAME_TO_INT
+from .aes import AesVacuumClient
+from .const import (
+    CONF_TRANSPORT, DEFAULT_PORT, DOMAIN, FAN_NAME_TO_INT, TRANSPORT_AES, WATER_NAME_TO_INT,
+)
 from .coordinator import TapoCoordinator
 from .tpap import TapoVacuumClient
 
@@ -18,7 +21,9 @@ PLATFORMS = [Platform.VACUUM, Platform.SENSOR, Platform.CAMERA, Platform.SELECT,
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    client = TapoVacuumClient(
+    # Entries created before transport detection have no CONF_TRANSPORT: TPAP.
+    client_cls = AesVacuumClient if entry.data.get(CONF_TRANSPORT) == TRANSPORT_AES else TapoVacuumClient
+    client = client_cls(
         host=entry.data[CONF_HOST],
         username=entry.data[CONF_USERNAME],
         password=entry.data[CONF_PASSWORD],
@@ -146,7 +151,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if ok:
-        hass.data[DOMAIN].pop(entry.entry_id, None)
+        coordinator = hass.data[DOMAIN].pop(entry.entry_id, None)
+        if coordinator is not None and hasattr(coordinator.client, "close"):
+            coordinator.client.close()
         for svc in ("clean_rooms", "set_room_settings", "clean_zone", "run_schedule", "send_raw"):
             hass.services.async_remove(DOMAIN, svc)
     return ok
