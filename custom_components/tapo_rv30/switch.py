@@ -76,8 +76,14 @@ class TapoBoolSettingSwitch(TapoEntity, SwitchEntity):
     def is_on(self) -> bool | None:
         return (self.coordinator.data or {}).get("bool_settings", {}).get(self._key)
 
+    async def _set(self, value: bool) -> None:
+        await self._call(self.coordinator.client.set_bool_setting, self._key, value)
+        # Some settings read back the old value for a moment after a write.
+        self.coordinator.set_bool_setting_local(self._key, value)
+        await self.coordinator.async_settings_changed_later()
+
     async def async_turn_on(self, **kwargs: Any) -> None:
-        await self._write(lambda: self.coordinator.client.set_bool_setting(self._key, True))
+        await self._set(True)
 
     async def async_turn_off(self, **kwargs: Any) -> None:
-        await self._write(lambda: self.coordinator.client.set_bool_setting(self._key, False))
+        await self._set(False)

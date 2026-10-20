@@ -7,7 +7,7 @@ from datetime import timedelta
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
@@ -257,6 +257,20 @@ class TapoCoordinator(DataUpdateCoordinator):
                 await asyncio.sleep(delay)
                 await self.async_refresh()
         self.hass.async_create_task(_poll())
+
+    @callback
+    def set_bool_setting_local(self, key: str, value: bool) -> None:
+        """Reflect a successful write immediately, before the re-read confirms it."""
+        self.bool_settings[key] = value
+        if self.data is not None:
+            self.data["bool_settings"] = self.bool_settings
+        self.async_update_listeners()
+
+    async def async_settings_changed_later(self, delay: float = 2.0) -> None:
+        async def _later() -> None:
+            await asyncio.sleep(delay)
+            await self.async_settings_changed()
+        self.hass.async_create_task(_later())
 
     async def async_settings_changed(self) -> None:
         """Re-read settings right after a write so switches don't wait for the slow cycle."""
