@@ -41,9 +41,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     async def _resolve(call: ServiceCall) -> tuple[list[int], int]:
         """Resolve rooms/map from the call, raising a user-facing error on failure."""
+        rooms = _rooms_list(call)
         try:
             return await hass.async_add_executor_job(
-                coordinator.resolve_rooms_live, _rooms_list(call), call.data.get("map")
+                coordinator.resolve_rooms_live, rooms, call.data.get("map")
             )
         except ValueError as exc:          # MapNotFound / RoomNotFound
             raise ServiceValidationError(f"{call.service}: {exc}") from exc
