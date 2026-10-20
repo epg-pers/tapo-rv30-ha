@@ -268,6 +268,21 @@ class TapoCoordinator(DataUpdateCoordinator):
                 await self.async_refresh()
         self.hass.async_create_task(_poll())
 
+    def map_names(self) -> dict[int, str]:
+        """{map_id: name} for every map stored on the vacuum."""
+        _, map_list = self.client.get_map_info()
+        return {m["map_id"]: _b64name(m.get("map_name", "")) for m in map_list}
+
+    def list_rooms_all_maps(self) -> list[tuple[int, str, list[tuple[int, str]]]]:
+        """[(map_id, map_name, [(room_id, room_name), ...]), ...] read live."""
+        out = []
+        for map_id, map_name in self.map_names().items():
+            map_data = self.client.get_map_data(map_id)
+            rooms = [(a["id"], _b64name(a.get("name", "")))
+                     for a in map_data.get("area_list", []) if a.get("type") == "room"]
+            out.append((map_id, map_name, rooms))
+        return out
+
     def resolve_rooms_live(
         self, name_patterns: list[str], map_name: str | None = None
     ) -> tuple[list[int], int]:

@@ -5,12 +5,14 @@ import logging
 from typing import Any
 
 from homeassistant.components.vacuum import (
+    Segment,
     StateVacuumEntity,
     VacuumActivity,
     VacuumEntityFeature,
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -36,6 +38,7 @@ _FEATURES = (
     | VacuumEntityFeature.MAP
     | VacuumEntityFeature.LOCATE
     | VacuumEntityFeature.CLEAN_SPOT
+    | VacuumEntityFeature.CLEAN_AREA
 )
 
 
@@ -116,6 +119,45 @@ class TapoVacuumEntity(CoordinatorEntity[TapoCoordinator], StateVacuumEntity):
 
     async def async_locate(self, **kwargs: Any) -> None:
         await self.hass.async_add_executor_job(self.coordinator.client.locate)
+
+    # ---- vacuum.clean_area (HA 2026.2+) --------------------------------------
+    # Segment ids are "<map_id>:<room_id>" because room ids restart at 1 on every
+    # map; the map name goes in Segment.group so the mapping UI can tell them apart.
+
+    async def async_get_segments(self) -> list[Segment]:
+        try:
+            maps = await self.hass.async_add_executor_job(self.coordinator.list_rooms_all_maps)
+        except Exception as exc:
+            raise HomeAssistantError(f"Could not read maps from the vacuum: {exc}") from exc
+        return [
+            Segment(id=f"{map_id}:{room_id}", name=room_name, group=map_name)
+            for map_id, map_name, rooms in maps
+            for room_id, room_name in rooms
+        ]
+
+    async def async_clean_segments(self, segment_ids: list[str], **kwargs: Any) -> None:
+        by_map: dict[int, list[int]] = {}
+        for seg in segment_ids:
+            try:
+                map_id, room_id = (int(p) for p in seg.split(":", 1))
+            except ValueError as exc:
+                raise ServiceValidationError(f"Unknown segment id '{seg}'") from exc
+            by_map.setdefault(map_id, []).append(room_id)
+        if len(by_map) > 1:
+            names = await self.hass.async_add_executor_job(self.coordinator.map_names)
+            raise ServiceValidationError(
+                "The selected areas are on different maps "
+                f"({', '.join(names.get(m, str(m)) for m in by_map)}); "
+                "the vacuum can only clean rooms on one map per run"
+            )
+        (map_id, room_ids), = by_map.items()
+        try:
+            await self.hass.async_add_executor_job(
+                self.coordinator.client.clean_rooms, room_ids, map_id
+            )
+        except Exception as exc:
+            raise HomeAssistantError(f"Vacuum rejected the command: {exc}") from exc
+        await self.coordinator.async_refresh_soon()
 
     async def async_return_to_base(self, **kwargs: Any) -> None:
         await self.hass.async_add_executor_job(self.coordinator.client.dock)
