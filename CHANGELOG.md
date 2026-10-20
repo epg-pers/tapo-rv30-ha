@@ -1,0 +1,41 @@
+# Changelog
+
+## v0.4.1
+
+- `clean_rooms`, `set_room_settings` and `clean_zone` now report map, room and device failures to the caller instead of only logging them. The error names the step that failed and lists the available maps or rooms, so it shows up in the UI and in automation traces (#10).
+- Map and room names are trimmed and stripped of wrapping quotes before matching. An explicit but empty `map` is an error rather than a silent fall back to the current map, and an ambiguous map name is rejected (#9).
+- Invalid `suction` / `water` / `passes` values give a validation error listing the accepted values.
+- The services pick up the robot's new state within a few seconds instead of waiting for the 30 s poll.
+
+- Releases are now created automatically when the version in `manifest.json` changes on `main`, with notes from `CHANGELOG.md`. hassfest and HACS validation run on every push.
+
+
+## v0.4.0
+
+### Fixes
+
+- **Loads again on Home Assistant 2026.8+** (#7, #18, #23). HA removed `VacuumEntityFeature.BATTERY`; the flag and `battery_level` property are gone (the Battery sensor already covers it) and state is now reported via `activity`. Thanks to @G0LDENWASTAKEN for the same fix in #19.
+- `vacuum.start` while paused now resumes instead of failing with `-3002` (#8).
+- `vacuum.stop` now ends the job instead of pausing it.
+- Commands no longer race the status poll (shared session is locked), and state re-polls at 2/5/10 s after a command.
+- Status and error code tables now match the Tapo app (status 0-19, errors 1-45).
+
+### New (from #22 by @cheesyturkey)
+
+- `vacuum.locate`, `vacuum.clean_spot`
+- `tapo_rv30.clean_zone`, `tapo_rv30.set_room_settings`
+- Empty Bin button, consumable reset buttons
+- Auto Empty, Do Not Disturb (+ start/end times), Child Lock, Carpet Boost switches
+- Volume number, Last Clean sensor, Main Brush Lid / Mop Cloth hours used
+
+### Breaking
+
+- Requires Home Assistant 2025.1 or later.
+- The **Status** sensor now shows the app's labels (Charging, Charged, Emptying Dust, Standby, ...) instead of the vacuum states. Automations matching on that sensor's text need updating; the `vacuum.*` entity states are unchanged.
+- `vacuum.stop` stops rather than pauses.
+
+Tested on an RV30 Max Plus with HA 2026.10.1. Reset buttons and `set_room_settings` are untested on hardware.
+
+## v0.3.0
+
+- Initial HACS release.
