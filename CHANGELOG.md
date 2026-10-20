@@ -1,5 +1,25 @@
 # Changelog
 
+## v0.7.0
+
+### New
+
+- **Map image** now draws no-go zones (red), virtual walls, carpets, saved clean zones (blue) and furniture outlines, and the robot marker moves on every poll instead of every 5 minutes. The map camera exposes `room_geometry` (each room's pixel bbox and centre) and `map_geometry` (mm to pixel transform, dock position) so a custom card can map clicks and coordinates.
+- **Mop Attached** and **Do Not Disturb Active** binary sensors, a **Clean Progress** (%) sensor, and the area sensor uses the unit set on the robot.
+- **Poll Interval** number (10 to 300 s, default 30) stored in the config entry.
+- **Reconfigure** (change IP or account) and **reauth** (prompted when the robot rejects the stored credentials) in the config flow.
+- `tapo_rv30.get_clean_records` returns the cleaning history (newest first) and lifetime totals as a service response.
+- A repair issue is raised when the rooms you mapped to Home Assistant areas no longer match the current map.
+- Device model and firmware version come from the robot and show on the device page.
+
+### Changed
+
+- Status polling goes through `multipleRequest` (one round trip instead of five), with a sequential fallback for firmware that lacks it, and retries briefly before marking entities unavailable.
+- `clean_rooms`, `clean_zone` and `run_schedule` refuse with a readable message while the robot is already cleaning or paused, instead of relaying device error -3002.
+- Room and map name matching ignores accents (`kupelna` matches `Kúpeľňa`).
+
+Several of these were inspired by @jan-tdy's fork (TapoVac-ADV): batching, retries, room geometry, the repair issue and accent folding.
+
 ## v0.6.1
 
 ### Fixes

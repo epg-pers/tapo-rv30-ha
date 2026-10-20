@@ -15,11 +15,14 @@ No cloud dependency — communicates directly with the vacuum over your LAN.
 - **Current Room** sensor, inferred from the vacuum's position on the map
 - **Schedules** sensor listing the Tapo-app schedules, and `tapo_rv30.run_schedule`
   to start one now
-- Live colour **map image** rendered from LZ4 pixel data (refreshes every 5 min)
+- Live colour **map image** with rooms, no-go zones, virtual walls, carpets, saved zones and
+  furniture; the robot marker moves every poll. `room_geometry` / `map_geometry` attributes
+  for custom cards
 - Fan speed selection (Quiet / Standard / Turbo / Max / Ultra)
 - Water level select (Off / Low / Medium / High)
 - Clean passes select (1 / 2 / 3)
-- Battery sensor
+- Battery, clean progress, mop attached and do-not-disturb-active sensors
+- Poll interval setting (10 to 300 s), reconfigure and reauth from the integration page
 - Error state sensor (e.g. "Ok", "Dust Bin Removed", "Trapped")
 - Consumable wear sensors (main brush, side brush, filter, sensor, charge contacts)
 - Locate (beep) and spot clean
@@ -59,6 +62,7 @@ Click the button above, or manually:
 | `tapo_rv30.clean_zone` | Clean rectangles given in map mm, same frame as the `position_mm` attribute. |
 | `tapo_rv30.set_room_settings` | Per-room suction / water / passes. |
 | `tapo_rv30.run_schedule` | Replay a saved schedule's rooms and settings now. The vacuum has no "run schedule by id" call, so the settings are re-sent and the clean started. |
+| `tapo_rv30.get_clean_records` | Cleaning history and lifetime totals as a service response. |
 | `tapo_rv30.send_raw` | Send any device method with params and get the response back (use with "Return response" in Developer Tools). Handy for diagnostics; writes change settings. |
 
 Bad input (unknown room, map, option) raises an error with the available
