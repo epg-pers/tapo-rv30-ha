@@ -14,7 +14,7 @@ from .services import async_setup_services, async_unload_services
 from .tpap import TapoVacuumClient
 
 _LOGGER = logging.getLogger(__name__)
-PLATFORMS = [Platform.VACUUM, Platform.SENSOR, Platform.BINARY_SENSOR, Platform.CAMERA,
+PLATFORMS = [Platform.VACUUM, Platform.SENSOR, Platform.BINARY_SENSOR, Platform.CAMERA, Platform.IMAGE,
              Platform.SELECT, Platform.BUTTON, Platform.SWITCH, Platform.TIME, Platform.NUMBER]
 
 

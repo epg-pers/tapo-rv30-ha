@@ -14,10 +14,14 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from PIL import Image, ImageDraw
 
 from .const import (
-    CLEANING_CODES, CONF_POLL_INTERVAL, DOMAIN, FAST_INTERVAL, MAP_INTERVAL, MAX_POLL_INTERVAL,
+    CLEANING_CODES, CONF_POLL_INTERVAL, DOMAIN, ERROR_CODES, EVENT_CLEAN_FINISHED,
+    EVENT_CLEAN_STARTED, EVENT_ERROR, FAST_INTERVAL, MAP_INTERVAL, MAX_POLL_INTERVAL,
     MIN_POLL_INTERVAL, PAUSED_CODES,
 )
-from .mapdata import b64name, decode_preset, decode_schedule, fold, resolve_rooms, room_at_vac
+from .mapdata import (
+    b64name, clean_transition, decode_clean_record, decode_preset, decode_schedule, fold,
+    resolve_rooms, room_at_vac,
+)
 from .maprender import _dot, _grid_px, _jpeg, render_map
 from .tpap import AuthError, TapoVacuumClient
 
@@ -61,6 +65,7 @@ class TapoCoordinator(DataUpdateCoordinator):
         self.bool_settings: dict[str, bool] = {}
         self.presets: list[dict] = []
         self._caps_fetched = False
+        self._last_record_ts: int | None = None   # newest getCleanRecords timestamp seen
         self.vac_pos: list | None = None
         self.current_room: str | None = None
 
@@ -155,7 +160,56 @@ class TapoCoordinator(DataUpdateCoordinator):
         data["current_room"] = self.current_room
         data["position_mm"] = self.vac_pos
         data["charging"] = data.get("status_code") == 5
+        await self._fire_events(self.data, data)
         return data
+
+    # ---- events ------------------------------------------------------------------
+    def _event_base(self) -> dict:
+        return {"entry_id": self.entry.entry_id if self.entry else None,
+                "device": self.device_name, "model": self.device_model}
+
+    async def _fire_events(self, prev: dict | None, new: dict) -> None:
+        """Fire HA events on clean start/finish and on a new error."""
+        if prev is None:
+            self._note_latest_record()
+            return
+        change = clean_transition(prev.get("status_code"), new.get("status_code"), CLEANING_CODES, PAUSED_CODES)
+        if change == "started":
+            self.hass.bus.async_fire(EVENT_CLEAN_STARTED, {**self._event_base(), "status_code": new.get("status_code"),
+                                                           "current_room": self.current_room})
+        elif change == "finished":
+            record = await self._fetch_new_record()
+            self.hass.bus.async_fire(EVENT_CLEAN_FINISHED, {**self._event_base(), "status_code": new.get("status_code"),
+                                                            **({"record": record} if record else {})})
+        prev_err = (prev.get("error_codes") or [0])[0]
+        new_err = (new.get("error_codes") or [0])[0]
+        if new_err and new_err != prev_err:
+            self.hass.bus.async_fire(EVENT_ERROR, {**self._event_base(), "code": new_err,
+                                                   "error": ERROR_CODES.get(new_err, f"Code({new_err})"),
+                                                   "current_room": self.current_room})
+
+    def _note_latest_record(self) -> None:
+        recs = (self.settings.get("records") or {}).get("record_list") or []
+        if recs:
+            self._last_record_ts = max(r.get("timestamp", 0) for r in recs)
+
+    async def _fetch_new_record(self) -> dict | None:
+        """The clean record the robot just wrote, if it is newer than any seen."""
+        try:
+            raw = await self.hass.async_add_executor_job(self.client.get_clean_records)
+        except Exception as exc:
+            _LOGGER.debug("Records fetch after clean failed: %s", exc)
+            return None
+        self.settings["records"] = raw
+        recs = raw.get("record_list") or []
+        if not recs:
+            return None
+        newest = max(recs, key=lambda r: r.get("timestamp", 0))
+        ts = newest.get("timestamp", 0)
+        if self._last_record_ts is not None and ts <= self._last_record_ts:
+            return None
+        self._last_record_ts = ts
+        return decode_clean_record(newest)
 
     async def _fetch_capabilities(self) -> None:
         """Component list and which optional settings answer: read once."""
@@ -176,6 +230,8 @@ class TapoCoordinator(DataUpdateCoordinator):
     async def _refresh_settings(self) -> None:
         self.settings = await self.hass.async_add_executor_job(self.client.get_settings)
         self._decode_schedules()
+        if self._last_record_ts is None:
+            self._note_latest_record()
         if self.bool_settings_supported:
             self.bool_settings = await self.hass.async_add_executor_job(
                 self.client.get_bool_settings, self.bool_settings_supported)

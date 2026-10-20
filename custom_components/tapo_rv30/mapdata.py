@@ -140,6 +140,20 @@ def dnd_active(dnd: dict | None, now_minutes: int) -> bool:
     return now_minutes >= start or now_minutes < end
 
 
+def clean_transition(prev_code, new_code, cleaning: set, paused: set) -> str | None:
+    """'started' when a clean begins, 'finished' when a running or paused clean
+    ends (stopped, docked, idle), else None. Pause/resume is not a transition."""
+    if prev_code is None or new_code is None or prev_code == new_code:
+        return None
+    prev_active = prev_code in cleaning or prev_code in paused
+    new_active = new_code in cleaning or new_code in paused
+    if not prev_active and new_code in cleaning:
+        return "started"
+    if prev_active and not new_active:
+        return "finished"
+    return None
+
+
 def decode_clean_record(rec: dict) -> dict:
     """One getCleanRecords entry, readable."""
     return {

@@ -147,3 +147,8 @@ VIRTUAL_WALL_COLOR = (200, 30, 30)
 CARPET_COLOR       = (205, 205, 205)
 ZONE_OUTLINE       = (40, 110, 220)       # saved clean zone
 FURNITURE_OUTLINE  = (120, 120, 120)
+
+EVENT_CLEAN_STARTED  = "tapo_rv30_clean_started"
+EVENT_CLEAN_FINISHED = "tapo_rv30_clean_finished"
+EVENT_ERROR          = "tapo_rv30_error"
+CONSUMABLE_WARN_FRACTION = 0.10   # "replace soon" below this fraction of life left

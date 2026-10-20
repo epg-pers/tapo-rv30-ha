@@ -26,7 +26,10 @@ through python-kasa.
 - Fan speed selection (Quiet / Standard / Turbo / Max / Ultra)
 - Water level select (Off / Low / Medium / High)
 - Clean passes select (1 / 2 / 3)
-- Battery, charging, clean progress, mop attached and do-not-disturb-active sensors
+- Battery, charging, clean progress, mop attached, do-not-disturb-active and problem sensors
+- "Replace soon" sensors per consumable and lifetime totals (cleans, area, hours) for statistics
+- Events on clean start / finish / error for automations
+- Map as both a camera and an image entity (instant updates in the frontend)
 - Poll interval setting (10 to 300 s), reconfigure and reauth from the integration page
 - Error state sensor (e.g. "Ok", "Dust Bin Removed", "Trapped")
 - Consumable wear sensors (main brush, side brush, filter, sensor, charge contacts)
@@ -94,11 +97,26 @@ automatic firmware updates in the Tapo app. Thanks to @jan-tdy for documenting t
 
 ## Dashboard
 
-See [`jarvis_dashboard.yaml`](jarvis_dashboard.yaml) for a complete Lovelace dashboard.
+![Example dashboard](docs/dashboard.png)
 
-Requires HACS frontend cards:
-- [Mushroom](https://github.com/piitaya/lovelace-mushroom)
-- [Xiaomi Vacuum Map Card](https://github.com/PiotrMachowski/lovelace-xiaomi-vacuum-map-card)
+*Mock-up of the example dashboard with a made-up house, rendered through the integration's map code.*
+
+[`examples/dashboard.yaml`](examples/dashboard.yaml) is a ready-made view: controls, status
+chips, the live map, preset buttons, one-tap room cleaning, settings and maintenance.
+Replace `robot` in the entity ids with your vacuum's name. The chip rows use
+[Mushroom](https://github.com/piitaya/lovelace-mushroom) from HACS; everything else is stock.
+
+[`examples/automations.yaml`](examples/automations.yaml) shows notifications from the
+`tapo_rv30_clean_finished` / `tapo_rv30_error` events and a local weekday schedule that
+runs a preset, replacing the Tapo cloud automation.
+
+## Events
+
+| Event | When | Data |
+|---|---|---|
+| `tapo_rv30_clean_started` | a clean begins | `device`, `status_code`, `current_room` |
+| `tapo_rv30_clean_finished` | a running or paused clean ends (stopped, docking) | `device`, `status_code`, `record` (area, minutes, bin emptied, preset name) when the robot logged one |
+| `tapo_rv30_error` | the robot reports a new error | `device`, `code`, `error`, `current_room` |
 
 ## Standalone CLI
 

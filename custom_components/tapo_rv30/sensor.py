@@ -98,6 +98,24 @@ _SCHEDULES_SENSOR = TapoSensorDescription(
 )
 
 
+_TOTAL_RUNS = TapoSensorDescription(
+    key="total_runs", name="Total Cleans", icon="mdi:counter",
+    state_class=SensorStateClass.TOTAL_INCREASING,
+    value_fn=lambda d: _records(d).get("total_number"),
+)
+_TOTAL_AREA = TapoSensorDescription(
+    key="total_area", name="Total Area Cleaned", icon="mdi:texture-box",
+    state_class=SensorStateClass.TOTAL_INCREASING, value_fn=lambda d: _records(d).get("total_area"),
+    unit_fn=_area_unit,
+)
+_TOTAL_TIME = TapoSensorDescription(
+    key="total_time", name="Total Cleaning Time", icon="mdi:timer-outline",
+    native_unit_of_measurement=UnitOfTime.HOURS, device_class=SensorDeviceClass.DURATION,
+    state_class=SensorStateClass.TOTAL_INCREASING,
+    value_fn=lambda d: (None if _records(d).get("total_time") is None else round(_records(d)["total_time"] / 60, 2)),
+)
+
+
 _STATUS_SENSOR = TapoSensorDescription(
     key="status",
     name="Status",
@@ -168,6 +186,9 @@ async def async_setup_entry(
         TapoStatusSensor(coordinator, entry, _AREA_SENSOR),
         TapoStatusSensor(coordinator, entry, _PROGRESS_SENSOR),
         TapoStatusSensor(coordinator, entry, _LAST_CLEAN_SENSOR),
+        TapoStatusSensor(coordinator, entry, _TOTAL_RUNS),
+        TapoStatusSensor(coordinator, entry, _TOTAL_AREA),
+        TapoStatusSensor(coordinator, entry, _TOTAL_TIME),
         TapoStatusSensor(coordinator, entry, _CURRENT_ROOM_SENSOR),
         TapoStatusSensor(coordinator, entry, _SCHEDULES_SENSOR),
         TapoStatusSensor(coordinator, entry, _used_h("main_brush_lid_time")),

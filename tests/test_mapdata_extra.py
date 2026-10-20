@@ -55,3 +55,17 @@ def test_decode_clean_record():
     assert d == {"started": 1791479539, "minutes": 57, "area": 64, "emptied_bin": True, "error": 0,
                  "map_id": 5, "start_type": 5, "rule_name": "Daytime Vacuum"}
     assert decode_clean_record({})["rule_name"] is None
+
+
+def test_clean_transition():
+    from custom_components.tapo_rv30.mapdata import clean_transition
+    C, P = {1, 2, 3}, {7}
+    assert clean_transition(5, 1, C, P) == "started"      # docked -> cleaning
+    assert clean_transition(0, 1, C, P) == "started"
+    assert clean_transition(1, 7, C, P) is None           # pause
+    assert clean_transition(7, 1, C, P) is None           # resume
+    assert clean_transition(1, 4, C, P) == "finished"     # cleaning -> returning
+    assert clean_transition(7, 0, C, P) == "finished"     # paused -> stopped
+    assert clean_transition(1, 1, C, P) is None
+    assert clean_transition(None, 1, C, P) is None
+    assert clean_transition(5, 6, C, P) is None           # charging -> charged

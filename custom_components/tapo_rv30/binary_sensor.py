@@ -3,11 +3,12 @@ from __future__ import annotations
 
 from homeassistant.components.binary_sensor import BinarySensorDeviceClass, BinarySensorEntity
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.util import dt as dt_util
 
-from .const import DOMAIN
+from .const import CONSUMABLE_LABELS, CONSUMABLE_LIMITS_H, CONSUMABLE_WARN_FRACTION, DOMAIN, ERROR_CODES
 from .entity import TapoEntity
 from .mapdata import dnd_active
 
@@ -15,7 +16,9 @@ from .mapdata import dnd_active
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry,
                             async_add_entities: AddEntitiesCallback) -> None:
     c = hass.data[DOMAIN][entry.entry_id]
-    entities = [TapoCharging(c, entry, "charging", "Charging")]
+    entities = [TapoCharging(c, entry, "charging", "Charging"),
+                TapoProblem(c, entry, "problem", "Problem")]
+    entities += [TapoConsumableWarn(c, entry, key, label) for key, label in CONSUMABLE_LABELS.items()]
     if c.has("mop"):
         entities.append(TapoMopAttached(c, entry, "mop_attached", "Mop Attached"))
     if "dnd" in c.settings:
@@ -53,3 +56,40 @@ class TapoDndActive(TapoEntity, BinarySensorEntity):
             return None
         now = dt_util.now()
         return dnd_active(dnd, now.hour * 60 + now.minute)
+
+
+class TapoProblem(TapoEntity, BinarySensorEntity):
+    """On while the robot reports an error (dust bin removed, trapped, ...)."""
+    _attr_device_class = BinarySensorDeviceClass.PROBLEM
+
+    def _code(self) -> int:
+        d = self.coordinator.data or {}
+        return (d.get("error_codes") or [0])[0]
+
+    @property
+    def is_on(self) -> bool | None:
+        return None if self.coordinator.data is None else self._code() != 0
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        code = self._code()
+        return {"code": code, "error": ERROR_CODES.get(code, f"Code({code})") if code else None}
+
+
+class TapoConsumableWarn(TapoEntity, BinarySensorEntity):
+    """On when a consumable has less than 10% of its service life left."""
+    _attr_device_class = BinarySensorDeviceClass.PROBLEM
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_icon = "mdi:wrench-clock"
+
+    def __init__(self, coordinator, entry, ckey: str, label: str) -> None:
+        super().__init__(coordinator, entry, f"replace_{ckey}", f"Replace {label}")
+        self._ckey = ckey
+        self._limit = CONSUMABLE_LIMITS_H[ckey]
+
+    @property
+    def is_on(self) -> bool | None:
+        raw = ((self.coordinator.data or {}).get("consumables") or {}).get(self._ckey)
+        if raw is None:
+            return None
+        return (self._limit - raw / 60) <= self._limit * CONSUMABLE_WARN_FRACTION

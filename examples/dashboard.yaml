@@ -1,0 +1,100 @@
+# Example dashboard for the Tapo RV30 integration.
+# Replace "robot" in every entity id with your vacuum's name (Settings > Devices & services
+# > the vacuum shows them). Needs the Mushroom cards from HACS for the chip rows; the rest
+# is stock Home Assistant.
+title: Vacuum
+views:
+  - title: Vacuum
+    path: vacuum
+    cards:
+      - type: vertical-stack
+        cards:
+          - type: custom:mushroom-vacuum-card
+            entity: vacuum.robot
+            commands: [start_pause, stop, locate, return_home]
+            fill_container: true
+          - type: custom:mushroom-chips-card
+            alignment: center
+            chips:
+              - type: entity
+                entity: sensor.robot_battery
+              - type: entity
+                entity: sensor.robot_status
+              - type: entity
+                entity: sensor.robot_current_room
+                icon: mdi:floor-plan
+              - type: entity
+                entity: binary_sensor.robot_problem
+      # Live map with the robot marker; the image entity updates the moment the map changes.
+      - type: picture-entity
+        entity: image.robot_map_image
+        show_name: false
+        show_state: false
+      # One button per preset saved in the Tapo app; they appear automatically.
+      - type: grid
+        columns: 2
+        square: false
+        cards:
+          - type: button
+            entity: button.robot_preset_daytime_vacuum
+            name: Daytime
+            icon: mdi:play-box-multiple
+          - type: button
+            entity: button.robot_preset_mop
+            name: Mop
+            icon: mdi:water
+      # Clean a single room on tap.
+      - type: grid
+        columns: 4
+        square: false
+        cards:
+          - type: button
+            name: Kitchen
+            icon: mdi:silverware-fork-knife
+            tap_action:
+              action: perform-action
+              perform_action: tapo_rv30.clean_rooms
+              target: { entity_id: vacuum.robot }
+              data: { rooms: [Kitchen] }
+          - type: button
+            name: Lounge
+            icon: mdi:sofa
+            tap_action:
+              action: perform-action
+              perform_action: tapo_rv30.clean_rooms
+              target: { entity_id: vacuum.robot }
+              data: { rooms: [Lounge] }
+          - type: button
+            name: Hall
+            icon: mdi:door
+            tap_action:
+              action: perform-action
+              perform_action: tapo_rv30.clean_rooms
+              target: { entity_id: vacuum.robot }
+              data: { rooms: [Hall] }
+          - type: button
+            name: Bedroom
+            icon: mdi:bed
+            tap_action:
+              action: perform-action
+              perform_action: tapo_rv30.clean_rooms
+              target: { entity_id: vacuum.robot }
+              data: { rooms: [Bedroom] }
+      - type: entities
+        title: Settings
+        entities:
+          - select.robot_water_level
+          - select.robot_clean_passes
+          - switch.robot_auto_empty
+          - switch.robot_do_not_disturb
+          - switch.robot_carpet_boost
+          - number.robot_volume
+      - type: entities
+        title: Maintenance
+        entities:
+          - sensor.robot_main_brush_remaining
+          - sensor.robot_side_brush_remaining
+          - sensor.robot_filter_remaining
+          - sensor.robot_total_cleans
+          - sensor.robot_total_area_cleaned
+          - button.robot_empty_bin

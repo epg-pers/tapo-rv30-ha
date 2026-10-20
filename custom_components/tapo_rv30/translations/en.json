@@ -36,5 +36,123 @@
       "reconfigure_successful": "Connection settings updated",
       "reauth_successful": "Re-authentication successful"
     }
+  },
+  "services": {
+    "clean_rooms": {
+      "name": "Clean specific rooms",
+      "description": "Send the vacuum to clean one or more named rooms.",
+      "fields": {
+        "rooms": {
+          "name": "Rooms",
+          "description": "List of room names to clean (partial match, case-insensitive)."
+        },
+        "map": {
+          "name": "Map",
+          "description": "Optional map name to search in (e.g. \"Downstairs\"). Defaults to current map."
+        }
+      }
+    },
+    "set_room_settings": {
+      "name": "Set room settings",
+      "description": "Per-room suction / water / passes (what the app calls custom cleaning settings).",
+      "fields": {
+        "rooms": {
+          "name": "Rooms",
+          "description": "Rooms"
+        },
+        "suction": {
+          "name": "Suction",
+          "description": "Suction"
+        },
+        "water": {
+          "name": "Water",
+          "description": "Water"
+        },
+        "passes": {
+          "name": "Passes",
+          "description": "Passes"
+        },
+        "map": {
+          "name": "Map",
+          "description": "Map"
+        }
+      }
+    },
+    "clean_zone": {
+      "name": "Clean zones",
+      "description": "Clean rectangles given as [x1, y1, x2, y2] in the map's real coordinates (mm, same frame as the vacuum's position_mm attribute). Starts the robot.",
+      "fields": {
+        "zones": {
+          "name": "Zones",
+          "description": "Zones"
+        },
+        "suction": {
+          "name": "Suction",
+          "description": "Suction"
+        },
+        "water": {
+          "name": "Water",
+          "description": "Water"
+        },
+        "passes": {
+          "name": "Passes",
+          "description": "Passes"
+        }
+      }
+    },
+    "run_schedule": {
+      "name": "Run a saved schedule now",
+      "description": "Start the clean a Tapo-app schedule would start, right now. The vacuum has no \"run schedule\" call, so this replays the schedule's rooms / preset, suction, water and passes. Get the id from the Schedules sensor's attributes.",
+      "fields": {
+        "schedule_id": {
+          "name": "Schedule ID",
+          "description": "Schedule ID"
+        }
+      }
+    },
+    "send_raw": {
+      "name": "Send raw command",
+      "description": "Send any device method (e.g. getCleanAttr) with optional params and return the response. For diagnostics and experimenting; writes can change settings.",
+      "fields": {
+        "method": {
+          "name": "Method",
+          "description": "Method"
+        },
+        "params": {
+          "name": "Params",
+          "description": "Params"
+        }
+      }
+    },
+    "get_clean_records": {
+      "name": "Get cleaning history",
+      "description": "Return the vacuum's cleaning history (newest first) plus lifetime totals. Use with \"Return response\" in Developer Tools or response_variable in scripts.",
+      "fields": {
+        "limit": {
+          "name": "Limit",
+          "description": "Only return this many most recent runs."
+        }
+      }
+    },
+    "run_preset": {
+      "name": "Run a preset",
+      "description": "Start a cleaning preset saved in the Tapo app (the robot's own \"customisation rules\"), exactly as the app would. Switches map first if the preset is on another map.",
+      "fields": {
+        "preset": {
+          "name": "Preset",
+          "description": "Preset name (partial, accent-insensitive) or id. See the preset buttons."
+        }
+      }
+    },
+    "set_map": {
+      "name": "Switch map",
+      "description": "Make another saved map the active one (multi-floor homes). The robot relocalises.",
+      "fields": {
+        "map": {
+          "name": "Map",
+          "description": "Map name (partial, accent-insensitive) or id."
+        }
+      }
+    }
   }
 }

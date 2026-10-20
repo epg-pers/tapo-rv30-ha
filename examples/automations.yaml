@@ -1,0 +1,41 @@
+# Example automations using the integration's events and entities.
+
+# Notify when a clean finishes, with the run's numbers.
+- alias: Vacuum finished
+  trigger:
+    - platform: event
+      event_type: tapo_rv30_clean_finished
+  action:
+    - action: notify.mobile_app_phone
+      data:
+        title: "{{ trigger.event.data.device }} finished"
+        message: >-
+          {% set r = trigger.event.data.record %}
+          {% if r %}{{ r.area }} m² in {{ r.minutes }} min{% if r.rule_name %} ({{ r.rule_name }}){% endif %}{% else %}Clean ended{% endif %}
+
+# Notify on a problem (dust bin removed, trapped, ...).
+- alias: Vacuum problem
+  trigger:
+    - platform: event
+      event_type: tapo_rv30_error
+  action:
+    - action: notify.mobile_app_phone
+      data:
+        title: "{{ trigger.event.data.device }} needs help"
+        message: "{{ trigger.event.data.error }} in {{ trigger.event.data.current_room or 'unknown room' }}"
+
+# Replace the Tapo app's cloud schedule with a local one: run a preset at 09:00 on weekdays.
+- alias: Weekday clean
+  trigger:
+    - platform: time
+      at: "09:00:00"
+  condition:
+    - condition: time
+      weekday: [mon, tue, wed, thu, fri]
+    - condition: state
+      entity_id: vacuum.robot
+      state: docked
+  action:
+    - action: tapo_rv30.run_preset
+      target: { entity_id: vacuum.robot }
+      data: { preset: "Daytime Vacuum" }

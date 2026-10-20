@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.9.0
+
+### New
+
+- **Events**: `tapo_rv30_clean_started`, `tapo_rv30_clean_finished` (with the robot's record of the run: area, minutes, bin emptied, preset name) and `tapo_rv30_error`, for notifications and automations. See `examples/automations.yaml`.
+- **Problem** binary sensor (on while the robot reports an error, with code and text as attributes) and **Replace <consumable>** sensors that turn on below 10% of service life.
+- **Total Cleans**, **Total Area Cleaned** and **Total Cleaning Time** sensors (`total_increasing`, so long-term statistics work).
+- **Map Image** entity alongside the camera; the frontend updates it the moment the map changes.
+- A generic example dashboard (`examples/dashboard.yaml`) with a mock-up screenshot, and example automations.
+
+### Changed
+
+- Service names and descriptions moved to `strings.json` (Home Assistant's translation format); `services.yaml` keeps the selectors.
+- `jarvis_dashboard.yaml` (the author's personal dashboard) is superseded by the example and removed.
+
 ## v0.8.1
 
 - Integration icon. Home Assistant 2026.3+ serves it straight from `custom_components/tapo_rv30/brand/`, so it shows on the Integrations page and in HACS without a `home-assistant/brands` submission.
