@@ -19,7 +19,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry,
 
 
 class TapoVolume(TapoEntity, NumberEntity):
-    # ponytail: 0-100 assumed (robot reported 15); the robot rejects anything out of range.
+    # Range 0-100 assumed (robot reported 15); the robot rejects anything out of range.
     _attr_icon = "mdi:volume-high"
     _attr_entity_category = EntityCategory.CONFIG
     _attr_native_min_value = 0

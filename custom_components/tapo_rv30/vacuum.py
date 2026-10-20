@@ -7,6 +7,7 @@ from typing import Any
 
 from homeassistant.components.vacuum import (
     StateVacuumEntity,
+    VacuumActivity,
     VacuumEntityFeature,
 )
 from homeassistant.config_entries import ConfigEntry
@@ -32,7 +33,6 @@ _FEATURES = (
     | VacuumEntityFeature.STOP
     | VacuumEntityFeature.RETURN_HOME
     | VacuumEntityFeature.FAN_SPEED
-    | VacuumEntityFeature.BATTERY
     | VacuumEntityFeature.STATE
     | VacuumEntityFeature.MAP
     | VacuumEntityFeature.LOCATE
@@ -70,16 +70,11 @@ class TapoVacuumEntity(CoordinatorEntity[TapoCoordinator], StateVacuumEntity):
         }
 
     @property
-    def state(self) -> str | None:
+    def activity(self) -> VacuumActivity | None:
         d = self.coordinator.data
         if d is None:
             return None
-        return VACUUM_STATES.get(d.get("status_code", 0), "idle")
-
-    @property
-    def battery_level(self) -> int | None:
-        d = self.coordinator.data
-        return d.get("battery") if d else None
+        return VacuumActivity(VACUUM_STATES.get(d.get("status_code", 0), "idle"))
 
     @property
     def fan_speed(self) -> str | None:
