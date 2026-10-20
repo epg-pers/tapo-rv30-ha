@@ -1,7 +1,6 @@
 """Vacuum entity for Tapo RV30."""
 from __future__ import annotations
 
-import asyncio
 import logging
 from typing import Any
 
@@ -99,37 +98,28 @@ class TapoVacuumEntity(CoordinatorEntity[TapoCoordinator], StateVacuumEntity):
             "integration":   DOMAIN,
         }
 
-    def _refresh_soon(self) -> None:
-        """The robot takes a few s to change status after a command and the poll is 30 s,
-        so re-poll shortly after — otherwise every UI shows the old state for up to 30 s."""
-        async def _poll() -> None:
-            for delay in (2, 3, 5):  # t = 2, 5, 10 s
-                await asyncio.sleep(delay)
-                await self.coordinator.async_refresh()
-        self.hass.async_create_task(_poll())
-
     async def async_start(self) -> None:
         await self.hass.async_add_executor_job(self.coordinator.client.start)
-        self._refresh_soon()
+        await self.coordinator.async_refresh_soon()
 
     async def async_pause(self) -> None:
         await self.hass.async_add_executor_job(self.coordinator.client.pause)
-        self._refresh_soon()
+        await self.coordinator.async_refresh_soon()
 
     async def async_stop(self, **kwargs: Any) -> None:
         await self.hass.async_add_executor_job(self.coordinator.client.stop)
-        self._refresh_soon()
+        await self.coordinator.async_refresh_soon()
 
     async def async_clean_spot(self, **kwargs: Any) -> None:
         await self.hass.async_add_executor_job(self.coordinator.client.clean_spot)
-        self._refresh_soon()
+        await self.coordinator.async_refresh_soon()
 
     async def async_locate(self, **kwargs: Any) -> None:
         await self.hass.async_add_executor_job(self.coordinator.client.locate)
 
     async def async_return_to_base(self, **kwargs: Any) -> None:
         await self.hass.async_add_executor_job(self.coordinator.client.dock)
-        self._refresh_soon()
+        await self.coordinator.async_refresh_soon()
 
     async def async_set_fan_speed(self, fan_speed: str, **kwargs: Any) -> None:
         value = FAN_NAME_TO_INT.get(fan_speed.lower())
@@ -137,4 +127,4 @@ class TapoVacuumEntity(CoordinatorEntity[TapoCoordinator], StateVacuumEntity):
             _LOGGER.error("Unknown fan speed: %s", fan_speed)
             return
         await self.hass.async_add_executor_job(self.coordinator.client.set_fan_speed, value)
-        self._refresh_soon()
+        await self.coordinator.async_refresh_soon()

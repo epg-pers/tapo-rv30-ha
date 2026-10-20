@@ -6,6 +6,7 @@ import logging
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_HOST, CONF_PASSWORD, CONF_USERNAME, Platform
 from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 
 from .const import DEFAULT_PORT, DOMAIN, FAN_NAME_TO_INT, WATER_NAME_TO_INT
 from .coordinator import TapoCoordinator
@@ -29,70 +30,64 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
+    def _rooms_list(call: ServiceCall) -> list[str]:
+        """'rooms' as a list. Templates give a bare string when one room is picked,
+        and iterating a string would yield single characters."""
+        raw = call.data.get("rooms", [])
+        rooms = [raw] if isinstance(raw, str) else list(raw)
+        if not rooms:
+            raise ServiceValidationError(f"{call.service}: 'rooms' is required")
+        return rooms
+
+    async def _resolve(call: ServiceCall) -> tuple[list[int], int]:
+        """Resolve rooms/map from the call, raising a user-facing error on failure."""
+        try:
+            return await hass.async_add_executor_job(
+                coordinator.resolve_rooms_live, _rooms_list(call), call.data.get("map")
+            )
+        except ValueError as exc:          # MapNotFound / RoomNotFound
+            raise ServiceValidationError(f"{call.service}: {exc}") from exc
+        except Exception as exc:
+            raise HomeAssistantError(
+                f"{call.service}: could not read maps from the vacuum: {exc}"
+            ) from exc
+
+    async def _send(call: ServiceCall, fn, *args) -> None:
+        """Run a client write, surfacing device errors to the caller."""
+        try:
+            await hass.async_add_executor_job(fn, *args)
+        except Exception as exc:
+            raise HomeAssistantError(f"{call.service}: vacuum rejected the command: {exc}") from exc
+
     async def handle_clean_rooms(call: ServiceCall) -> None:
         """Service: tapo_rv30.clean_rooms."""
-        entity_ids: list[str] = call.data.get("entity_id", [])
-        rooms_raw = call.data.get("rooms", [])
-        map_name: str | None = call.data.get("map")
-
-        # Normalise rooms to a list — HA templates can produce a string when only
-        # one room is selected, and iterating a string gives individual characters.
-        if isinstance(rooms_raw, str):
-            rooms: list[str] = [rooms_raw]
-        else:
-            rooms = list(rooms_raw)
-
-        if not rooms:
-            _LOGGER.error("clean_rooms: 'rooms' field is required")
-            return
-
-        # Find the coordinator for the target entity
-        coord: TapoCoordinator | None = None
-        for eid in entity_ids:
-            state = hass.states.get(eid)
-            if state and state.attributes.get("integration") == DOMAIN:
-                coord = coordinator
-                break
-        if coord is None:
-            coord = coordinator   # fallback to first/only
-
-        try:
-            # Fetch rooms live from the device so we always use the correct map_id
-            # and support the optional map_name filter.
-            room_ids, map_id = await hass.async_add_executor_job(
-                coord.resolve_rooms_live, rooms, map_name
-            )
-            await hass.async_add_executor_job(coord.client.clean_rooms, room_ids, map_id)
-            # Trigger a map refresh so the in-progress path shows promptly
-            await coordinator.async_request_refresh()
-        except ValueError as exc:
-            _LOGGER.error("clean_rooms: %s", exc)
+        room_ids, map_id = await _resolve(call)
+        await _send(call, coordinator.client.clean_rooms, room_ids, map_id)
+        await coordinator.async_refresh_soon()
 
     hass.services.async_register(DOMAIN, "clean_rooms", handle_clean_rooms)
 
     def _levels(call: ServiceCall) -> dict:
         out = {}
-        if "suction" in call.data:
-            out["suction"] = FAN_NAME_TO_INT[call.data["suction"].lower()]
-        if "water" in call.data:
-            out["cistern"] = WATER_NAME_TO_INT[call.data["water"].lower()]
-        if "passes" in call.data:
-            out["clean_number"] = int(call.data["passes"])
+        try:
+            if "suction" in call.data:
+                out["suction"] = FAN_NAME_TO_INT[str(call.data["suction"]).strip().lower()]
+            if "water" in call.data:
+                out["cistern"] = WATER_NAME_TO_INT[str(call.data["water"]).strip().lower()]
+            if "passes" in call.data:
+                out["clean_number"] = int(call.data["passes"])
+        except (KeyError, ValueError) as exc:
+            raise ServiceValidationError(
+                f"{call.service}: invalid value {exc}. suction: {list(FAN_NAME_TO_INT)}, "
+                f"water: {list(WATER_NAME_TO_INT)}, passes: 1-3"
+            ) from exc
         return out
 
     async def handle_set_room_settings(call: ServiceCall) -> None:
         """Service: tapo_rv30.set_room_settings."""
-        rooms = call.data["rooms"]
-        rooms = [rooms] if isinstance(rooms, str) else list(rooms)
-        try:
-            room_ids, map_id = await hass.async_add_executor_job(
-                coordinator.resolve_rooms_live, rooms, call.data.get("map"))
-        except ValueError as exc:
-            _LOGGER.error("set_room_settings: %s", exc)
-            return
+        room_ids, map_id = await _resolve(call)
         lv = _levels(call)
-        await hass.async_add_executor_job(
-            coordinator.client.set_room_settings, map_id, {rid: lv for rid in room_ids})
+        await _send(call, coordinator.client.set_room_settings, map_id, {rid: lv for rid in room_ids})
         await coordinator.async_request_refresh()
 
     async def handle_clean_zone(call: ServiceCall) -> None:
@@ -100,11 +95,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         g = coordinator.data or {}
         lv = {"suction": g.get("suction", 3), "cistern": g.get("cistern", 0),
               "clean_number": 1, **_levels(call)}
-        map_id, _ = await hass.async_add_executor_job(coordinator.client.get_map_info)
-        await hass.async_add_executor_job(
-            coordinator.client.clean_zones, map_id, call.data["zones"],
-            lv["suction"], lv["cistern"], lv["clean_number"])
-        await coordinator.async_request_refresh()
+        try:
+            map_id, _ = await hass.async_add_executor_job(coordinator.client.get_map_info)
+        except Exception as exc:
+            raise HomeAssistantError(f"{call.service}: could not read maps from the vacuum: {exc}") from exc
+        await _send(call, coordinator.client.clean_zones, map_id, call.data["zones"],
+                    lv["suction"], lv["cistern"], lv["clean_number"])
+        await coordinator.async_refresh_soon()
 
     hass.services.async_register(DOMAIN, "set_room_settings", handle_set_room_settings)
     hass.services.async_register(DOMAIN, "clean_zone", handle_clean_zone)

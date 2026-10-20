@@ -1,6 +1,7 @@
 """DataUpdateCoordinator for Tapo RV30."""
 from __future__ import annotations
 
+import asyncio
 import base64
 import logging
 from datetime import timedelta
@@ -22,6 +23,15 @@ from .const import (
 from .tpap import TapoVacuumClient
 
 _LOGGER = logging.getLogger(__name__)
+
+
+class MapNotFound(ValueError):
+    """The requested map could not be resolved on the vacuum."""
+
+
+class RoomNotFound(ValueError):
+    """A requested room could not be resolved on the chosen map."""
+
 
 MAP_SCALE = 4   # px per vacuum grid cell → ~700×700 output image
 
@@ -69,6 +79,18 @@ def _b64name(s: str) -> str:
         return base64.b64decode(s).decode(errors="replace").strip()
     except Exception:
         return s
+
+
+def _norm(value: Any) -> str:
+    """Normalise a user-supplied map/room name.
+
+    Templates and scripts often leave surrounding whitespace or a stray pair of
+    quotes around the value; strip both so they still match.
+    """
+    text = str(value).strip()
+    if len(text) >= 2 and text[0] == text[-1] and text[0] in "\"'":
+        text = text[1:-1].strip()
+    return text
 
 
 def _render_map_image(map_data: dict) -> bytes:
@@ -234,40 +256,75 @@ class TapoCoordinator(DataUpdateCoordinator):
         _LOGGER.debug("Map rendered: %d bytes, %d rooms",
                       len(self.map_image_bytes), len(self.rooms))
 
+    async def async_refresh_soon(self) -> None:
+        """Re-poll at 2, 5 and 10 s after a command.
+
+        The robot takes a few seconds to report its new status and the normal poll
+        is 30 s, so without this every UI shows the old state for up to 30 s.
+        """
+        async def _poll() -> None:
+            for delay in (2, 3, 5):
+                await asyncio.sleep(delay)
+                await self.async_refresh()
+        self.hass.async_create_task(_poll())
+
     def resolve_rooms_live(
         self, name_patterns: list[str], map_name: str | None = None
     ) -> tuple[list[int], int]:
-        """Fetch rooms live from device, resolve names → (room_ids, map_id).
+        """Fetch rooms live from device, resolve names -> (room_ids, map_id).
 
-        Uses map_name (partial match) if given, otherwise current map.
-        Raises ValueError if map or any room is not found.
+        Uses map_name (partial match) if given, otherwise current map. Names are
+        normalised with _norm() first. Raises MapNotFound / RoomNotFound (both
+        ValueError) with the available names in the message.
         """
         current_map_id, map_list = self.client.get_map_info()
+        map_names = {m["map_id"]: _b64name(m.get("map_name", "")) for m in map_list}
 
-        if map_name:
-            target_id = next(
-                (m["map_id"] for m in map_list
-                 if map_name.lower() in _b64name(m.get("map_name", "")).lower()),
-                None,
-            )
-            if target_id is None:
-                available = [_b64name(m.get("map_name", "")) for m in map_list]
-                raise ValueError(f"Map '{map_name}' not found. Available: {available}")
+        if map_name is not None:
+            wanted = _norm(map_name)
+            if not wanted:
+                raise MapNotFound(
+                    "'map' was given but is empty after trimming; omit it to use the "
+                    f"current map. Available maps: {sorted(map_names.values())}"
+                )
+            exact = [mid for mid, n in map_names.items() if n.lower() == wanted.lower()]
+            partial = [mid for mid, n in map_names.items() if wanted.lower() in n.lower()]
+            hits = exact or partial
+            if not hits:
+                raise MapNotFound(
+                    f"Map '{wanted}' not found on the vacuum. "
+                    f"Available maps: {sorted(map_names.values())}"
+                )
+            if len(hits) > 1:
+                raise MapNotFound(
+                    f"Map '{wanted}' is ambiguous, matches: "
+                    f"{sorted(map_names[m] for m in hits)}"
+                )
+            target_id = hits[0]
         else:
             target_id = current_map_id
 
         map_data = self.client.get_map_data(target_id)
         rooms = [a for a in map_data.get("area_list", []) if a.get("type") == "room"]
+        decoded = [_b64name(r.get("name", "")) for r in rooms]
+        target_name = map_names.get(target_id, str(target_id))
 
         matched: list[int] = []
         seen: set[int] = set()
-        for pat in name_patterns:
-            decoded = [_b64name(r.get("name", "")) for r in rooms]
+        for raw in name_patterns:
+            pat = _norm(raw)
+            if not pat:
+                raise RoomNotFound(
+                    f"Empty room name in 'rooms' on map '{target_name}'. "
+                    f"Available rooms: {decoded}"
+                )
             exact = [r for r, n in zip(rooms, decoded) if n.lower() == pat.lower()]
             hits = exact or [r for r, n in zip(rooms, decoded) if pat.lower() in n.lower()]
             if not hits:
-                available = [_b64name(r.get("name", "")) for r in rooms]
-                raise ValueError(f"No room matching '{pat}'. Available: {available}")
+                raise RoomNotFound(
+                    f"No room matching '{pat}' on map '{target_name}'. "
+                    f"Available rooms: {decoded}"
+                )
             for r in hits:
                 if r["id"] not in seen:
                     seen.add(r["id"]); matched.append(r["id"])
