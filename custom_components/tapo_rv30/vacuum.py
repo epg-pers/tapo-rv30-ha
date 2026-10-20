@@ -98,6 +98,7 @@ class TapoVacuumEntity(CoordinatorEntity[TapoCoordinator], StateVacuumEntity):
             "clean_percent": d.get("clean_percent", 0),
             "rooms":         rooms,
             "position_mm":   (self.coordinator.vac_pos or [None, None])[:2],
+            "current_room":  self.coordinator.current_room,
             "integration":   DOMAIN,
         }
 
@@ -130,7 +131,7 @@ class TapoVacuumEntity(CoordinatorEntity[TapoCoordinator], StateVacuumEntity):
         except Exception as exc:
             raise HomeAssistantError(f"Could not read maps from the vacuum: {exc}") from exc
         return [
-            Segment(id=f"{map_id}:{room_id}", name=room_name, group=map_name)
+            Segment(id=f"{map_id}:{room_id}", name=room_name or f"Room {room_id}", group=map_name)
             for map_id, map_name, rooms in maps
             for room_id, room_name in rooms
         ]

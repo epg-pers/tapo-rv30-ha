@@ -393,16 +393,59 @@ class TapoVacuumClient:
             "clean_order": True, "force_clean": False,
         })
 
-    def clean_rooms(self, room_ids: list[int], map_id: int) -> None:
+    def clean_rooms(self, room_ids: list[int], map_id: int, clean_order: bool = True) -> None:
         self.send("setSwitchClean", {
             "clean_mode":  3,
             "clean_on":    True,
-            "clean_order": True,
+            "clean_order": clean_order,
             "force_clean": False,
             "map_id":      map_id,
             "room_list":   list(room_ids),
             "start_type":  1,
         })
+
+    def clean_custom_rule(self, custom_rule_id, map_id: int, clean_order: bool = True) -> None:
+        """Run a Tapo-app cleaning preset. Schedules built from a preset carry
+        clean_mode 5 + custom_rule_id instead of a room_list; this sends the same
+        shape setSwitchClean. Inferred from schedule data, not confirmed by the app."""
+        self.send("setSwitchClean", {
+            "clean_mode": 5, "clean_on": True, "clean_order": clean_order,
+            "force_clean": False, "map_id": map_id,
+            "custom_rule_id": custom_rule_id, "start_type": 1,
+        })
+
+    def get_schedules(self) -> list[dict]:
+        """Saved schedule rules as configured in the Tapo app (get_schedule_rules)."""
+        r = self.send("get_schedule_rules", {"start_index": 0})
+        return (r.get("result") or {}).get("rule_list", [])
+
+    def run_schedule(self, schedule_id) -> None:
+        """Start the clean a saved schedule would start, now.
+
+        There is no known device call to fire a schedule by id, so this replays
+        its settings: suction / water / passes via setCleanAttr, then the rooms,
+        preset or whole house via setSwitchClean.
+        """
+        rule = next((r for r in self.get_schedules() if r.get("id") == schedule_id), None)
+        if rule is None:
+            raise ValueError(f"No schedule with id {schedule_id!r}")
+        attr = rule.get("clean_attr") or {}
+        cur = self.send("getCleanAttr", {"type": "global"})["result"]
+        for key in ("suction", "cistern", "clean_number"):
+            if attr.get(key) is not None:
+                cur[key] = attr[key]
+        cur["type"] = "global"
+        self.send("setCleanAttr", cur)
+        map_id = attr.get("map_id")
+        if map_id is None:
+            map_id, _ = self.get_map_info()
+        order = attr.get("clean_order", True)
+        if attr.get("custom_rule_id") is not None:
+            self.clean_custom_rule(attr["custom_rule_id"], map_id, order)
+        elif attr.get("room_list"):
+            self.clean_rooms(attr["room_list"], map_id, order)
+        else:
+            self.start()
 
     def pause(self) -> None:
         if self._status() == 4:
@@ -445,16 +488,17 @@ class TapoVacuumClient:
         self.send("setCleanAttr", cur)
 
     # ---- Settings & extras (names from the decompiled Tapo app, 2026-10-13) ----
-    _SETTINGS = (("dust", "getDustCollectionInfo"), ("dnd", "getDoNotDisturb"),
-                 ("volume", "getVolume"), ("child_lock", "getChildLockInfo"),
-                 ("carpet_boost", "getCarpetAutoBoost"), ("records", "getCleanRecords"))
+    _SETTINGS = (("dust", "getDustCollectionInfo", None), ("dnd", "getDoNotDisturb", None),
+                 ("volume", "getVolume", None), ("child_lock", "getChildLockInfo", None),
+                 ("carpet_boost", "getCarpetAutoBoost", None), ("records", "getCleanRecords", None),
+                 ("schedules", "get_schedule_rules", {"start_index": 0}))
 
     def get_settings(self) -> dict:
         """Slow-changing settings; a getter the model doesn't support is just left out."""
         out = {}
-        for key, method in self._SETTINGS:
+        for key, method, params in self._SETTINGS:
             try:
-                out[key] = self.send(method)["result"]
+                out[key] = self.send(method, params)["result"]
             except Exception as exc:
                 _LOGGER.debug("%s failed: %s", method, exc)
         return out

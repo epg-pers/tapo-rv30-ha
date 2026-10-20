@@ -74,6 +74,20 @@ _LAST_CLEAN_SENSOR = TapoSensorDescription(
 )
 
 
+_CURRENT_ROOM_SENSOR = TapoSensorDescription(
+    key="current_room", name="Current Room", icon="mdi:floor-plan",
+    # Inferred from the vacuum's map position; refreshed every poll.
+    value_fn=lambda d: d.get("current_room"),
+)
+
+_SCHEDULES_SENSOR = TapoSensorDescription(
+    key="schedules", name="Schedules", icon="mdi:calendar-clock",
+    # Count of schedules saved in the Tapo app; the decoded list is in the attributes.
+    value_fn=lambda d: len(d.get("schedules") or []),
+    attrs_fn=lambda d: {"schedules": d.get("schedules") or []},
+)
+
+
 _STATUS_SENSOR = TapoSensorDescription(
     key="status",
     name="Status",
@@ -143,6 +157,8 @@ async def async_setup_entry(
         TapoStatusSensor(coordinator, entry, _ERROR_SENSOR),
         TapoStatusSensor(coordinator, entry, _AREA_SENSOR),
         TapoStatusSensor(coordinator, entry, _LAST_CLEAN_SENSOR),
+        TapoStatusSensor(coordinator, entry, _CURRENT_ROOM_SENSOR),
+        TapoStatusSensor(coordinator, entry, _SCHEDULES_SENSOR),
         TapoStatusSensor(coordinator, entry, _used_h("main_brush_lid_time")),
         TapoStatusSensor(coordinator, entry, _used_h("rag_time")),
     ]

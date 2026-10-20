@@ -5,7 +5,7 @@ import logging
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_HOST, CONF_PASSWORD, CONF_USERNAME, Platform
-from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.core import HomeAssistant, ServiceCall, ServiceResponse, SupportsResponse
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 
 from .const import DEFAULT_PORT, DOMAIN, FAN_NAME_TO_INT, WATER_NAME_TO_INT
@@ -104,8 +104,42 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     lv["suction"], lv["cistern"], lv["clean_number"])
         await coordinator.async_refresh_soon()
 
+    async def handle_run_schedule(call: ServiceCall) -> None:
+        """Service: tapo_rv30.run_schedule (replays a saved schedule's settings)."""
+        sid = call.data.get("schedule_id")
+        if sid is None:
+            raise ServiceValidationError(f"{call.service}: 'schedule_id' is required")
+        try:
+            sid = int(sid)
+        except (TypeError, ValueError):
+            pass
+        try:
+            await hass.async_add_executor_job(coordinator.client.run_schedule, sid)
+        except ValueError as exc:
+            raise ServiceValidationError(f"{call.service}: {exc}") from exc
+        except Exception as exc:
+            raise HomeAssistantError(f"{call.service}: vacuum rejected the command: {exc}") from exc
+        await coordinator.async_refresh_soon()
+
+    async def handle_send_raw(call: ServiceCall) -> ServiceResponse:
+        """Service: tapo_rv30.send_raw -- any device method, returns the response."""
+        method = str(call.data.get("method", "")).strip()
+        if not method:
+            raise ServiceValidationError(f"{call.service}: 'method' is required")
+        params = call.data.get("params") or {}
+        if not isinstance(params, dict):
+            raise ServiceValidationError(f"{call.service}: 'params' must be a mapping")
+        try:
+            resp = await hass.async_add_executor_job(coordinator.client.send, method, params)
+        except Exception as exc:
+            raise HomeAssistantError(f"{call.service}: {method} failed: {exc}") from exc
+        return {"result": resp.get("result"), "error_code": resp.get("error_code", 0)}
+
     hass.services.async_register(DOMAIN, "set_room_settings", handle_set_room_settings)
     hass.services.async_register(DOMAIN, "clean_zone", handle_clean_zone)
+    hass.services.async_register(DOMAIN, "run_schedule", handle_run_schedule)
+    hass.services.async_register(DOMAIN, "send_raw", handle_send_raw,
+                                 supports_response=SupportsResponse.ONLY)
     return True
 
 
@@ -113,6 +147,6 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if ok:
         hass.data[DOMAIN].pop(entry.entry_id, None)
-        for svc in ("clean_rooms", "set_room_settings", "clean_zone"):
+        for svc in ("clean_rooms", "set_room_settings", "clean_zone", "run_schedule", "send_raw"):
             hass.services.async_remove(DOMAIN, svc)
     return ok

@@ -93,6 +93,54 @@ def _norm(value: Any) -> str:
     return text
 
 
+# Bit n of week_day = that weekday; bit 0 is Sunday (Tapo app convention).
+_WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
+
+
+def _decode_weekdays(mask: int) -> list[str]:
+    return [name for i, name in enumerate(_WEEKDAYS) if mask & (1 << i)]
+
+
+def _decode_schedule(rule: dict, room_names: dict[int, str]) -> dict:
+    """One get_schedule_rules entry as a readable summary (raw rule kept under 'raw')."""
+    attr = rule.get("clean_attr") or {}
+    room_ids = attr.get("room_list") or []
+    s_min = rule.get("s_min", 0)
+    return {
+        "id":            rule.get("id"),
+        "enabled":       rule.get("enable", False),
+        "time":          f"{s_min // 60:02d}:{s_min % 60:02d}",
+        "days":          _decode_weekdays(rule.get("week_day", 0)),
+        "repeat":        rule.get("mode") == "repeat",
+        "rooms":         [room_names.get(rid, f"Room {rid}") for rid in room_ids],
+        "room_ids":      room_ids,
+        "preset_id":     attr.get("custom_rule_id"),
+        "suction":       attr.get("suction"),
+        "water_level":   attr.get("cistern"),
+        "clean_passes":  attr.get("clean_number"),
+        "map_id":        attr.get("map_id"),
+        "raw":           rule,
+    }
+
+
+def _room_at_vac(map_data: dict) -> str | None:
+    """Name of the room the vacuum is in, from vac_coor against the room-id
+    pixel grid getMapData already carries. None off-map or on a non-room pixel."""
+    vac = map_data.get("vac_coor")
+    if not vac:
+        return None
+    width, height = map_data["width"], map_data["height"]
+    gx, gy = int(vac[0]), int(vac[1])
+    if not (0 <= gx < width and 0 <= gy < height):
+        return None
+    pixels = _lz4_block_decompress(base64.b64decode(map_data["map_data"]), map_data["pix_len"])
+    room_id = pixels[gy * width + gx]
+    for a in map_data.get("area_list", []):
+        if a.get("type") == "room" and a.get("id") == room_id:
+            return _b64name(a.get("name", ""))
+    return None
+
+
 def _render_map_image(map_data: dict) -> bytes:
     """Decode LZ4 pixel data and produce a JPEG image as bytes."""
     width   = map_data["width"]
@@ -200,7 +248,9 @@ class TapoCoordinator(DataUpdateCoordinator):
         self.device_name:  str = "Tapo RV30"
         self._name_fetched = False
         self.settings: dict = {}       # get_settings(), refreshed with the map
+        self.schedules: list[dict] = []
         self.vac_pos: list | None = None
+        self.current_room: str | None = None
 
     async def _async_update_data(self) -> dict[str, Any]:
         if not self._name_fetched:
@@ -225,7 +275,8 @@ class TapoCoordinator(DataUpdateCoordinator):
             _LOGGER.debug("Consumables fetch failed: %s", exc)
             data["consumables"] = {}
 
-        # Refresh map on first load and every MAP_INTERVAL seconds
+        # Refresh map on first load and every MAP_INTERVAL seconds; in between,
+        # re-read the map data (no re-render) so position and current room track.
         self._map_tick += 1
         if self.map_image_bytes is None or self._map_tick >= self._map_cycles:
             self._map_tick = 0
@@ -234,15 +285,36 @@ class TapoCoordinator(DataUpdateCoordinator):
             except Exception as exc:
                 _LOGGER.warning("Map refresh failed: %s", exc)
             self.settings = await self.hass.async_add_executor_job(self.client.get_settings)
+            self._decode_schedules()
+        elif self.map_id is not None:
+            try:
+                await self.hass.async_add_executor_job(self._refresh_position)
+            except Exception as exc:
+                _LOGGER.debug("Position refresh failed: %s", exc)
 
         data["settings"] = self.settings
+        data["schedules"] = self.schedules
+        data["current_room"] = self.current_room
+        data["position_mm"] = self.vac_pos
         return data
+
+    def _decode_schedules(self) -> None:
+        names = {r["id"]: _b64name(r.get("name", "")) for r in self.rooms}
+        rules = (self.settings.get("schedules") or {}).get("rule_list") or []
+        self.schedules = [_decode_schedule(r, names) for r in rules]
+
+    def _refresh_position(self) -> None:
+        map_data = self.client.get_map_data(self.map_id)
+        self.vac_pos = map_data.get("real_vac_coor")
+        self.current_room = _room_at_vac(map_data)
 
     async def async_settings_changed(self) -> None:
         """Re-read settings right after a write so switches don't wait for the slow cycle."""
         self.settings = await self.hass.async_add_executor_job(self.client.get_settings)
+        self._decode_schedules()
         if self.data is not None:
             self.data["settings"] = self.settings
+            self.data["schedules"] = self.schedules
         self.async_update_listeners()
 
     def _refresh_map(self) -> None:
@@ -250,6 +322,7 @@ class TapoCoordinator(DataUpdateCoordinator):
         map_data       = self.client.get_map_data(current_id)
         self.map_id    = current_id
         self.vac_pos   = map_data.get("real_vac_coor")
+        self.current_room = _room_at_vac(map_data)
         self.rooms     = [a for a in map_data.get("area_list", [])
                           if a.get("type") == "room"]
         self.map_image_bytes = _render_map_image(map_data)
