@@ -42,12 +42,11 @@ async def _register_resource(hass: HomeAssistant, url: str) -> None:
     Storage mode gets a proper resource entry; YAML mode gets the extra-JS hook."""
     lovelace = hass.data.get("lovelace")
     resources = getattr(lovelace, "resources", None)
-    mode = getattr(lovelace, "mode", None)
-    _LOGGER.warning("DEBUG lovelace=%r mode=%r resources=%r keys=%s", type(lovelace), mode, type(resources),
-                    [k for k in hass.data if "lovelace" in str(k).lower()])
+    # Storage mode has a writable collection (async_create_item); YAML mode's
+    # resource collection is read-only, so the extra-JS hook is used there.
     base = url.split("?", 1)[0]
     try:
-        if resources is not None and mode == "storage":
+        if resources is not None and hasattr(resources, "async_create_item"):
             if not getattr(resources, "loaded", True):
                 await resources.async_load()
             for item in resources.async_items():
