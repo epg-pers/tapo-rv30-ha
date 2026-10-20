@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any, Callable
 
 from homeassistant.components.sensor import (
@@ -22,7 +23,7 @@ from .const import (
     CONSUMABLE_LIMITS_H,
     DOMAIN,
     ERROR_CODES,
-    VACUUM_STATES,
+    STATUS_LABELS,
     WATER_INT_TO_NAME,
     FAN_INT_TO_NAME,
 )
@@ -34,13 +35,50 @@ _LOGGER = logging.getLogger(__name__)
 @dataclass(frozen=True)
 class TapoSensorDescription(SensorEntityDescription):
     value_fn: Callable[[dict], Any] = lambda d: None
+    attrs_fn: Callable[[dict], dict] | None = None
+
+
+def _used_h(field: str) -> TapoSensorDescription:
+    # App doesn't expose these parts' service intervals to us, so report hours used.
+    label = {"main_brush_lid_time": "Main Brush Lid", "rag_time": "Mop Cloth"}[field]
+    return TapoSensorDescription(
+        key=f"consumable_{field}_used", name=f"{label} Used", icon="mdi:wrench-clock",
+        native_unit_of_measurement=UnitOfTime.HOURS, state_class=SensorStateClass.MEASUREMENT,
+        value_fn=lambda d: (None if d.get("consumables", {}).get(field) is None
+                            else round(d["consumables"][field] / 60, 1)),
+    )
+
+
+def _records(d: dict) -> dict:
+    return d.get("settings", {}).get("records") or {}
+
+
+def _last_record(d: dict) -> dict:
+    return max(_records(d).get("record_list") or [{}], key=lambda r: r.get("timestamp", 0))
+
+
+_LAST_CLEAN_SENSOR = TapoSensorDescription(
+    key="last_clean", name="Last Clean", icon="mdi:history",
+    device_class=SensorDeviceClass.TIMESTAMP,
+    value_fn=lambda d: (datetime.fromtimestamp(_last_record(d)["timestamp"], tz=timezone.utc)
+                        if _last_record(d).get("timestamp") else None),
+    attrs_fn=lambda d: {
+        "area_m2": _last_record(d).get("clean_area"),
+        "minutes": _last_record(d).get("clean_time"),
+        "emptied_bin": _last_record(d).get("dust_collection"),
+        "ended_with_error": bool(_last_record(d).get("error")),
+        "total_runs": _records(d).get("total_number"),
+        "total_area_m2": _records(d).get("total_area"),
+        "total_hours": round((_records(d).get("total_time") or 0) / 60, 1),
+    },
+)
 
 
 _STATUS_SENSOR = TapoSensorDescription(
     key="status",
     name="Status",
     icon="mdi:robot-vacuum",
-    value_fn=lambda d: VACUUM_STATES.get(d.get("status_code", 0), "idle").replace("_", " ").title(),
+    value_fn=lambda d: STATUS_LABELS.get(d.get("status_code", 0), f"Code({d.get('status_code')})"),
 )
 
 _BATTERY_SENSOR = TapoSensorDescription(
@@ -104,6 +142,9 @@ async def async_setup_entry(
         TapoStatusSensor(coordinator, entry, _BATTERY_SENSOR),
         TapoStatusSensor(coordinator, entry, _ERROR_SENSOR),
         TapoStatusSensor(coordinator, entry, _AREA_SENSOR),
+        TapoStatusSensor(coordinator, entry, _LAST_CLEAN_SENSOR),
+        TapoStatusSensor(coordinator, entry, _used_h("main_brush_lid_time")),
+        TapoStatusSensor(coordinator, entry, _used_h("rag_time")),
     ]
 
     for ckey, clabel in CONSUMABLE_LABELS.items():
@@ -138,6 +179,11 @@ class TapoStatusSensor(CoordinatorEntity[TapoCoordinator], SensorEntity):
         if d is None:
             return None
         return self.entity_description.value_fn(d)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        fn = self.entity_description.attrs_fn
+        return fn(self.coordinator.data) if fn and self.coordinator.data else None
 
 
 class TapoConsumableSensor(CoordinatorEntity[TapoCoordinator], SensorEntity):

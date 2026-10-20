@@ -7,12 +7,13 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_HOST, CONF_PASSWORD, CONF_USERNAME, Platform
 from homeassistant.core import HomeAssistant, ServiceCall
 
-from .const import DEFAULT_PORT, DOMAIN
+from .const import DEFAULT_PORT, DOMAIN, FAN_NAME_TO_INT, WATER_NAME_TO_INT
 from .coordinator import TapoCoordinator
 from .tpap import TapoVacuumClient
 
 _LOGGER = logging.getLogger(__name__)
-PLATFORMS = [Platform.VACUUM, Platform.SENSOR, Platform.CAMERA, Platform.SELECT]
+PLATFORMS = [Platform.VACUUM, Platform.SENSOR, Platform.CAMERA, Platform.SELECT,
+             Platform.BUTTON, Platform.SWITCH, Platform.TIME, Platform.NUMBER]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -68,6 +69,45 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             _LOGGER.error("clean_rooms: %s", exc)
 
     hass.services.async_register(DOMAIN, "clean_rooms", handle_clean_rooms)
+
+    def _levels(call: ServiceCall) -> dict:
+        out = {}
+        if "suction" in call.data:
+            out["suction"] = FAN_NAME_TO_INT[call.data["suction"].lower()]
+        if "water" in call.data:
+            out["cistern"] = WATER_NAME_TO_INT[call.data["water"].lower()]
+        if "passes" in call.data:
+            out["clean_number"] = int(call.data["passes"])
+        return out
+
+    async def handle_set_room_settings(call: ServiceCall) -> None:
+        """Service: tapo_rv30.set_room_settings."""
+        rooms = call.data["rooms"]
+        rooms = [rooms] if isinstance(rooms, str) else list(rooms)
+        try:
+            room_ids, map_id = await hass.async_add_executor_job(
+                coordinator.resolve_rooms_live, rooms, call.data.get("map"))
+        except ValueError as exc:
+            _LOGGER.error("set_room_settings: %s", exc)
+            return
+        lv = _levels(call)
+        await hass.async_add_executor_job(
+            coordinator.client.set_room_settings, map_id, {rid: lv for rid in room_ids})
+        await coordinator.async_request_refresh()
+
+    async def handle_clean_zone(call: ServiceCall) -> None:
+        """Service: tapo_rv30.clean_zone."""
+        g = coordinator.data or {}
+        lv = {"suction": g.get("suction", 3), "cistern": g.get("cistern", 0),
+              "clean_number": 1, **_levels(call)}
+        map_id, _ = await hass.async_add_executor_job(coordinator.client.get_map_info)
+        await hass.async_add_executor_job(
+            coordinator.client.clean_zones, map_id, call.data["zones"],
+            lv["suction"], lv["cistern"], lv["clean_number"])
+        await coordinator.async_request_refresh()
+
+    hass.services.async_register(DOMAIN, "set_room_settings", handle_set_room_settings)
+    hass.services.async_register(DOMAIN, "clean_zone", handle_clean_zone)
     return True
 
 
@@ -75,5 +115,6 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if ok:
         hass.data[DOMAIN].pop(entry.entry_id, None)
-        hass.services.async_remove(DOMAIN, "clean_rooms")
+        for svc in ("clean_rooms", "set_room_settings", "clean_zone"):
+            hass.services.async_remove(DOMAIN, svc)
     return ok

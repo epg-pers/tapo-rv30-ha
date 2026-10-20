@@ -177,6 +177,8 @@ class TapoCoordinator(DataUpdateCoordinator):
         self.map_id: int | None = None # current map_id
         self.device_name:  str = "Tapo RV30"
         self._name_fetched = False
+        self.settings: dict = {}       # get_settings(), refreshed with the map
+        self.vac_pos: list | None = None
 
     async def _async_update_data(self) -> dict[str, Any]:
         if not self._name_fetched:
@@ -209,13 +211,23 @@ class TapoCoordinator(DataUpdateCoordinator):
                 await self.hass.async_add_executor_job(self._refresh_map)
             except Exception as exc:
                 _LOGGER.warning("Map refresh failed: %s", exc)
+            self.settings = await self.hass.async_add_executor_job(self.client.get_settings)
 
+        data["settings"] = self.settings
         return data
+
+    async def async_settings_changed(self) -> None:
+        """Re-read settings right after a write so switches don't wait for the slow cycle."""
+        self.settings = await self.hass.async_add_executor_job(self.client.get_settings)
+        if self.data is not None:
+            self.data["settings"] = self.settings
+        self.async_update_listeners()
 
     def _refresh_map(self) -> None:
         current_id, _ = self.client.get_map_info()
         map_data       = self.client.get_map_data(current_id)
         self.map_id    = current_id
+        self.vac_pos   = map_data.get("real_vac_coor")
         self.rooms     = [a for a in map_data.get("area_list", [])
                           if a.get("type") == "room"]
         self.map_image_bytes = _render_map_image(map_data)

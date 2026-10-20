@@ -10,16 +10,39 @@ DEFAULT_PORT  = 4433
 FAST_INTERVAL = 30   # seconds — status / battery / attrs
 MAP_INTERVAL  = 300  # seconds — map image re-render
 
+# From the Tapo app's RobotStatusType enum (decompiled 2026-10-13).
+# HA vacuum state per code; STATUS_LABELS is the human label for the Status sensor.
 VACUUM_STATES = {
-    0:   "idle",
-    1:   "cleaning",
-    2:   "cleaning",   # mapping counts as cleaning
-    4:   "returning",
-    5:   "docked",
-    6:   "docked",
-    7:   "paused",
-    8:   "idle",
-    100: "error",
+    0:  "idle",       # standby
+    1:  "cleaning",
+    2:  "cleaning",   # building map
+    3:  "cleaning",   # remote control
+    4:  "returning",
+    5:  "docked",     # charging
+    6:  "docked",     # charge done
+    7:  "paused",
+    8:  "idle",       # sleep
+    9:  "docked",     # emptying dust (right after docking)
+    10: "paused",     # map building paused
+    11: "cleaning",   # going to point
+    12: "paused",     # going to point paused
+    13: "cleaning",   # exploring
+    14: "paused",     # exploring paused
+    15: "docked",     # washing mop
+    16: "docked",     # drying mop
+    17: "docked",     # attaching mop
+    18: "docked",     # removing mop
+    19: "docked",     # cutting hair
+}
+DOCKED_CODES = {c for c, s in VACUUM_STATES.items() if s == "docked"}
+
+STATUS_LABELS = {
+    0: "Standby", 1: "Cleaning", 2: "Mapping", 3: "Remote Control",
+    4: "Returning", 5: "Charging", 6: "Charged", 7: "Paused", 8: "Sleeping",
+    9: "Emptying Dust", 10: "Mapping Paused", 11: "Going To Point",
+    12: "Going To Point Paused", 13: "Exploring", 14: "Exploring Paused",
+    15: "Washing Mop", 16: "Drying Mop", 17: "Attaching Mop",
+    18: "Removing Mop", 19: "Cutting Hair",
 }
 
 FAN_SPEED_LIST = ["Quiet", "Standard", "Turbo", "Max", "Ultra"]
@@ -29,18 +52,54 @@ FAN_INT_TO_NAME = {v: k.capitalize() for k, v in FAN_NAME_TO_INT.items()}
 WATER_NAME_TO_INT = {"off": 0, "low": 1, "medium": 2, "high": 3}
 WATER_INT_TO_NAME = {v: k for k, v in WATER_NAME_TO_INT.items()}
 
+# From the Tapo app's RobotCleanErrorType enum (err_status codes).
 ERROR_CODES = {
     0:  "Ok",
+    1:  "Wheel Stuck",
     2:  "Side Brush Stuck",
     3:  "Main Brush Stuck",
-    4:  "Wheel Blocked",
+    4:  "Lifted Off Floor",
+    5:  "Bumper Stuck",
     6:  "Trapped",
-    7:  "Trapped (Cliff)",
+    7:  "Cliff Sensor Blocked",
+    8:  "Battery Error",
+    9:  "Wheel Error",
+    10: "Side Brush Motor Error",
+    11: "Main Brush Motor Error",
+    12: "Suction Fan Error",
+    13: "Water Pump Error",
     14: "Dust Bin Removed",
-    15: "Unable To Move",
+    15: "Tilted",
     16: "Lidar Blocked",
-    21: "Unable To Find Dock",
-    22: "Battery Low",
+    17: "Lidar Stuck Or Tangled",
+    18: "Lidar Error",
+    19: "Can't Locate (Cleaning)",
+    20: "Can't Locate (Heading Home)",
+    21: "Dock Not Found",
+    22: "Low Battery, Recharging",
+    23: "Lidar Cover Stuck",
+    24: "No Dock, Stopped Returning",
+    25: "Dust Bin Needs Cleaning",
+    26: "Clean Water Tank Empty Or Missing",
+    27: "Dirty Water Tank Full Or Missing",
+    28: "Mop Auto-Install Failed",
+    29: "Clean Tray Missing From Dock",
+    30: "Clean Tray Overflow",
+    31: "Mop Detached",
+    32: "Mop Bracket Error",
+    33: "Mopping Arm Error",
+    34: "Mop Not Detected",
+    35: "Fan Motor Blocked",
+    36: "Mop Stuck",
+    37: "Extending Mop Stuck",
+    38: "Carpet Sensor Error",
+    39: "Front Line Laser Error",
+    40: "Side Line Laser Error",
+    41: "Dirty Water Pump Error",
+    42: "Drying Fan Error",
+    43: "Drying Heater Error",
+    44: "Dust Bag Not Installed",
+    45: "Mop Install Failed",
 }
 
 CONSUMABLE_LIMITS_H = {
