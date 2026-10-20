@@ -21,7 +21,7 @@ from .const import (
     FLOOR_COLOR,
 )
 from .mapdata import (
-    MapNotFound, RoomNotFound, b64name, decode_schedule, lz4_block_decompress, resolve_rooms,
+    b64name, decode_schedule, lz4_block_decompress, resolve_rooms,
     room_at_vac,
 )
 from .tpap import TapoVacuumClient
@@ -256,62 +256,7 @@ class TapoCoordinator(DataUpdateCoordinator):
     def resolve_rooms_live(
         self, name_patterns: list[str], map_name: str | None = None
     ) -> tuple[list[int], int]:
-        """Fetch rooms live from device, resolve names -> (room_ids, map_id).
-
-        Uses map_name (partial match) if given, otherwise current map. Names are
-        normalised with _norm() first. Raises MapNotFound / RoomNotFound (both
-        ValueError) with the available names in the message.
-        """
+        """Resolve room names against the vacuum's live map list -> (room_ids, map_id)."""
         current_map_id, map_list = self.client.get_map_info()
-        map_names = {m["map_id"]: b64name(m.get("map_name", "")) for m in map_list}
-
-        if map_name is not None:
-            wanted = _norm(map_name)
-            if not wanted:
-                raise MapNotFound(
-                    "'map' was given but is empty after trimming; omit it to use the "
-                    f"current map. Available maps: {sorted(map_names.values())}"
-                )
-            exact = [mid for mid, n in map_names.items() if n.lower() == wanted.lower()]
-            partial = [mid for mid, n in map_names.items() if wanted.lower() in n.lower()]
-            hits = exact or partial
-            if not hits:
-                raise MapNotFound(
-                    f"Map '{wanted}' not found on the vacuum. "
-                    f"Available maps: {sorted(map_names.values())}"
-                )
-            if len(hits) > 1:
-                raise MapNotFound(
-                    f"Map '{wanted}' is ambiguous, matches: "
-                    f"{sorted(map_names[m] for m in hits)}"
-                )
-            target_id = hits[0]
-        else:
-            target_id = current_map_id
-
-        map_data = self.client.get_map_data(target_id)
-        rooms = [a for a in map_data.get("area_list", []) if a.get("type") == "room"]
-        decoded = [b64name(r.get("name", "")) for r in rooms]
-        target_name = map_names.get(target_id, str(target_id))
-
-        matched: list[int] = []
-        seen: set[int] = set()
-        for raw in name_patterns:
-            pat = _norm(raw)
-            if not pat:
-                raise RoomNotFound(
-                    f"Empty room name in 'rooms' on map '{target_name}'. "
-                    f"Available rooms: {decoded}"
-                )
-            exact = [r for r, n in zip(rooms, decoded) if n.lower() == pat.lower()]
-            hits = exact or [r for r, n in zip(rooms, decoded) if pat.lower() in n.lower()]
-            if not hits:
-                raise RoomNotFound(
-                    f"No room matching '{pat}' on map '{target_name}'. "
-                    f"Available rooms: {decoded}"
-                )
-            for r in hits:
-                if r["id"] not in seen:
-                    seen.add(r["id"]); matched.append(r["id"])
-
-        return matched, target_id
+        return resolve_rooms(current_map_id, map_list, self.client.get_map_data,
+                             name_patterns, map_name)

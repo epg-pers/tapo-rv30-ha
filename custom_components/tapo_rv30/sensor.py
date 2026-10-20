@@ -24,8 +24,6 @@ from .const import (
     DOMAIN,
     ERROR_CODES,
     STATUS_LABELS,
-    WATER_INT_TO_NAME,
-    FAN_INT_TO_NAME,
 )
 from .coordinator import TapoCoordinator
 

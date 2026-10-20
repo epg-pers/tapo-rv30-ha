@@ -28,4 +28,5 @@ jobs:
         with:
           python-version: "3.13"
       - run: pip install -r tests/requirements.txt
+      - run: pyflakes custom_components tests
       - run: pytest -q tests
