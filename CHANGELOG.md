@@ -1,11 +1,28 @@
 # Changelog
 
+## v0.5.0
+
+### New
+
+- Native `vacuum.clean_area` support: map the vacuum's rooms to Home Assistant areas in the vacuum entity's settings and clean them with the standard action (#6). Rooms from every saved map are offered, grouped by map; one run can only cover rooms on one map.
+- Current Room sensor and `current_room` vacuum attribute, inferred from the vacuum's map position and refreshed every poll (#11).
+- Schedules sensor with the decoded Tapo-app schedules as attributes, and `tapo_rv30.run_schedule` to start one now (#13). `run_schedule` replays the schedule's rooms/preset and settings; it is untested on hardware, as the test vacuum has no schedules.
+- `tapo_rv30.send_raw` diagnostic service: send any device method and get the response.
+
+### Fixes
+
+- Manifest passes hassfest: keys sorted, `requests` and `Pillow` dropped from requirements (both ship with Home Assistant).
+
 ## v0.4.1
+
+### Fixes
 
 - `clean_rooms`, `set_room_settings` and `clean_zone` now report map, room and device failures to the caller instead of only logging them. The error names the step that failed and lists the available maps or rooms, so it shows up in the UI and in automation traces (#10).
 - Map and room names are trimmed and stripped of wrapping quotes before matching. An explicit but empty `map` is an error rather than a silent fall back to the current map, and an ambiguous map name is rejected (#9).
 - Invalid `suction` / `water` / `passes` values give a validation error listing the accepted values.
 - The services pick up the robot's new state within a few seconds instead of waiting for the 30 s poll.
+
+### Repository
 
 - Releases are now created automatically when the version in `manifest.json` changes on `main`, with notes from `CHANGELOG.md`. hassfest and HACS validation run on every push.
 

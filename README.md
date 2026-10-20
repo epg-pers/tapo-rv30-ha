@@ -9,7 +9,12 @@ No cloud dependency — communicates directly with the vacuum over your LAN.
 ## Features
 
 - Full vacuum control — start, pause, stop, dock
-- **Room-by-room cleaning** via `tapo_rv30.clean_rooms` service
+- **Room-by-room cleaning** via `tapo_rv30.clean_rooms` service, or the native
+  `vacuum.clean_area` action (map rooms to Home Assistant areas in the vacuum
+  entity's settings; HA 2026.2+)
+- **Current Room** sensor, inferred from the vacuum's position on the map
+- **Schedules** sensor listing the Tapo-app schedules, and `tapo_rv30.run_schedule`
+  to start one now
 - Live colour **map image** rendered from LZ4 pixel data (refreshes every 5 min)
 - Fan speed selection (Quiet / Standard / Turbo / Max / Ultra)
 - Water level select (Off / Low / Medium / High)
@@ -44,6 +49,19 @@ Click the button above, or manually:
 4. Restart Home Assistant
 5. **Settings → Devices & Services → + Add Integration → Tapo RV30**
 6. Enter your vacuum's IP address, Tapo account email, and password
+
+## Services
+
+| Service | What it does |
+|---|---|
+| `tapo_rv30.clean_rooms` | Clean named rooms (partial match). Optional `map`. |
+| `tapo_rv30.clean_zone` | Clean rectangles given in map mm, same frame as the `position_mm` attribute. |
+| `tapo_rv30.set_room_settings` | Per-room suction / water / passes. |
+| `tapo_rv30.run_schedule` | Replay a saved schedule's rooms and settings now. The vacuum has no "run schedule by id" call, so the settings are re-sent and the clean started. |
+| `tapo_rv30.send_raw` | Send any device method with params and get the response back (use with "Return response" in Developer Tools). Handy for diagnostics; writes change settings. |
+
+Bad input (unknown room, map, option) raises an error with the available
+names in it, so it shows in the UI and in automation traces.
 
 ## Dashboard
 
