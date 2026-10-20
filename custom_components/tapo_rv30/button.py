@@ -1,10 +1,10 @@
-"""Buttons for Tapo RV30 — empty bin, reset consumable timers."""
+"""Buttons for Tapo RV30: run a preset, empty bin, reset consumable timers."""
 from __future__ import annotations
 
 from homeassistant.components.button import ButtonEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN
@@ -20,15 +20,31 @@ RESETTABLE = {
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry,
                             async_add_entities: AddEntitiesCallback) -> None:
     c = hass.data[DOMAIN][entry.entry_id]
-    async_add_entities([TapoEmptyBinButton(c, entry, "empty_bin", "Empty Bin")]
-                       + [TapoResetButton(c, entry, part, label) for part, label in RESETTABLE.items()])
+    entities: list[ButtonEntity] = []
+    if c.has("dust_bucket") and "dust" in c.settings:
+        entities.append(TapoEmptyBinButton(c, entry, "empty_bin", "Empty Bin"))
+    entities += [TapoResetButton(c, entry, part, label) for part, label in RESETTABLE.items()]
+    async_add_entities(entities)
+
+    # One button per preset; presets added in the app later appear on the next refresh.
+    known: set[int] = set()
+
+    @callback
+    def _sync_presets() -> None:
+        new = [p for p in c.presets if p["id"] not in known]
+        if new:
+            known.update(p["id"] for p in new)
+            async_add_entities(TapoPresetButton(c, entry, p["id"]) for p in new)
+
+    _sync_presets()
+    entry.async_on_unload(c.async_add_listener(_sync_presets))
 
 
 class TapoEmptyBinButton(TapoEntity, ButtonEntity):
     _attr_icon = "mdi:delete-empty"
 
     async def async_press(self) -> None:
-        await self.hass.async_add_executor_job(self.coordinator.client.empty_bin)
+        await self._call(self.coordinator.client.empty_bin)
         await self.coordinator.async_request_refresh()
 
 
@@ -41,5 +57,39 @@ class TapoResetButton(TapoEntity, ButtonEntity):
         self._part = part
 
     async def async_press(self) -> None:
-        await self.hass.async_add_executor_job(self.coordinator.client.reset_consumable, self._part)
+        await self._call(self.coordinator.client.reset_consumable, self._part)
         await self.coordinator.async_request_refresh()
+
+
+class TapoPresetButton(TapoEntity, ButtonEntity):
+    """Starts a Tapo-app preset (clean_mode 5), switching map first if needed."""
+    _attr_icon = "mdi:play-box-multiple"
+
+    def __init__(self, coordinator, entry, rule_id: int) -> None:
+        super().__init__(coordinator, entry, f"preset_{rule_id}", None)
+        self._rule_id = rule_id
+
+    @property
+    def _preset(self) -> dict | None:
+        return next((p for p in self.coordinator.presets if p["id"] == self._rule_id), None)
+
+    @property
+    def name(self) -> str:
+        p = self._preset
+        return f"Preset {p['name']}" if p else f"Preset {self._rule_id}"
+
+    @property
+    def available(self) -> bool:
+        return super().available and self._preset is not None
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        p = self._preset or {}
+        return {k: p.get(k) for k in ("map_name", "rooms", "room_settings", "clean_order")}
+
+    async def async_press(self) -> None:
+        p = self._preset
+        if p is None:
+            return
+        await self._call(self.coordinator.client.run_preset, p["id"], p["map_id"], p.get("clean_order", True))
+        await self.coordinator.async_refresh_soon()

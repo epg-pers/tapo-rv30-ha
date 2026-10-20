@@ -14,7 +14,7 @@ from .mapdata import decode_clean_record
 
 _LOGGER = logging.getLogger(__name__)
 SERVICES = ("clean_rooms", "set_room_settings", "clean_zone", "run_schedule", "send_raw",
-            "get_clean_records")
+            "get_clean_records", "run_preset", "set_map")
 
 
 def _coordinators(hass: HomeAssistant, call: ServiceCall) -> list[TapoCoordinator]:
@@ -193,7 +193,44 @@ def async_setup_services(hass: HomeAssistant) -> None:
             "records": records,
         }
 
+    async def handle_run_preset(call: ServiceCall) -> None:
+        coord = _one(hass, call)
+        _require_idle(call, coord)
+        ref = call.data.get("preset")
+        if ref in (None, ""):
+            raise ServiceValidationError(f"{call.service}: 'preset' (name or id) is required")
+        preset = coord.find_preset(ref)
+        if preset is None:
+            names = [p["name"] for p in coord.presets]
+            raise ServiceValidationError(
+                f"{call.service}: no unique preset matching '{ref}'. Available: {names}")
+        await _send(hass, call, coord.client.run_preset, preset["id"], preset["map_id"],
+                    preset.get("clean_order", True))
+        await coord.async_refresh_soon()
+
+    async def handle_set_map(call: ServiceCall) -> None:
+        coord = _one(hass, call)
+        _require_idle(call, coord)
+        ref = call.data.get("map")
+        if ref in (None, ""):
+            raise ServiceValidationError(f"{call.service}: 'map' (name or id) is required")
+        try:
+            names = await hass.async_add_executor_job(coord.map_names)
+        except Exception as exc:
+            raise HomeAssistantError(f"{call.service}: could not read maps from the vacuum: {exc}") from exc
+        from .mapdata import fold
+        wanted = fold(str(ref).strip())
+        hits = [mid for mid, n in names.items() if str(mid) == wanted or fold(n) == wanted]
+        hits = hits or [mid for mid, n in names.items() if wanted and wanted in fold(n)]
+        if len(hits) != 1:
+            raise ServiceValidationError(
+                f"{call.service}: no unique map matching '{ref}'. Available: {sorted(names.values())}")
+        await _send(hass, call, coord.client.set_current_map, hits[0])
+        await coord.async_refresh_soon()
+
     hass.services.async_register(DOMAIN, "clean_rooms", handle_clean_rooms)
+    hass.services.async_register(DOMAIN, "run_preset", handle_run_preset)
+    hass.services.async_register(DOMAIN, "set_map", handle_set_map)
     hass.services.async_register(DOMAIN, "get_clean_records", handle_get_clean_records,
                                  supports_response=SupportsResponse.ONLY)
     hass.services.async_register(DOMAIN, "set_room_settings", handle_set_room_settings)

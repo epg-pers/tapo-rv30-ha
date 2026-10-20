@@ -1,13 +1,15 @@
 """Shared base for the integration's entities."""
 from __future__ import annotations
 
-from typing import Callable
+from typing import Any, Callable
 
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .coordinator import TapoCoordinator
+from .tpap import AuthError
 
 
 class TapoEntity(CoordinatorEntity[TapoCoordinator]):
@@ -27,7 +29,17 @@ class TapoEntity(CoordinatorEntity[TapoCoordinator]):
     def settings(self) -> dict:
         return (self.coordinator.data or {}).get("settings", {})
 
+    async def _call(self, fn: Callable[..., Any], *args: Any) -> Any:
+        """Run a blocking client call; device/network errors become a readable
+        HomeAssistantError instead of "Unexpected exception" in the UI."""
+        try:
+            return await self.hass.async_add_executor_job(fn, *args)
+        except AuthError as exc:
+            raise HomeAssistantError(f"{self.coordinator.device_name}: authentication failed ({exc})") from exc
+        except Exception as exc:
+            raise HomeAssistantError(f"{self.coordinator.device_name} rejected the command: {exc}") from exc
+
     async def _write(self, fn: Callable[[], None]) -> None:
         """Run a client write, then re-read settings so the UI updates immediately."""
-        await self.hass.async_add_executor_job(fn)
+        await self._call(fn)
         await self.coordinator.async_settings_changed()

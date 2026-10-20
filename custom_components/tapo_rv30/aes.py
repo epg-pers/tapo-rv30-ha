@@ -39,8 +39,9 @@ class _LoopThread:
 class AesVacuumClient(TapoVacuumClient):
     """Same blocking method surface as TapoVacuumClient, AES transport underneath."""
 
-    def __init__(self, host: str, username: str, password: str, port: int = 4433) -> None:
-        super().__init__(host, username, password, port)
+    def __init__(self, host: str, username: str, password: str, port: int = 4433,
+                 cache_dir=None) -> None:
+        super().__init__(host, username, password, port, cache_dir)
         self._loopthread = _LoopThread()
         self._device = None
 

@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.8.0
+
+### New
+
+- **Presets.** The cleaning presets you save in the Tapo app ("customisation rules") are read from the robot: one button per preset, a `tapo_rv30.run_preset` service (by name or id), and the preset's rooms and per-room settings as attributes. They start natively (`clean_mode 5`), so the robot behaves exactly as if the app had started them. Verified on an RV30 Max Plus. Found in @cavefire's fork.
+- **Capability discovery.** The robot's component list (`getComponentList`) and a one-off probe of its optional settings decide which entities exist, so RV20, RV30 and RV50 share one codebase. New switches appear automatically when the model answers: AI obstacle avoidance, automatic re-mopping, clean along floor, extended mopping, pet area deep clean, sweep walk. Components are in the diagnostics download.
+- `tapo_rv30.set_map` switches the active map for multi-floor homes; `run_preset` switches automatically when needed.
+- **Charging** binary sensor (@danieyal).
+- Ready-made `calibration_points` on the map camera for the Xiaomi Vacuum Map Card, in the millimetre frame `clean_zone` uses (idea from @ckarlof's guide).
+
+### Changed
+
+- **TPAP transport hardening**, ported from @danieyal's fork: P-384 and P-521 SPAKE2+ suites, the factory default passcode for robots that advertise it, TLS modes 0/1/2 (plain, self-signed, verified against the TP-Link root CA), device attestation (DAC) checks, and session-lost versus wrong-credentials error classification so a lapsed session re-handshakes while a bad password raises reauth.
+- **Security**, following @Charles226's audit: the session cache is JSON (never pickle), written 0600 under Home Assistant's `.storage/tapo_rv30/`; the self-signed TLS warning is silenced per request instead of process-wide; map data from the robot is validated (size, pixel count, room count) and the LZ4 decoder is bounds-checked, so a malformed map is skipped rather than stalling Home Assistant.
+- Errors from buttons, switches, numbers, times and vacuum commands show the device's message in the UI instead of "Unexpected exception" (@jan-tdy).
+
 ## v0.7.0
 
 ### New

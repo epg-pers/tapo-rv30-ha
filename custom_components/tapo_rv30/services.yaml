@@ -150,3 +150,37 @@ get_clean_records:
         number:
           min: 1
           max: 100
+
+run_preset:
+  name: Run a preset
+  description: >-
+    Start a cleaning preset saved in the Tapo app (the robot's own "customisation
+    rules"), exactly as the app would. Switches map first if the preset is on another map.
+  target:
+    entity:
+      domain: vacuum
+      integration: tapo_rv30
+  fields:
+    preset:
+      name: Preset
+      description: Preset name (partial, accent-insensitive) or id. See the preset buttons.
+      required: true
+      example: "Daytime Vacuum"
+      selector:
+        text:
+
+set_map:
+  name: Switch map
+  description: Make another saved map the active one (multi-floor homes). The robot relocalises.
+  target:
+    entity:
+      domain: vacuum
+      integration: tapo_rv30
+  fields:
+    map:
+      name: Map
+      description: Map name (partial, accent-insensitive) or id.
+      required: true
+      example: "Upstairs"
+      selector:
+        text:

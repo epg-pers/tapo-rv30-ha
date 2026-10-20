@@ -45,4 +45,7 @@ async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: ConfigE
         "image_bytes": len(coord.map_image_bytes) if coord.map_image_bytes else 0,
     }
     out["schedules"] = coord.schedules
+    out["components"] = coord.components
+    out["bool_settings"] = coord.bool_settings
+    out["presets"] = coord.presets
     return out

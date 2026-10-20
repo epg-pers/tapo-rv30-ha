@@ -1,7 +1,7 @@
 """Binary sensors for Tapo RV30: mop attached, do-not-disturb active."""
 from __future__ import annotations
 
-from homeassistant.components.binary_sensor import BinarySensorEntity
+from homeassistant.components.binary_sensor import BinarySensorDeviceClass, BinarySensorEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -15,10 +15,21 @@ from .mapdata import dnd_active
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry,
                             async_add_entities: AddEntitiesCallback) -> None:
     c = hass.data[DOMAIN][entry.entry_id]
-    entities = [TapoMopAttached(c, entry, "mop_attached", "Mop Attached")]
+    entities = [TapoCharging(c, entry, "charging", "Charging")]
+    if c.has("mop"):
+        entities.append(TapoMopAttached(c, entry, "mop_attached", "Mop Attached"))
     if "dnd" in c.settings:
         entities.append(TapoDndActive(c, entry, "dnd_active", "Do Not Disturb Active"))
     async_add_entities(entities)
+
+
+class TapoCharging(TapoEntity, BinarySensorEntity):
+    _attr_device_class = BinarySensorDeviceClass.BATTERY_CHARGING
+
+    @property
+    def is_on(self) -> bool | None:
+        d = self.coordinator.data
+        return None if d is None else bool(d.get("charging"))
 
 
 class TapoMopAttached(TapoEntity, BinarySensorEntity):

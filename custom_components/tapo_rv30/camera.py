@@ -14,6 +14,21 @@ from .const import DOMAIN
 from .coordinator import TapoCoordinator
 
 
+def _calibration_points(g: dict) -> list[dict] | None:
+    """Three mm<->px reference points derived from the map geometry."""
+    try:
+        res, (ox, oy) = g["resolution_mm"], g["real_origin_mm"]
+        gw, gh, s = g["grid_size"][0], g["grid_size"][1], g["scale_px_per_cell"]
+    except (KeyError, TypeError):
+        return None
+
+    def pt(gx, gy):
+        return {"vacuum": {"x": int(ox + gx * res), "y": int(oy + gy * res)},
+                "map": {"x": int(gx * s + s / 2), "y": int((gh - 1 - gy) * s + s / 2)}}
+
+    return [pt(0, 0), pt(gw - 1, 0), pt(0, gh - 1)]
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry,
                             async_add_entities: AddEntitiesCallback) -> None:
     async_add_entities([TapoMapCamera(hass.data[DOMAIN][entry.entry_id], entry)])
@@ -49,6 +64,9 @@ class TapoMapCamera(CoordinatorEntity[TapoCoordinator], Camera):
             "rooms": [r["name"] for r in self.coordinator.room_geometry],
             "room_geometry": self.coordinator.room_geometry,
             "map_geometry": self.coordinator.map_geometry,
+            # Ready-made calibration for the Xiaomi Vacuum Map Card: vacuum coords
+            # here are millimetres, the frame tapo_rv30.clean_zone expects.
+            "calibration_points": _calibration_points(self.coordinator.map_geometry),
         }
 
     async def async_camera_image(self, width: int | None = None, height: int | None = None) -> bytes | None:

@@ -15,41 +15,80 @@ class RoomNotFound(ValueError):
     """A requested room could not be resolved on the chosen map."""
 
 
+class MapValidationError(ValueError):
+    """Device-supplied map data is malformed or implausibly large."""
+
+
+MAX_MAP_SIDE = 2048            # cells; real maps are a few hundred
+MAX_MAP_CELLS = 4_200_000
+MAX_ROOMS = 64
+
+
+def validate_map(map_data: dict) -> None:
+    """Reject map fields that would make rendering allocate or loop excessively.
+    The fields are device-supplied, so treat them as untrusted."""
+    try:
+        width, height, pix_len = int(map_data["width"]), int(map_data["height"]), int(map_data["pix_len"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise MapValidationError(f"map header missing or invalid: {exc}") from exc
+    if not (0 < width <= MAX_MAP_SIDE and 0 < height <= MAX_MAP_SIDE):
+        raise MapValidationError(f"map size {width}x{height} out of range")
+    if pix_len != width * height or pix_len > MAX_MAP_CELLS:
+        raise MapValidationError(f"pix_len {pix_len} does not match {width}x{height}")
+    rooms = [a for a in map_data.get("area_list") or [] if isinstance(a, dict) and a.get("type") == "room"]
+    if len(rooms) > MAX_ROOMS:
+        raise MapValidationError(f"{len(rooms)} rooms is implausible")
+    if not isinstance(map_data.get("map_data"), str):
+        raise MapValidationError("map_data missing")
+
+
 
 def lz4_block_decompress(data: bytes, uncompressed_size: int) -> bytes:
-    """Pure-Python LZ4 block decompressor — no C extension needed."""
+    """Pure-Python LZ4 block decompressor, bounds-checked on every copy so a
+    malformed block raises MapValidationError instead of corrupting or growing
+    the output."""
     out = bytearray(uncompressed_size)
     src = 0
     dst = 0
     n = len(data)
     while src < n:
         token = data[src]; src += 1
-        # Literal run
         lit_len = token >> 4
         if lit_len == 15:
-            while src < n:
+            while True:
+                if src >= n:
+                    raise MapValidationError("lz4: truncated literal length")
                 extra = data[src]; src += 1
                 lit_len += extra
                 if extra != 255:
                     break
+        if src + lit_len > n or dst + lit_len > uncompressed_size:
+            raise MapValidationError("lz4: literal run exceeds buffer")
         out[dst:dst + lit_len] = data[src:src + lit_len]
         src += lit_len
         dst += lit_len
         if src >= n:
             break
-        # Match copy
+        if src + 2 > n:
+            raise MapValidationError("lz4: truncated match offset")
         offset = data[src] | (data[src + 1] << 8); src += 2
         match_len = (token & 0xF) + 4
-        if match_len == 19:  # 4 + 15
-            while src < n:
+        if match_len == 19:
+            while True:
+                if src >= n:
+                    raise MapValidationError("lz4: truncated match length")
                 extra = data[src]; src += 1
                 match_len += extra
                 if extra != 255:
                     break
         match_pos = dst - offset
+        if offset == 0 or match_pos < 0 or dst + match_len > uncompressed_size:
+            raise MapValidationError("lz4: match outside buffer")
         for i in range(match_len):
             out[dst + i] = out[match_pos + i]
         dst += match_len
+    if dst != uncompressed_size:
+        raise MapValidationError(f"lz4: produced {dst} of {uncompressed_size} bytes")
     return bytes(out)
 
 
@@ -115,6 +154,25 @@ def decode_clean_record(rec: dict) -> dict:
     }
 
 
+def decode_preset(rule: dict, detail: dict | None, room_names: dict[int, str], map_name: str | None) -> dict:
+    """One Tapo-app preset ("customisation rule") as a readable summary."""
+    areas = (detail or {}).get("area_list") or []
+    rooms = [a for a in areas if a.get("type") == "room"]
+    return {
+        "id":        rule.get("rule_id"),
+        "name":      b64name(rule.get("rule_name", "")) or f"Preset {rule.get('rule_id')}",
+        "map_id":    rule.get("map_id"),
+        "map_name":  map_name,
+        "mode":      rule.get("mode"),
+        "valid":     not rule.get("invalid"),
+        "rooms":     [room_names.get(a.get("id"), f"Room {a.get('id')}") for a in rooms],
+        "room_settings": [{"room": room_names.get(a.get("id"), f"Room {a.get('id')}"),
+                           "suction": a.get("suction"), "water_level": a.get("cistern"),
+                           "passes": a.get("clean_number")} for a in rooms],
+        "clean_order": (detail or {}).get("clean_order", True),
+    }
+
+
 def decode_weekdays(mask: int) -> list[str]:
     return [name for i, name in enumerate(_WEEKDAYS) if mask & (1 << i)]
 
@@ -147,6 +205,7 @@ def room_at_vac(map_data: dict) -> str | None:
     vac = map_data.get("vac_coor")
     if not vac:
         return None
+    validate_map(map_data)
     width, height = map_data["width"], map_data["height"]
     gx, gy = int(vac[0]), int(vac[1])
     if not (0 <= gx < width and 0 <= gy < height):

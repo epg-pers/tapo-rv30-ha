@@ -26,6 +26,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         username=entry.data[CONF_USERNAME],
         password=entry.data[CONF_PASSWORD],
         port=DEFAULT_PORT,
+        cache_dir=hass.config.path(".storage", "tapo_rv30"),
     )
     coordinator = TapoCoordinator(hass, client, entry)
     await coordinator.async_config_entry_first_refresh()

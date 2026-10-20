@@ -15,6 +15,9 @@ No cloud dependency — communicates directly with the vacuum over your LAN.
 - **Current Room** sensor, inferred from the vacuum's position on the map
 - **Schedules** sensor listing the Tapo-app schedules, and `tapo_rv30.run_schedule`
   to start one now
+- **Presets**: one button per preset saved in the Tapo app, plus `tapo_rv30.run_preset`
+- Entities adapt to the model: optional settings (AI avoidance, re-mopping, pet deep clean, ...)
+  appear only when the robot supports them
 - Live colour **map image** with rooms, no-go zones, virtual walls, carpets, saved zones and
   furniture; the robot marker moves every poll. `room_geometry` / `map_geometry` attributes
   for custom cards
@@ -62,11 +65,30 @@ Click the button above, or manually:
 | `tapo_rv30.clean_zone` | Clean rectangles given in map mm, same frame as the `position_mm` attribute. |
 | `tapo_rv30.set_room_settings` | Per-room suction / water / passes. |
 | `tapo_rv30.run_schedule` | Replay a saved schedule's rooms and settings now. The vacuum has no "run schedule by id" call, so the settings are re-sent and the clean started. |
+| `tapo_rv30.run_preset` | Start a preset saved in the Tapo app, by name or id. |
+| `tapo_rv30.set_map` | Switch the active map (multi-floor). |
 | `tapo_rv30.get_clean_records` | Cleaning history and lifetime totals as a service response. |
 | `tapo_rv30.send_raw` | Send any device method with params and get the response back (use with "Return response" in Developer Tools). Handy for diagnostics; writes change settings. |
 
 Bad input (unknown room, map, option) raises an error with the available
 names in it, so it shows in the UI and in automation traces.
+
+## Map card calibration
+
+The map camera's `calibration_points` attribute holds three ready-made points for the
+[Xiaomi Vacuum Map Card](https://github.com/PiotrMachowski/lovelace-xiaomi-vacuum-map-card),
+in the millimetre frame that `tapo_rv30.clean_zone` expects. Paste them into the card's
+`calibration_source.calibration_points` and point zone cleaning at `tapo_rv30.clean_zone`.
+The `map_geometry` and `room_geometry` attributes give the full mm to pixel transform and
+each room's pixel bounds for custom cards.
+
+## Known issue: firmware updates and local access
+
+Several users report that an RV30 Max (Plus) firmware update silently breaks local access
+on port 4433 (connection refused or TLS handshake failure) until the robot is power-cycled;
+TP-Link's forum reply is that third-party local access is unsupported. If polling stops
+after an update on an unchanged network, reboot the vacuum and consider turning off
+automatic firmware updates in the Tapo app. Thanks to @jan-tdy for documenting this.
 
 ## Dashboard
 

@@ -11,7 +11,7 @@ from .const import (
     CARPET_COLOR, FLOOR_COLOR, FORBID_COLOR, FORBID_OUTLINE, FURNITURE_OUTLINE, ROOM_PALETTE,
     UNKNOWN_COLOR, VIRTUAL_WALL_COLOR, WALL_COLOR, ZONE_OUTLINE,
 )
-from .mapdata import b64name, lz4_block_decompress, mm_to_grid
+from .mapdata import b64name, lz4_block_decompress, mm_to_grid, validate_map
 
 MAP_SCALE = 4   # px per vacuum grid cell -> ~700x700 output image
 FONT_SIZE = 14
@@ -48,6 +48,7 @@ def render_map(map_data: dict) -> tuple[Image.Image, list[dict], dict]:
     room_geometry: per room id/name, bbox and centre in image px.
     map_geometry: what a card needs to place its own overlays (mm -> px).
     """
+    validate_map(map_data)
     width, height, pix_len = map_data["width"], map_data["height"], map_data["pix_len"]
     pixels = lz4_block_decompress(base64.b64decode(map_data["map_data"]), pix_len)
 

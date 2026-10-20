@@ -17,7 +17,7 @@ from .const import (
     CLEANING_CODES, CONF_POLL_INTERVAL, DOMAIN, FAST_INTERVAL, MAP_INTERVAL, MAX_POLL_INTERVAL,
     MIN_POLL_INTERVAL, PAUSED_CODES,
 )
-from .mapdata import b64name, decode_schedule, resolve_rooms, room_at_vac
+from .mapdata import b64name, decode_preset, decode_schedule, fold, resolve_rooms, room_at_vac
 from .maprender import _dot, _grid_px, _jpeg, render_map
 from .tpap import AuthError, TapoVacuumClient
 
@@ -56,6 +56,11 @@ class TapoCoordinator(DataUpdateCoordinator):
         self._info_fetched = False
         self.settings: dict = {}           # get_settings(), refreshed with the map
         self.schedules: list[dict] = []
+        self.components: dict[str, int] = {}       # getComponentList, read once
+        self.bool_settings_supported: list[str] = []   # probed once
+        self.bool_settings: dict[str, bool] = {}
+        self.presets: list[dict] = []
+        self._caps_fetched = False
         self.vac_pos: list | None = None
         self.current_room: str | None = None
 
@@ -70,6 +75,10 @@ class TapoCoordinator(DataUpdateCoordinator):
             model=f"Tapo {self.device_model}",
             sw_version=self.fw_version,
         )
+
+    def has(self, component: str) -> bool:
+        """True if the robot lists this component (or the list was unavailable)."""
+        return component in self.components if self.components else True
 
     @property
     def status_code(self) -> int | None:
@@ -112,6 +121,9 @@ class TapoCoordinator(DataUpdateCoordinator):
             except Exception as exc:
                 _LOGGER.debug("Device info fetch failed: %s", exc)
 
+        if not self._caps_fetched:
+            await self._fetch_capabilities()
+
         data = await self._fetch_status()
 
         # Full map render + settings on first load and every MAP_INTERVAL; in
@@ -129,8 +141,7 @@ class TapoCoordinator(DataUpdateCoordinator):
                 else:
                     _LOGGER.debug("Map refresh skipped: %s", exc)
                     self._map_tick = self._map_cycles - 1   # try again next poll
-            self.settings = await self.hass.async_add_executor_job(self.client.get_settings)
-            self._decode_schedules()
+            await self._refresh_settings()
         elif self.map_id is not None:
             try:
                 await self.hass.async_add_executor_job(self._refresh_position)
@@ -139,9 +150,84 @@ class TapoCoordinator(DataUpdateCoordinator):
 
         data["settings"] = self.settings
         data["schedules"] = self.schedules
+        data["bool_settings"] = self.bool_settings
+        data["presets"] = self.presets
         data["current_room"] = self.current_room
         data["position_mm"] = self.vac_pos
+        data["charging"] = data.get("status_code") == 5
         return data
+
+    async def _fetch_capabilities(self) -> None:
+        """Component list and which optional settings answer: read once."""
+        try:
+            self.components = await self.hass.async_add_executor_job(self.client.get_components)
+        except AuthError as exc:
+            raise ConfigEntryAuthFailed(str(exc)) from exc
+        except Exception as exc:
+            _LOGGER.debug("getComponentList failed: %s", exc)
+        try:
+            probed = await self.hass.async_add_executor_job(self.client.probe_bool_settings)
+            self.bool_settings_supported = list(probed)
+            self.bool_settings = probed
+        except Exception as exc:
+            _LOGGER.debug("Settings probe failed: %s", exc)
+        self._caps_fetched = True
+
+    async def _refresh_settings(self) -> None:
+        self.settings = await self.hass.async_add_executor_job(self.client.get_settings)
+        self._decode_schedules()
+        if self.bool_settings_supported:
+            self.bool_settings = await self.hass.async_add_executor_job(
+                self.client.get_bool_settings, self.bool_settings_supported)
+        try:
+            self.presets = await self.hass.async_add_executor_job(self._read_presets)
+        except Exception as exc:
+            _LOGGER.debug("Preset read failed: %s", exc)
+
+    def _read_presets(self) -> list[dict]:
+        rules = self.client.get_presets()
+        if not rules:
+            return []
+        names = self.map_names()
+        out = []
+        for rule in rules:
+            map_id = rule.get("map_id")
+            try:
+                detail = self.client.get_preset_detail(map_id, rule["rule_id"])
+            except Exception as exc:
+                _LOGGER.debug("Preset %s detail failed: %s", rule.get("rule_id"), exc)
+                detail = None
+            room_names = ({r["id"]: b64name(r.get("name", "")) for r in self.rooms}
+                          if map_id == self.map_id else self._room_names_for(map_id))
+            out.append(decode_preset(rule, detail, room_names, names.get(map_id)))
+        return out
+
+    _room_name_cache: dict[int, dict[int, str]] = {}
+
+    def _room_names_for(self, map_id: int) -> dict[int, str]:
+        if map_id not in self._room_name_cache:
+            try:
+                md = self.client.get_map_data(map_id)
+                self._room_name_cache[map_id] = {a["id"]: b64name(a.get("name", ""))
+                                                 for a in md.get("area_list", []) if a.get("type") == "room"}
+            except Exception:
+                return {}
+        return self._room_name_cache[map_id]
+
+    def find_preset(self, ref) -> dict | None:
+        """Preset by id, or by name (accent-insensitive, exact then partial)."""
+        try:
+            rid = int(ref)
+            for p in self.presets:
+                if p["id"] == rid:
+                    return p
+        except (TypeError, ValueError):
+            pass
+        wanted = fold(str(ref).strip())
+        exact = [p for p in self.presets if fold(p["name"]) == wanted]
+        partial = [p for p in self.presets if wanted and wanted in fold(p["name"])]
+        hits = exact or partial
+        return hits[0] if len(hits) == 1 else None
 
     async def _fetch_status(self) -> dict[str, Any]:
         """get_status with a short retry so one dropped packet doesn't flip
@@ -174,11 +260,12 @@ class TapoCoordinator(DataUpdateCoordinator):
 
     async def async_settings_changed(self) -> None:
         """Re-read settings right after a write so switches don't wait for the slow cycle."""
-        self.settings = await self.hass.async_add_executor_job(self.client.get_settings)
-        self._decode_schedules()
+        await self._refresh_settings()
         if self.data is not None:
             self.data["settings"] = self.settings
             self.data["schedules"] = self.schedules
+            self.data["bool_settings"] = self.bool_settings
+            self.data["presets"] = self.presets
         self.async_update_listeners()
 
     def _decode_schedules(self) -> None:

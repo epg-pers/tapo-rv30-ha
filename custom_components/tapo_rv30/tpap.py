@@ -1,4 +1,10 @@
-"""TPAP SPAKE2+ transport and vacuum client for Tapo RV30."""
+"""TPAP SPAKE2+ transport and vacuum client for Tapo RV30.
+
+Handshake, cipher suites, TLS modes and credential handling follow the
+reference behaviour reverse-engineered in python-kasa (PR #1592) with the
+extensions from github.com/danieyal/tapo-rv30-ha (P-384/P-521 suites,
+factory default passcode, TLS mode 2 with the TP-Link root CA, DAC proof).
+"""
 from __future__ import annotations
 
 import base64
@@ -7,27 +13,29 @@ import hmac
 import json
 import logging
 import os
-import pickle
 import secrets
+import ssl
 import struct
 import tempfile
 import threading
 import warnings
+from datetime import datetime, timezone
 from pathlib import Path
 
 import requests
+from requests.adapters import HTTPAdapter
+from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.hazmat.primitives.asymmetric import ec, padding, rsa
 from cryptography.hazmat.primitives.ciphers import algorithms
 from cryptography.hazmat.primitives.ciphers.aead import AESCCM, ChaCha20Poly1305
 from cryptography.hazmat.primitives.cmac import CMAC
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
-from ecdsa import NIST256p, ellipticcurve
+from ecdsa import NIST256p, NIST384p, NIST521p, ellipticcurve
 from urllib3.exceptions import InsecureRequestWarning
 
 from .const import DOCKED_CODES
 
-warnings.filterwarnings("ignore", category=InsecureRequestWarning)
 _LOGGER = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -59,16 +67,44 @@ def _cmac_aes(key: bytes, data: bytes) -> bytes:
 def _pbkdf2(pw: bytes, salt: bytes, iters: int, length: int) -> bytes:
     return hashlib.pbkdf2_hmac("sha256", pw, salt, iters, length)
 
-# SPAKE2+ P-256 constants
-_P256_M = bytes.fromhex("02886e2f97ace46e55ba9dd7242579f2993b64e16ef3dcab95afd497333d8fa12f")
-_P256_N = bytes.fromhex("03d8bbd6c639c62937b04d997f38c3770719c629d7014d49a24b4f98baa1292b49")
+# SPAKE2+ per-suite parameters: suite type -> (M, N, ecdsa curve, cryptography curve).
+# Suites 1/2/8/9 are P-256, 3/4 are P-384 and 5 is P-521.
+_SUITE_PARAMS = {
+    "p256": (
+        bytes.fromhex("02886e2f97ace46e55ba9dd7242579f2993b64e16ef3dcab95afd497333d8fa12f"),
+        bytes.fromhex("03d8bbd6c639c62937b04d997f38c3770719c629d7014d49a24b4f98baa1292b49"),
+        NIST256p, ec.SECP256R1(),
+    ),
+    "p384": (
+        bytes.fromhex("030ff0895ae5ebf6187080a82d82b42e2765e3b2f8749c7e05eba366434b363d3d"
+                      "c36f15314739074d2eb8613fceec2853"),
+        bytes.fromhex("02c72cf2e390853a1c1c4ad816a62fd15824f56078918f43f922ca21518f9c543b"
+                      "b252c5490214cf9aa3f0baab4b665c10"),
+        NIST384p, ec.SECP384R1(),
+    ),
+    "p521": (
+        bytes.fromhex("02003f06f38131b2ba2600791e82488e8d20ab889af753a41806c5db18d37d8560"
+                      "8cfae06b82e4a72cd744c719193562a653ea1f119eef9356907edc9b56979962d7aa"),
+        bytes.fromhex("0200c7924b9ec017f3094562894336a53c50167ba8c5963876880542bc669e494b2"
+                      "532d76c5b53dfb349fdf69154b9e0048c58a42e8ed04cef052a3bc349d95575cd25"),
+        NIST521p, ec.SECP521R1(),
+    ),
+}
+_SUITE_CURVES = {1: "p256", 2: "p256", 8: "p256", 9: "p256",
+                 3: "p384", 4: "p384", 5: "p521"}
 
-def _sec1_xy(sec1: bytes):
-    p = ec.EllipticCurvePublicKey.from_encoded_point(ec.SECP256R1(), sec1)
+def _suite_params(suite_type: int):
+    name = _SUITE_CURVES.get(suite_type)
+    if name is None:
+        raise AuthError(f"Unsupported TPAP cipher suite: {suite_type}")
+    return _SUITE_PARAMS[name]
+
+def _sec1_xy(sec1: bytes, curve: ec.EllipticCurve):
+    p = ec.EllipticCurvePublicKey.from_encoded_point(curve, sec1)
     n = p.public_numbers(); return n.x, n.y
 
-def _xy_unc(x: int, y: int) -> bytes:
-    return ec.EllipticCurvePublicNumbers(x, y, ec.SECP256R1()).public_key().public_bytes(
+def _xy_unc(x: int, y: int, curve: ec.EllipticCurve) -> bytes:
+    return ec.EllipticCurvePublicNumbers(x, y, curve).public_key().public_bytes(
         serialization.Encoding.X962, serialization.PublicFormat.UncompressedPoint)
 
 def _l8(b: bytes) -> bytes: return len(b).to_bytes(8, "little") + b
@@ -140,80 +176,280 @@ def _build_cred(extra: dict, user: str, pw: str, mac12: str) -> str:
             return pw
     return (user + "/" + pw) if user else pw
 
+def _sha256hex_upper(s: str) -> str:
+    return hashlib.sha256(s.encode()).hexdigest().upper()
+
+def _mac_default_passcode(mac: str) -> str:
+    """Derive the factory default passcode a device advertising pake type 0 expects."""
+    mac_hex = mac.replace(":", "").replace("-", "")
+    try:
+        mac_bytes = bytes.fromhex(mac_hex)
+    except ValueError as exc:
+        raise AuthError("Invalid device MAC for default passcode derivation") from exc
+    if len(mac_bytes) < 6:
+        raise AuthError("Device MAC too short for default passcode derivation")
+    ikm = b"GqY5o136oa4i6VprTlMW2DpVXxmfW8" + mac_bytes[3:6] + mac_bytes[0:3]
+    return _hkdf(ikm, salt=b"tp-kdf-salt-default-passcode",
+                 info=b"tp-kdf-info-default-passcode", length=32).hex().upper()
+
 # ---------------------------------------------------------------------------
 # TapoVacuumClient
 # ---------------------------------------------------------------------------
 _PAKE_CTX = b"PAKE V1"
 
+# Device error codes that mean "the session is gone, re-handshake and retry".
+# Values mirror python-kasa SmartErrorCode: SESSION_TIMEOUT_ERROR, SESSION_EXPIRED,
+# INVALID_NONCE, TRANSPORT_NOT_AVAILABLE_ERROR and STAT_ACCESS_ERROR.
+_SESSION_ERRORS = {9999, -40401, -40413, 1002, -2203}
+# Codes that mean the credentials themselves are wrong — retrying never helps:
+# LOGIN_ERROR, LOGIN_FAILED_ERROR, AES_DECODE_FAIL_ERROR, HAND_SHAKE_FAILED_ERROR,
+# TRANSPORT_UNKNOWN_CREDENTIALS_ERROR and HOMEKIT_LOGIN_FAIL.
+_AUTH_ERRORS = {-1501, 1111, -1005, 1100, 1003, -40412}
+
+# TP-Link device root CA, used when the device asks for verified TLS (tls mode 2).
+_ROOT_CA_PEM = """-----BEGIN CERTIFICATE-----
+MIICNzCCAdygAwIBAgIUNLD7w5j5WU/efCe8bqkfGSRGgLYwCgYIKoZIzj0EAwIw
+ezEnMCUGA1UEAwweVFAtTElOSyBTWVNURU1TIERFVklDRSBST09UIENBMR0wGwYD
+VQQKDBRUUC1MSU5LIFNZU1RFTVMgSU5DLjEPMA0GA1UEBwwGSXJ2aW5lMRMwEQYD
+VQQIDApDYWxpZm9ybmlhMQswCQYDVQQGEwJVUzAgFw0yNDExMjIwMjU3NDhaGA8y
+MDU0MTExNTAyNTc0OFowezEnMCUGA1UEAwweVFAtTElOSyBTWVNURU1TIERFVklD
+RSBST09UIENBMR0wGwYDVQQKDBRUUC1MSU5LIFNZU1RFTVMgSU5DLjEPMA0GA1UE
+BwwGSXJ2aW5lMRMwEQYDVQQIDApDYWxpZm9ybmlhMQswCQYDVQQGEwJVUzBZMBMG
+ByqGSM49AgEGCCqGSM49AwEHA0IABLwo8H9H6BoJDvcoewi4wPrPryVXir4z4yXV
+n29R5XCAcFfKk06pYPupG6pjaKOLKWXnaOdPZThDFxwGLo3urV2jPDA6MAsGA1Ud
+DwQEAwIBhjAMBgNVHRMEBTADAQH/MB0GA1UdDgQWBBRivfUtiHYsZBOKo80uZEwk
+XhBkdDAKBggqhkjOPQQDAgNJADBGAiEA+7j5jemtXcGYN0unH+9rjVhVAL7WrsOi
+5rbc0IIvD6MCIQCZuGGssu4Ygt2V8Vr0QF2fO9wxfNB3aRRMYQ+6lMrLGA==
+-----END CERTIFICATE-----"""
+
+_TLS_CIPHERS = ":".join([
+    "ECDHE-ECDSA-AES256-GCM-SHA384", "ECDHE-ECDSA-AES256-SHA384",
+    "ECDHE-ECDSA-AES256-SHA",        "ECDHE-ECDSA-AES128-GCM-SHA256",
+    "ECDHE-ECDSA-AES128-SHA256",     "ECDHE-ECDSA-AES128-SHA",
+    "ECDHE-RSA-AES256-GCM-SHA384",   "ECDHE-RSA-AES256-SHA384",
+    "ECDHE-RSA-AES256-SHA",          "ECDHE-RSA-AES128-GCM-SHA256",
+    "ECDHE-RSA-AES128-SHA256",       "ECDHE-RSA-AES128-SHA",
+])
+
+
+class _PinnedCAAdapter(HTTPAdapter):
+    """requests adapter that trusts only the TP-Link root CA, without hostname checks.
+
+    A device certifies itself by model name (CN "RV30 Max Plus(EU)") with no
+    usable subjectAltName, so it can never match the IP we dial. The chain up to
+    the pinned root is the real check; the hostname match is turned off.
+    """
+
+    def init_poolmanager(self, *args, **kwargs):
+        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        ctx.set_ciphers(_TLS_CIPHERS)
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_REQUIRED
+        ctx.load_verify_locations(cadata=_ROOT_CA_PEM)
+        kwargs["ssl_context"] = ctx
+        # Without this urllib3 runs its own hostname match and rejects the cert,
+        # because our context has check_hostname off but assert_hostname unset.
+        kwargs["assert_hostname"] = False
+        return super().init_poolmanager(*args, **kwargs)
+
+    def cert_verify(self, conn, url, verify, cert):
+        """Leave verification to our pinned context.
+
+        The default would set ca_certs to the certifi bundle, and urllib3 loads
+        that into our context on top of the pinned root — which would let any
+        public CA vouch for the device. Skipping it keeps the root pinned.
+        """
+        return
+
 
 class AuthError(Exception):
-    """Raised when SPAKE2+ auth fails (wrong credentials, session expired)."""
+    """Raised when SPAKE2+ auth fails (wrong credentials, bad attestation)."""
+
+
+class _SessionLost(Exception):
+    """Internal: the encrypted session is no longer usable — re-handshake."""
+
+
+def _opt_int(value) -> int | None:
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _raise_for_error(response: dict, action: str) -> None:
+    """Classify a device error code so callers know whether retrying helps."""
+    code = _opt_int(response.get("error_code")) or 0
+    if code == 0:
+        return
+    msg = f"{action} failed: error_code={code}"
+    if code in _AUTH_ERRORS:
+        raise AuthError(msg)
+    if code in _SESSION_ERRORS:
+        raise _SessionLost(msg)
+    raise RuntimeError(f"Device error {code} on {action}")
+
+
+def _load_cert(value: str) -> x509.Certificate:
+    """Load a certificate the device sent as PEM or bare base64 DER."""
+    data = value.strip()
+    if "-----BEGIN" in data:
+        return x509.load_pem_x509_certificate(data.encode())
+    return x509.load_der_x509_certificate(_b64d(data))
+
+
+def _verify_cert_chain(ca: x509.Certificate, ica: x509.Certificate | None) -> None:
+    """Verify the device attestation chain up to the pinned TP-Link root."""
+    root = x509.load_pem_x509_certificate(_ROOT_CA_PEM.encode())
+    now  = datetime.now(timezone.utc)
+    chain = [ca] + ([ica] if ica else []) + [root]
+    for cert in chain:
+        if not (cert.not_valid_before_utc <= now <= cert.not_valid_after_utc):
+            raise AuthError("DAC certificate is outside its validity window")
+    # Each certificate must be signed by the next one up, ending at the root.
+    for cert, issuer in zip(chain, chain[1:]):
+        if cert.issuer != issuer.subject:
+            raise AuthError("DAC certificate chain is not contiguous")
+        pub  = issuer.public_key()
+        algo = cert.signature_hash_algorithm
+        if algo is None:
+            raise AuthError("DAC certificate has no signature hash algorithm")
+        if isinstance(pub, ec.EllipticCurvePublicKey):
+            pub.verify(cert.signature, cert.tbs_certificate_bytes, ec.ECDSA(algo))
+        elif isinstance(pub, rsa.RSAPublicKey):
+            pub.verify(cert.signature, cert.tbs_certificate_bytes, padding.PKCS1v15(), algo)
+        else:
+            raise AuthError(f"Unsupported DAC issuer key: {type(pub).__name__}")
 
 
 class TapoVacuumClient:
     """Synchronous TPAP client.  All methods are blocking — run in an executor."""
 
-    def __init__(self, host: str, username: str, password: str, port: int = 4433) -> None:
+    def __init__(self, host: str, username: str, password: str, port: int = 4433,
+                 cache_dir: str | Path | None = None) -> None:
         self.host     = host
         self.port     = port
         self.username = username
         self.password = password
-        self.base_url = f"https://{host}:{port}"
         self._http    = requests.Session()
-        self._http.verify = False
-        self._cache   = Path(tempfile.gettempdir()) / f"tapo_rv30_{host}.pkl"
+        self._cache   = self._cache_path(host, cache_dir)
         # HA calls us from several executor threads (poll + commands); the session
         # seq/nonce is shared state, so one request at a time.
         self._lock    = threading.RLock()
         # None = untried, then True/False once the firmware has answered multipleRequest.
         self._multi_supported: bool | None = None
 
+        # Discovery metadata — filled in by _discover(), cached between runs.
         self._device_mac = ""
         self._tpap_pake: list[int] = []
+        self._tls_mode: int | None = None
+        self._tpap_port: int | None = None
+        self._tpap_dac   = False
+        self._user_hash_type: int | None = None
+
         self._session_id = ""
         self._seq        = 1
         self._cipher_id  = "aes_128_ccm"
         self._hkdf_hash  = "SHA256"
         self._key        = b""
         self._base_nonce = b""
+        self._shared_key = b""
+        self._dac_nonce  = ""
+        self.base_url    = f"https://{host}:{port}"
+
+    # ---- Session cache file ----------------------------------------------------
+    @staticmethod
+    def _cache_path(host: str, cache_dir: str | Path | None) -> Path:
+        """Session cache location: the caller's directory (HA's .storage) when
+        given, else a per-user temp dir; the directory is 0700 and the file 0600
+        so no other local user can read or pre-plant a session."""
+        base = Path(cache_dir) if cache_dir else Path(tempfile.gettempdir()) / f"tapo_rv30_{os.getuid()}"
+        try:
+            base.mkdir(mode=0o700, parents=True, exist_ok=True)
+        except Exception:
+            pass
+        return base / f"session_{host}.json"
 
     # ---- Internal HTTP -------------------------------------------------------
+    def _apply_tls_mode(self) -> None:
+        """Re-target the base URL and TLS trust from the discovered tls/port hints.
+
+        tls 0 = plain http, 1 = https with an untrusted (self-signed) cert,
+        2 = https validated against the pinned TP-Link root CA.
+        """
+        scheme = "http" if self._tls_mode == 0 else "https"
+        if self._tpap_port and self._tpap_port > 0:
+            port = self._tpap_port
+        elif scheme == "https":
+            port = 4433
+        else:
+            port = self.port
+        self.base_url = f"{scheme}://{self.host}:{port}"
+
+        self._verify = self._tls_mode == 2
+        self._http.mount("https://", _PinnedCAAdapter() if self._verify else HTTPAdapter())
+
+    _verify = False   # TLS mode 1 (self-signed) until discovery says otherwise
+
     def _post(self, path: str, body=None, binary: bool = False):
         url = self.base_url + path
+        kwargs = dict(timeout=15, verify=self._verify)
         if binary:
-            r = self._http.post(url, data=body,
-                headers={"Content-Type": "application/octet-stream"}, timeout=15)
+            kwargs.update(data=body, headers={"Content-Type": "application/octet-stream"})
         else:
-            r = self._http.post(url, json=body,
-                headers={"Content-Type": "application/json"}, timeout=15)
+            kwargs.update(json=body, headers={"Content-Type": "application/json"})
+        # verify is passed per request: requests lets REQUESTS_CA_BUNDLE override
+        # session.verify. The self-signed warning is silenced here only, not
+        # process-wide, and only while we are knowingly unverified.
+        with warnings.catch_warnings():
+            if not self._verify:
+                warnings.simplefilter("ignore", InsecureRequestWarning)
+            r = self._http.post(url, **kwargs)
         r.raise_for_status()
         return r.content if binary else r.json()
 
     # ---- Session cache -------------------------------------------------------
+    _CACHE_FIELDS = ("mac", "pake", "sid", "seq", "cid", "hkdf", "tls", "tport", "dac", "uht")
+
     def _load_session(self) -> bool:
+        """JSON, never pickle: a tampered file can at worst fail the session."""
         try:
-            d = pickle.loads(self._cache.read_bytes())
-            if d.get("host") == self.host and d.get("user") == self.username:
-                self._device_mac = d["mac"];  self._tpap_pake  = d["pake"]
-                self._session_id = d["sid"];  self._seq        = d["seq"]
-                self._cipher_id  = d["cid"];  self._hkdf_hash  = d["hkdf"]
-                self._key        = d["key"];  self._base_nonce = d["nonce"]
-                return True
+            d = json.loads(self._cache.read_text())
+            if d.get("host") != self.host or d.get("user") != self.username:
+                return False
+            self._device_mac = d["mac"];  self._tpap_pake  = list(d["pake"])
+            self._session_id = d["sid"];  self._seq        = int(d["seq"])
+            self._cipher_id  = d["cid"];  self._hkdf_hash  = d["hkdf"]
+            self._key        = _b64d(d["key"]); self._base_nonce = _b64d(d["nonce"])
+            self._tls_mode       = _opt_int(d.get("tls"))
+            self._tpap_port      = _opt_int(d.get("tport"))
+            self._tpap_dac       = bool(d.get("dac", False))
+            self._user_hash_type = _opt_int(d.get("uht"))
+            if self._cipher_id not in _CIPHER_LABELS or not self._session_id:
+                return False
+            self._apply_tls_mode()
+            return True
         except Exception:
-            pass
-        return False
+            return False
 
     def _save_session(self) -> None:
         try:
-            self._cache.write_bytes(pickle.dumps({
+            payload = json.dumps({
                 "host": self.host, "user": self.username,
                 "mac": self._device_mac, "pake": self._tpap_pake,
                 "sid": self._session_id, "seq": self._seq,
                 "cid": self._cipher_id, "hkdf": self._hkdf_hash,
-                "key": self._key, "nonce": self._base_nonce,
-            }))
-        except Exception:
-            pass
+                "key": _b64e(self._key), "nonce": _b64e(self._base_nonce),
+                "tls": self._tls_mode, "tport": self._tpap_port,
+                "dac": self._tpap_dac, "uht": self._user_hash_type,
+            })
+            fd = os.open(self._cache, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, "w") as fh:
+                fh.write(payload)
+        except Exception as exc:
+            _LOGGER.debug("Session cache write failed: %s", exc)
 
     def _clear_session(self) -> None:
         try: self._cache.unlink()
@@ -223,58 +459,118 @@ class TapoVacuumClient:
     # ---- SPAKE2+ auth --------------------------------------------------------
     def _discover(self) -> None:
         d = self._post("/", {"method": "login", "params": {"sub_method": "discover"}})
+        _raise_for_error(d, "discover")
         r = d["result"]
-        self._device_mac = r.get("mac") or ""
-        self._tpap_pake  = (r.get("tpap") or {}).get("pake") or []
+        tpap = r.get("tpap") or {}
+        self._device_mac     = r.get("mac") or ""
+        self._tpap_pake      = list(tpap.get("pake") or [])
+        self._tls_mode       = _opt_int(tpap.get("tls"))
+        self._tpap_port      = _opt_int(tpap.get("port"))
+        self._tpap_dac       = bool(tpap.get("dac"))
+        self._user_hash_type = _opt_int(tpap.get("user_hash_type"))
+        # Discovery runs before the real TLS mode is known, so re-target now.
+        self._apply_tls_mode()
+
+    def _passcode_type(self) -> str:
+        """Pick the passcode scheme, preferring what the robot advertises."""
+        pake = set(self._tpap_pake)
+        for values, ptype in (((0,), "default_userpw"),
+                              ((2,), "userpw"),
+                              ((3,), "shared_token")):
+            if pake & set(values):
+                return ptype
+        return "default_userpw"
+
+    def _candidate_secrets(self, ptype: str) -> list[str]:
+        """Secrets to try in order; a rejected one falls through to the next."""
+        if ptype == "default_userpw":
+            out = []
+            if self._device_mac:
+                out.append(_mac_default_passcode(self._device_mac))
+            # Some firmware advertises type 0 but still takes the account
+            # password, so keep it as a fallback rather than failing outright.
+            if self.password:
+                out.append(self.password)
+            return out
+        if ptype == "shared_token":
+            return [_md5hex(self.password)]
+        return [self.password]
+
+    def _resolve_cred(self, ptype: str, secret: str, register: dict) -> str:
+        if ptype == "default_userpw":
+            return secret
+        mac12 = self._device_mac.replace(":", "").replace("-", "")
+        return _build_cred(register.get("extra_crypt") or {}, self.username, secret, mac12)
 
     def authenticate(self) -> None:
-        """Run full SPAKE2+ handshake. Raises AuthError on failure."""
+        """Run the full SPAKE2+ handshake. Raises AuthError on failure."""
         self._discover()
-        ptype = ("default_userpw" if 0 in self._tpap_pake else
-                 "userpw"         if 2 in self._tpap_pake else
-                 "shared_token"   if 3 in self._tpap_pake else "userpw")
+        ptype = self._passcode_type()
+        candidates = self._candidate_secrets(ptype)
+        if not candidates:
+            raise AuthError(f"No credential candidates for passcode type {ptype!r}")
+
+        last: Exception | None = None
+        for n, secret in enumerate(candidates, start=1):
+            try:
+                self._handshake(ptype, secret)
+                return
+            except AuthError as exc:
+                last = exc
+                if n < len(candidates):
+                    _LOGGER.debug("TPAP credential candidate %d/%d rejected: %s",
+                                  n, len(candidates), exc)
+        raise last
+
+    def _handshake(self, ptype: str, secret: str) -> None:
         ur = _b64e(os.urandom(32))
+        username = _sha256hex_upper("admin") if self._user_hash_type == 1 else _md5hex("admin")
 
         reg = self._post("/", {"method": "login", "params": {
-            "sub_method": "pake_register", "username": _md5hex("admin"),
+            "sub_method": "pake_register", "username": username,
             "user_random": ur, "cipher_suites": [1],
             "encryption": ["aes_128_ccm", "chacha20_poly1305", "aes_256_ccm"],
             "passcode_type": ptype, "stok": None,
         }})
-        if reg.get("error_code", 0):
-            raise AuthError(f"pake_register failed: error_code={reg.get('error_code')}")
+        _raise_for_error(reg, "pake_register")
         r = reg["result"]
 
-        st = int(r.get("cipher_suites") or 2)
+        st    = int(r.get("cipher_suites") or 2)
         iters = int(r.get("iterations") or 10000)
+        if iters <= 0:
+            raise AuthError("pake_register returned invalid iterations")
         self._cipher_id = (r.get("encryption") or "aes_128_ccm").lower().replace("-", "_")
+        if self._cipher_id not in _CIPHER_LABELS:
+            raise AuthError(f"Unsupported session cipher: {self._cipher_id}")
         self._hkdf_hash = "SHA512" if st in (2, 4, 5, 7, 9) else "SHA256"
         cmac = st in (8, 9)
         dlen = 64 if self._hkdf_hash == "SHA512" else 32
 
-        mac12 = self._device_mac.replace(":", "").replace("-", "")
-        cred  = _build_cred(r.get("extra_crypt") or {}, self.username, self.password, mac12)
+        cred = self._resolve_cred(ptype, secret, r)
 
-        G = NIST256p.generator; order = G.order(); curve = NIST256p.curve
-        Mx, My = _sec1_xy(_P256_M); Nx, Ny = _sec1_xy(_P256_N)
-        M = ellipticcurve.Point(curve, Mx, My, order)
-        N = ellipticcurve.Point(curve, Nx, Ny, order)
+        M_enc, N_enc, nist, curve = _suite_params(st)
+        G = nist.generator; order = G.order(); ec_curve = nist.curve
+        Mx, My = _sec1_xy(M_enc, curve); Nx, Ny = _sec1_xy(N_enc, curve)
+        M = ellipticcurve.Point(ec_curve, Mx, My, order)
+        N = ellipticcurve.Point(ec_curve, Nx, Ny, order)
 
         a, b = _derive_ab(cred.encode(), _b64d(r["dev_salt"]), iters)
         w, h = a % order, b % order
         x = secrets.randbelow(order - 1) + 1
 
-        L     = x * G + w * M;   L_enc = _xy_unc(L.x(), L.y())
-        Rx, Ry = _sec1_xy(_b64d(r["dev_share"]))
-        R     = ellipticcurve.Point(curve, Rx, Ry, order); R_enc = _xy_unc(R.x(), R.y())
-        Rp    = R + (-(w * N))
-        Z_enc = _xy_unc((x * Rp).x(), (x * Rp).y())
-        V_enc = _xy_unc(((h % order) * Rp).x(), ((h % order) * Rp).y())
+        L      = x * G + w * M
+        L_enc  = _xy_unc(L.x(), L.y(), curve)
+        Rx, Ry = _sec1_xy(_b64d(r["dev_share"]), curve)
+        R      = ellipticcurve.Point(ec_curve, Rx, Ry, order)
+        R_enc  = _xy_unc(R.x(), R.y(), curve)
+        Rp     = R + (-(w * N))
+        Z_enc  = _xy_unc((x * Rp).x(), (x * Rp).y(), curve)
+        V_enc  = _xy_unc(((h % order) * Rp).x(), ((h % order) * Rp).y(), curve)
 
         hfn   = _sha512 if self._hkdf_hash == "SHA512" else _sha256
         ctx   = hfn(_PAKE_CTX + _b64d(ur) + _b64d(r["dev_random"]))
         trans = (_l8(ctx) + _l8(b"") + _l8(b"")
-                 + _l8(_xy_unc(Mx, My)) + _l8(_xy_unc(Nx, Ny))
+                 + _l8(_xy_unc(Mx, My, curve)) + _l8(_xy_unc(Nx, Ny, curve))
                  + _l8(L_enc) + _l8(R_enc) + _l8(Z_enc) + _l8(V_enc)
                  + _l8(_encode_w(w)))
         T = hfn(trans)
@@ -287,23 +583,64 @@ class TapoVacuumClient:
         u_conf   = mac_fn(KcA, R_enc)
         e_conf   = mac_fn(KcB, L_enc)
 
-        share = self._post("/", {"method": "login", "params": {
-            "sub_method": "pake_share",
+        params = {
+            "sub_method":   "pake_share",
             "user_share":   _b64e(L_enc),
             "user_confirm": _b64e(u_conf),
-        }})
-        if share.get("error_code", 0):
-            raise AuthError(f"pake_share failed: error_code={share.get('error_code')}")
+        }
+        # tls 0 leaves the transport unauthenticated, so a device offering DAC
+        # proves its identity by signing our nonce with its attestation cert.
+        use_dac = self._tls_mode == 0 and self._tpap_dac
+        if use_dac:
+            self._dac_nonce = _b64e(os.urandom(32))
+            params["dac_nonce"] = self._dac_nonce
+
+        share = self._post("/", {"method": "login", "params": params})
+        _raise_for_error(share, "pake_share")
         s = share["result"]
 
         if (s.get("dev_confirm") or "").lower() != _b64e(e_conf).lower():
             raise AuthError("SPAKE2+ confirmation mismatch — wrong password?")
 
+        self._shared_key = shared
+        if use_dac:
+            self._verify_dac_proof(s)
+
         self._session_id = s.get("sessionId") or s.get("stok") or ""
-        self._seq        = int(s.get("start_seq") or 1)
+        if not self._session_id:
+            raise AuthError("pake_share response missing session id")
+        # The reference implementation treats a missing start_seq as fatal; keep
+        # the historical default of 1 so older firmware still works, but say so.
+        if s.get("start_seq") is None:
+            _LOGGER.warning("TPAP: %s omitted start_seq, defaulting to 1", self.host)
+            self._seq = 1
+        else:
+            self._seq = int(s["start_seq"])
         self._key, self._base_nonce = _derive_cipher(shared, self._cipher_id, self._hkdf_hash)
         self._save_session()
-        _LOGGER.debug("TPAP session established with %s", self.host)
+        _LOGGER.debug("TPAP session established with %s (suite %s, %s)",
+                      self.host, st, self._cipher_id)
+
+    def _verify_dac_proof(self, share_result: dict) -> None:
+        """Check the device attestation chain and its signature over our nonce."""
+        dac_ca    = share_result.get("dac_ca") or ""
+        dac_ica   = share_result.get("dac_ica") or ""
+        dac_proof = share_result.get("dac_proof")
+        if not (dac_ca and isinstance(dac_proof, str)):
+            return
+        try:
+            ca  = _load_cert(dac_ca)
+            ica = _load_cert(dac_ica) if dac_ica else None
+            _verify_cert_chain(ca, ica)
+            pub = ca.public_key()
+            if not isinstance(pub, ec.EllipticCurvePublicKey):
+                raise AuthError(f"Unsupported DAC key type: {type(pub).__name__}")
+            pub.verify(_b64d(dac_proof), self._shared_key + _b64d(self._dac_nonce),
+                       ec.ECDSA(hashes.SHA256()))
+        except AuthError:
+            raise
+        except Exception as exc:
+            raise AuthError(f"DAC verification failed: {exc}") from exc
 
     def _ensure_auth(self) -> None:
         if not self._session_id:
@@ -311,41 +648,51 @@ class TapoVacuumClient:
 
     # ---- Send ----------------------------------------------------------------
     def send(self, method: str, params: dict | None = None) -> dict:
+        """Send an encrypted request, re-handshaking once if the session lapsed."""
         with self._lock:
             return self._send(method, params)
 
-    def _send(self, method: str, params: dict | None = None) -> dict:
-        """Send an encrypted request. Re-auths once on session expiry."""
+    def _send(self, method: str, params: dict | None) -> dict:
         self._ensure_auth()
         for attempt in range(2):
             try:
-                payload = (struct.pack(">I", self._seq)
-                           + _encrypt(self._cipher_id, self._key, self._base_nonce,
-                                      json.dumps({"method": method,
-                                                  "params": params or {}}).encode(),
-                                      self._seq))
-                raw = self._post(f"/stok={self._session_id}/ds", payload, binary=True)
-                if len(raw) < 4 + _TAG_LEN:
-                    raise RuntimeError(f"Response too short ({len(raw)} bytes)")
-                rseq  = struct.unpack(">I", raw[:4])[0]
-                plain = _decrypt(self._cipher_id, self._key, self._base_nonce, raw[4:], rseq)
-                self._seq += 1
-                self._save_session()
-                resp = json.loads(plain.decode())
-                if resp.get("error_code", 0):
-                    raise RuntimeError(f"Device error {resp['error_code']}")
-                return resp
-            except AuthError:
-                raise
-            except Exception as exc:
+                return self._send_once(method, params)
+            except _SessionLost as exc:
                 if attempt == 0:
-                    _LOGGER.debug("Send failed (%s), re-authenticating", exc)
+                    _LOGGER.debug("TPAP session lost (%s), re-authenticating", exc)
                     self._clear_session()
-                    self.authenticate()
+                    try:
+                        self.authenticate()
+                    except _SessionLost as reauth:
+                        raise RuntimeError(str(reauth)) from reauth
                 else:
-                    raise
+                    raise RuntimeError(str(exc)) from exc
+        raise RuntimeError("unreachable")
 
-    # ---- High-level API calls -----------------------------------------------
+    def _send_once(self, method: str, params: dict | None) -> dict:
+        payload = (struct.pack(">I", self._seq)
+                   + _encrypt(self._cipher_id, self._key, self._base_nonce,
+                              json.dumps({"method": method,
+                                          "params": params or {}}).encode(),
+                              self._seq))
+        try:
+            raw = self._post(f"/stok={self._session_id}/ds", payload, binary=True)
+        except requests.RequestException as exc:
+            # A reset or refused connection usually means the device dropped us.
+            raise _SessionLost(f"transport error: {exc}") from exc
+        if len(raw) < 4 + _TAG_LEN:
+            raise _SessionLost(f"response too short ({len(raw)} bytes)")
+        rseq = struct.unpack(">I", raw[:4])[0]
+        try:
+            plain = _decrypt(self._cipher_id, self._key, self._base_nonce, raw[4:], rseq)
+        except Exception as exc:
+            raise _SessionLost(f"decrypt failed: {exc}") from exc
+        self._seq += 1
+        self._save_session()
+        resp = json.loads(plain.decode())
+        _raise_for_error(resp, method)
+        return resp
+
     # ---- Batched reads --------------------------------------------------------
     _MULTI_BATCH = 5   # what python-kasa uses against real devices
 
@@ -428,6 +775,71 @@ class TapoVacuumClient:
 
     def get_clean_records(self) -> dict:
         return self.send("getCleanRecords")["result"]
+
+    # ---- Capabilities ------------------------------------------------------------
+    def get_components(self) -> dict[str, int]:
+        """{component_id: version} from getComponentList; what this model can do."""
+        r = self.send("getComponentList")["result"]
+        return {c["id"]: int(c.get("ver_code", 0)) for c in r.get("component_list", []) if "id" in c}
+
+    # Optional on/off settings seen across RV20/RV30/RV50 firmware; which ones a
+    # model has is found by probing once (probe_bool_settings).
+    BOOL_SETTINGS = {
+        "child_lock":          ("getChildLockInfo", "setChildLockInfo", "child_lock_status"),
+        "carpet_boost":        ("getCarpetAutoBoost", "setCarpetAutoBoost", "auto_boost"),
+        "ai_avoid":            ("getAiAvoidSwitch", "setAiAvoidSwitch", "switch"),
+        "automatic_remopping": ("getAutomaticRemoppingSwitch", "setAutomaticRemoppingSwitch", "switch"),
+        "clean_along_floor":   ("getCleanAlongFloorSwitch", "setCleanAlongFloorSwitch", "switch"),
+        "extended_mopping":    ("getExtendedMoppingSwitch", "setExtendedMoppingSwitch", "switch"),
+        "pet_area_deep_clean": ("getPetAreaDeepSwitch", "setPetAreaDeepSwitch", "switch"),
+        "sweep_walk":          ("getSweepWalk", "setSweepWalk", "sweepWalk"),
+    }
+
+    def probe_bool_settings(self) -> dict[str, bool]:
+        """Which BOOL_SETTINGS this model answers, with their current values."""
+        out = {}
+        for key, (getter, _, field) in self.BOOL_SETTINGS.items():
+            try:
+                out[key] = bool(self.send(getter)["result"].get(field))
+            except Exception as exc:
+                _LOGGER.debug("%s not supported: %s", getter, exc)
+        return out
+
+    def get_bool_settings(self, keys) -> dict[str, bool]:
+        out = {}
+        for key in keys:
+            getter, _, field = self.BOOL_SETTINGS[key]
+            try:
+                out[key] = bool(self.send(getter)["result"].get(field))
+            except Exception as exc:
+                _LOGGER.debug("%s failed: %s", getter, exc)
+        return out
+
+    def set_bool_setting(self, key: str, value: bool) -> None:
+        _, setter, field = self.BOOL_SETTINGS[key]
+        self.send(setter, {field: bool(value)})
+
+    # ---- Maps ----------------------------------------------------------------------
+    def set_current_map(self, map_id: int) -> None:
+        """Switch the active map (the robot relocalises on it)."""
+        self.send("setMapInfo", {"current_map_id": int(map_id)})
+
+    # ---- Presets (Tapo app "customisation rules") ------------------------------------
+    def get_presets(self) -> list[dict]:
+        """Saved presets: [{rule_id, rule_name (b64), map_id, mode, invalid}, ...]."""
+        r = self.send("getCustomizationRulesInfo")["result"]
+        return r.get("rule_list") or []
+
+    def get_preset_detail(self, map_id: int, rule_id: int) -> dict:
+        """Rooms and per-room settings of one preset."""
+        return self.send("getCustomizationRuleData", {"map_id": int(map_id), "rule_id": int(rule_id)})["result"]
+
+    def run_preset(self, rule_id: int, map_id: int, clean_order: bool = True) -> None:
+        """Start a preset exactly as the app does (clean_mode 5); switches map first if needed."""
+        current, _ = self.get_map_info()
+        if current != map_id:
+            self.set_current_map(map_id)
+        self.clean_custom_rule(rule_id, map_id, clean_order)
 
     def get_consumables(self) -> dict:
         return self.send("getConsumablesInfo")["result"]

@@ -13,6 +13,8 @@ from homeassistant.components.vacuum import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
+
+from .tpap import AuthError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -126,24 +128,32 @@ class TapoVacuumEntity(CoordinatorEntity[TapoCoordinator], StateVacuumEntity):
             "integration":   DOMAIN,
         }
 
+    async def _call(self, fn, *args):
+        try:
+            return await self.hass.async_add_executor_job(fn, *args)
+        except AuthError as exc:
+            raise HomeAssistantError(f"{self.coordinator.device_name}: authentication failed ({exc})") from exc
+        except Exception as exc:
+            raise HomeAssistantError(f"{self.coordinator.device_name} rejected the command: {exc}") from exc
+
     async def async_start(self) -> None:
-        await self.hass.async_add_executor_job(self.coordinator.client.start)
+        await self._call(self.coordinator.client.start)
         await self.coordinator.async_refresh_soon()
 
     async def async_pause(self) -> None:
-        await self.hass.async_add_executor_job(self.coordinator.client.pause)
+        await self._call(self.coordinator.client.pause)
         await self.coordinator.async_refresh_soon()
 
     async def async_stop(self, **kwargs: Any) -> None:
-        await self.hass.async_add_executor_job(self.coordinator.client.stop)
+        await self._call(self.coordinator.client.stop)
         await self.coordinator.async_refresh_soon()
 
     async def async_clean_spot(self, **kwargs: Any) -> None:
-        await self.hass.async_add_executor_job(self.coordinator.client.clean_spot)
+        await self._call(self.coordinator.client.clean_spot)
         await self.coordinator.async_refresh_soon()
 
     async def async_locate(self, **kwargs: Any) -> None:
-        await self.hass.async_add_executor_job(self.coordinator.client.locate)
+        await self._call(self.coordinator.client.locate)
 
     # ---- vacuum.clean_area (HA 2026.2+) --------------------------------------
     # Segment ids are "<map_id>:<room_id>" because room ids restart at 1 on every
@@ -185,7 +195,7 @@ class TapoVacuumEntity(CoordinatorEntity[TapoCoordinator], StateVacuumEntity):
         await self.coordinator.async_refresh_soon()
 
     async def async_return_to_base(self, **kwargs: Any) -> None:
-        await self.hass.async_add_executor_job(self.coordinator.client.dock)
+        await self._call(self.coordinator.client.dock)
         await self.coordinator.async_refresh_soon()
 
     async def async_set_fan_speed(self, fan_speed: str, **kwargs: Any) -> None:
@@ -193,5 +203,5 @@ class TapoVacuumEntity(CoordinatorEntity[TapoCoordinator], StateVacuumEntity):
         if value is None:
             _LOGGER.error("Unknown fan speed: %s", fan_speed)
             return
-        await self.hass.async_add_executor_job(self.coordinator.client.set_fan_speed, value)
+        await self._call(self.coordinator.client.set_fan_speed, value)
         await self.coordinator.async_refresh_soon()
