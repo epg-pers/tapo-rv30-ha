@@ -1,14 +1,16 @@
 # Tapo RV30 Robot Vacuum — Home Assistant Integration
 
-Local-only Home Assistant integration for the **TP-Link Tapo RV30 Max Plus** robot vacuum.
+Local-only Home Assistant integration for **TP-Link Tapo robot vacuums** (RV20 / RV30
+Max Plus and relatives). No cloud dependency: it talks directly to the vacuum over your LAN.
 
-Implements the **TPAP / SPAKE2+** authentication protocol reverse-engineered from
-[python-kasa PR #1592](https://github.com/python-kasa/python-kasa/pull/1592).
-No cloud dependency — communicates directly with the vacuum over your LAN.
+Newer firmware uses the **TPAP / SPAKE2+** protocol, implemented here from the work in
+[python-kasa PR #1592](https://github.com/python-kasa/python-kasa/pull/1592). Units that
+still use the older AES scheme (RV30C, RV30C Mop) are detected automatically and handled
+through python-kasa.
 
 ## Features
 
-- Full vacuum control — start, pause, stop, dock
+- Full vacuum control — start, pause, stop, dock, locate, spot clean
 - **Room-by-room cleaning** via `tapo_rv30.clean_rooms` service, or the native
   `vacuum.clean_area` action (map rooms to Home Assistant areas in the vacuum
   entity's settings; HA 2026.2+)
@@ -24,17 +26,17 @@ No cloud dependency — communicates directly with the vacuum over your LAN.
 - Fan speed selection (Quiet / Standard / Turbo / Max / Ultra)
 - Water level select (Off / Low / Medium / High)
 - Clean passes select (1 / 2 / 3)
-- Battery, clean progress, mop attached and do-not-disturb-active sensors
+- Battery, charging, clean progress, mop attached and do-not-disturb-active sensors
 - Poll interval setting (10 to 300 s), reconfigure and reauth from the integration page
 - Error state sensor (e.g. "Ok", "Dust Bin Removed", "Trapped")
 - Consumable wear sensors (main brush, side brush, filter, sensor, charge contacts)
-- Locate (beep) and spot clean
 - Zone cleaning via `tapo_rv30.clean_zone` and per-room suction / water / passes via `tapo_rv30.set_room_settings`
 - Empty Bin button and consumable reset buttons
 - Auto Empty, Do Not Disturb (with start / end times), Child Lock and Carpet Boost switches
 - Voice volume control
 - Last Clean sensor with run totals
-- Config flow UI — set up from Settings → Devices & Services
+- Config flow UI with reconfigure and reauth; diagnostics download for bug reports
+- Integration icon (HA 2026.3+), served from the integration itself
 
 ## Requirements
 
@@ -100,10 +102,12 @@ Requires HACS frontend cards:
 
 ## Standalone CLI
 
-[`tapo_vacuum.py`](tapo_vacuum.py) is a standalone command-line tool (no HA required):
+[`tapo_vacuum.py`](tapo_vacuum.py) is a standalone command-line tool (no HA required).
+It uses the original TPAP handshake (P-256 suites only); the integration's `tpap.py`
+is the maintained transport.
 
 ```bash
-pip install requests ecdsa lz4 Pillow
+pip install requests ecdsa cryptography lz4 Pillow
 python3 tapo_vacuum.py status
 python3 tapo_vacuum.py map
 python3 tapo_vacuum.py clean kitchen lounge
@@ -111,21 +115,22 @@ python3 tapo_vacuum.py clean kitchen lounge
 
 ## Supported Models
 
-- **RV30 Max Plus (EU)** firmware 1.3.2
-- **RV20 Max Plus (EU)** firmware 1.2.0
+- **RV30 Max Plus (EU)**, firmware 1.3.3, tested on every release with HA 2026.10
+- **RV20 Max Plus (EU)**, firmware 1.2.0, reported working
 
-Should work on any Tapo RobovAC using TPAP. AES-transport models are supported
-on a best-effort basis (no test hardware); please report results on #25.
+Entities are created from what the robot reports it can do (`getComponentList` and a
+settings probe), so other Tapo RobovAC models should work with the features they have;
+the RV50 Pro Omni has been reported working on a fork. AES-transport models (RV30C) are
+supported on a best-effort basis with no test hardware; please report results on #25.
 
 ## Protocol notes — room cleaning
 
-The `setSwitchClean` payload for selective room cleaning was reverse-engineered
-from live device traffic and, as far as we know, is not documented anywhere else.
-Neither [python-kasa](https://github.com/python-kasa/python-kasa) (which only
-implements whole-house `clean_mode: 0`) nor the official Home Assistant Tapo
-integration implement room cleaning at the time of writing.
+The `setSwitchClean` payload for selective room cleaning was reverse-engineered here
+from live device traffic and later contributed to
+[python-kasa](https://github.com/python-kasa/python-kasa)
+([#1660](https://github.com/python-kasa/python-kasa/pull/1660)).
 
-The correct payload is:
+The payload is:
 
 ```json
 {
@@ -139,11 +144,11 @@ The correct payload is:
 }
 ```
 
-Key points:
-- `clean_mode: 2` is **spot clean** — the `rooms` array is silently ignored
-- `clean_mode: 3` is selective room clean
-- `room_list` is a plain integer array of room IDs (the pixel values used in the LZ4 map)
-- Discovered by reading `getSwitchClean` while the official Tapo app performed a room clean
+`clean_mode` values: `0` whole house, `1` whole house with per-room settings, `2` spot,
+`3` selected rooms (`room_list`), `4` zones (`area_list` of rectangles in mm, which is also
+what the app uses for spot clean), `5` a saved preset (`custom_rule_id`, listed by
+`getCustomizationRulesInfo`). `room_list` holds the room ids, which are the pixel values
+in the LZ4 map. `tapo_rv30.send_raw` lets you try any method against your own robot.
 
 ## Credits
 
@@ -152,6 +157,12 @@ The TPAP / SPAKE2+ transport code (`custom_components/tapo_rv30/tpap.py` and
 [python-kasa](https://github.com/python-kasa/python-kasa) project
 ([PR #1592](https://github.com/python-kasa/python-kasa/pull/1592)), which is
 licensed under GPL-3.0-or-later.
+
+Thanks to the people whose forks and PRs fed back in: @cheesyturkey (command fixes,
+settings and dock entities), @jan-tdy (batching, retries, room geometry, schedules),
+@peggleg (AES transport, schedules), @danieyal (TPAP hardening, charging sensor),
+@Charles226 (security review), @cavefire (presets, capability discovery),
+@ckarlof (map-card calibration), @G0LDENWASTAKEN (HA 2026.8 fix).
 
 ## License
 
