@@ -15,7 +15,7 @@ through python-kasa.
   zero setup
 - **Room-by-room cleaning** via `tapo_rv30.clean_rooms` service, or the native
   `vacuum.clean_area` action (map rooms to Home Assistant areas in the vacuum
-  entity's settings; HA 2026.2+)
+  entity's settings)
 - **Current Room** sensor, inferred from the vacuum's position on the map
 - **Schedules** sensor listing the Tapo-app schedules, and `tapo_rv30.run_schedule`
   to start one now
