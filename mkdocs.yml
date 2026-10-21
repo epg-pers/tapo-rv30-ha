@@ -53,5 +53,5 @@ extra:
   social:
     - icon: fontawesome/brands/github
       link: https://github.com/epg-pers/tapo-rv30-ha
-    - icon: fontawesome/brands/home-assistant
+    - icon: material/home-assistant
       link: https://my.home-assistant.io/redirect/hacs_repository/?owner=epg-pers&repository=tapo-rv30-ha&category=integration
