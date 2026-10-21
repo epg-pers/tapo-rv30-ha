@@ -10,7 +10,7 @@
  * the vacuum's device automatically.
  */
 
-const CARD_VERSION = "0.19.0";
+const CARD_VERSION = "0.19.1";
 const ROOM_COLORS = ["#ffb3ba", "#bae1ff", "#baffc9", "#ffffba", "#dcbaff", "#ffdcba", "#baffff"];
 
 const ICONS = {
@@ -92,6 +92,7 @@ canvas { display: block; width: 100%; height: auto; touch-action: none; cursor: 
   background: color-mix(in srgb, var(--card-background-color) 80%, transparent); backdrop-filter: blur(6px); }
 .floors button { border: none; cursor: pointer; padding: 5px 10px; border-radius: 999px; font-size: .78em; background: transparent; color: var(--secondary-text-color); }
 .floors button.on { background: var(--primary-color); color: var(--text-primary-color, #fff); }
+.mapwrap.has-go .floors { bottom: 60px; }
 .sheet { position: absolute; inset: 0; display: flex; align-items: flex-end; background: rgba(0,0,0,.35); backdrop-filter: blur(2px); z-index: 3; }
 .sheet .panel { width: 100%; background: var(--card-background-color); border-radius: 16px 16px 0 0; padding: 14px 16px 16px; box-shadow: 0 -6px 24px rgba(0,0,0,.3); }
 .sheet h4 { margin: 0 0 10px; font-size: 1em; font-weight: 500; color: var(--primary-text-color); display: flex; justify-content: space-between; align-items: center; }
@@ -658,6 +659,7 @@ class TapoRV30Card extends HTMLElement {
       const room = this._roomAt(this._target[0], this._target[1]);
       go.hidden = false; go.querySelector("span").textContent = room != null ? `Go to the ${this._roomName(room)}` : "Go here";
     } else go.hidden = true;
+    this._el.mapwrap.classList.toggle("has-go", !go.hidden);
     this._el.tClear.hidden = !(this._selected.size || this._zone || this._target);
   }
 

@@ -10,31 +10,54 @@ card is still there for your own dashboards; the page is the full-size version.
 
 ## What is on it
 
-- **Map**: the bundled card, full size: tap rooms, draw zones, floors, presets, controls,
-  the status panel with the last clean map.
-- **Schedules**: the robot's own schedules, the ones it runs with or without the app. Add,
-  edit, enable or disable and delete them with a form (start time, days, rooms or a preset or
-  the whole house, suction, water, passes). Nothing is stored in Home Assistant; it all
-  goes to the robot through `add_schedule`, `set_schedule` and `remove_schedule`.
-  A schedule whose start time falls inside the robot's **Do Not Disturb** window is
-  flagged in the list and in the editor, because the robot keeps it but never runs it
-  (verified on an RV30 Max Plus; the Tapo app shows the same warning). Saving or enabling
-  one asks first. The Do Not Disturb times are editable on the Settings tab.
+### Map
+
+The bundled card, full size: tap rooms, draw zones, floors, presets, controls, the status
+panel with the last clean map, and the go-to tool (tap a point, press Go).
+
+### Schedules
+
+The robot's own schedules, the ones it runs with or without the app. Add, edit, enable or
+disable and delete them with a form (start time, days, rooms or a preset or the whole
+house, suction, water, passes). Nothing is stored in Home Assistant; it all goes to the
+robot through `add_schedule`, `set_schedule` and `remove_schedule`.
+
+A schedule whose start time falls inside the robot's **Do Not Disturb** window is flagged
+in the list and in the editor, because the robot keeps it but never runs it (verified on an
+RV30 Max Plus; the Tapo app shows the same warning). Saving or enabling one asks first. The
+Do Not Disturb times are editable on the Settings tab.
 
 ![Schedule editor warning about Do Not Disturb](panel-dnd.png){ width="640" }
-- **History**: lifetime totals, cleans per day for the last 30 days, minutes per week for
-  the last 8 weeks, and the recent runs with how they were started.
+
+### History
+
+Lifetime totals, cleans per day for the last 30 days, minutes per week for the last 8
+weeks, and the recent runs with how they were started.
 
 ![History and statistics](panel-history.png){ width="760" }
-- **Rooms**: each room with how recently it was cleaned and how much of it the robot
-  covered, with a one-tap clean button.
-- **Drive**: the app's remote control. Take control and the robot drives off the dock;
-  hold an arrow button, or an arrow key, and it moves until you let go. Stop, vacuum while
-  driving, spot clean where it stands, locate, send it home. The map on the left follows it.
-  Verified on an RV30 Max Plus. If yours misbehaves, press Stop or Send home.
-- **Maintenance**: consumable life bars (amber under 30 percent, red under 10), Empty Bin,
-  resets, and the Omni dock actions where the dock has them.
-- **Settings**: every switch, select and number the robot exposes.
+
+### Rooms
+
+Each room with how recently it was cleaned and how much of it the robot covered, with a
+one-tap clean button.
+
+### Drive
+
+The app's remote control. Take control and the robot drives off the dock; hold an arrow
+button, or an arrow key, and it moves until you let go. Stop, vacuum while driving, spot
+clean where it stands, locate, send it home. The map on the left follows it. Verified on an
+RV30 Max Plus. If yours misbehaves, press Stop or Send home.
+
+![The Drive tab](panel-drive.png){ width="520" }
+
+### Maintenance
+
+Consumable life bars (amber under 30 percent, red under 10), Empty Bin, resets, and the
+Omni dock actions where the dock has them.
+
+### Settings
+
+Every switch, select, number and time the robot exposes, Do Not Disturb included.
 
 With more than one robot, each gets a tab in the header.
 

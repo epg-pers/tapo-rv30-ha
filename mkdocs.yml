@@ -55,3 +55,12 @@ extra:
       link: https://github.com/epg-pers/tapo-rv30-ha
     - icon: material/home-assistant
       link: https://my.home-assistant.io/redirect/hacs_repository/?owner=epg-pers&repository=tapo-rv30-ha&category=integration
+
+nav:
+  - Overview: index.md
+  - The sidebar page: panel.md
+  - Entities: entities.md
+  - Services and events: services.md
+  - Matter: matter.md
+  - Troubleshooting: troubleshooting.md
+  - Protocol notes: protocol.md

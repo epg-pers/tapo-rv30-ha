@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.19.1
+
+### Fixed
+
+- Card: the floor chips no longer sit under the Go button on multi-floor maps while rooms, a zone or a go-to point are selected.
+- Docs: the sidebar page is split into sections with a Drive screenshot, the entities page shows the go-to tool, the services table no longer wraps service names, and the site has a proper navigation order.
+
 ## v0.19.0
 
 ### New
