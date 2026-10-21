@@ -129,7 +129,7 @@ needs no Home Assistant.
 
 ## The sidebar page
 
-<p align="center"><img src="docs/panel.png" width="760" alt="The Tapo Vacuum sidebar page"></p>
+<p align="center"><img src="docs/panel-remote.png" width="760" alt="The Tapo Vacuum sidebar page"></p>
 
 *Mock-up with a made-up house.* Map, a schedules editor, history and statistics, rooms with
 freshness, maintenance and settings in one page. Details in [docs/panel.md](docs/panel.md).
