@@ -88,13 +88,13 @@ _LAST_CLEAN_SENSOR = TapoSensorDescription(
 
 
 _CURRENT_ROOM_SENSOR = TapoSensorDescription(
-    key="current_room", name="Current Room", icon="mdi:floor-plan",
+    key="current_room", translation_key="current_room", name="Current Room",
     # Inferred from the vacuum's map position; refreshed every poll.
     value_fn=lambda d: d.get("current_room"),
 )
 
 _SCHEDULES_SENSOR = TapoSensorDescription(
-    key="schedules", name="Schedules", icon="mdi:calendar-clock",
+    key="schedules", translation_key="schedules", name="Schedules",
     # Count of schedules saved in the Tapo app; the decoded list is in the attributes.
     value_fn=lambda d: len(d.get("schedules") or []),
     attrs_fn=lambda d: {"schedules": d.get("schedules") or []},
@@ -124,7 +124,7 @@ def _matter(d: dict) -> dict:
 
 
 _MATTER_SENSOR = TapoSensorDescription(
-    key="matter", name="Matter", icon="mdi:link-variant",
+    key="matter", translation_key="matter", name="Matter",
     entity_category=EntityCategory.DIAGNOSTIC, entity_registry_enabled_default=False,
     # Not paired / Pairing window open / Paired. The setup code and QR payload are the
     # robot's fixed ones (printed on it); they are attributes here so you can pair from
@@ -136,7 +136,7 @@ _MATTER_SENSOR = TapoSensorDescription(
 
 
 _MATTER_CODE_SENSOR = TapoSensorDescription(
-    key="matter_setup_code", name="Matter Setup Code", icon="mdi:qrcode",
+    key="matter_setup_code", translation_key="matter_setup_code", name="Matter Setup Code",
     entity_category=EntityCategory.DIAGNOSTIC, entity_registry_enabled_default=False,
     # The robot's fixed manual pairing code as the state, the QR payload as an attribute.
     value_fn=lambda d: ((d.get("settings") or {}).get("matter_setup") or {}).get("setup_code"),
@@ -154,9 +154,8 @@ _WIFI_SENSOR = TapoSensorDescription(
 
 
 _STATUS_SENSOR = TapoSensorDescription(
-    key="status",
+    key="status", translation_key="status",
     name="Status",
-    icon="mdi:robot-vacuum",
     value_fn=lambda d: STATUS_LABELS.get(d.get("status_code", 0), f"Code({d.get('status_code')})"),
 )
 
@@ -170,9 +169,8 @@ _BATTERY_SENSOR = TapoSensorDescription(
 )
 
 _ERROR_SENSOR = TapoSensorDescription(
-    key="error",
+    key="error", translation_key="error",
     name="Error",
-    icon="mdi:alert-circle",
     value_fn=lambda d: ERROR_CODES.get(
         (d.get("error_codes") or [0])[0], f"Code({(d.get('error_codes') or [0])[0]})"
     ),

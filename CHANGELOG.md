@@ -1,6 +1,16 @@
 # Changelog
 
-## v0.15.0
+## v0.16.0
+
+### New
+
+- **Discovery**: Home Assistant offers the robot when it sees its DHCP lease (TP-Link MAC prefix E0:D3:62 so far; other prefixes welcome via an issue) and the robot answers on the TPAP port. An existing entry follows the robot when its IP changes.
+- **Voice**: Assist sentences registered by the integration: "vacuum the kitchen and the lounge", "clean everywhere", "send the robot home", "stop the vacuum". Rooms resolve against the current map; the reply names anything it did not recognise.
+- **Device triggers** for clean started / finished / error, so the events appear in the automation editor's device picker. Events now carry `device_id`.
+- **Blueprints**: notify with the Last Clean Map when a run finishes; clean when everyone has left. Import badges in the README.
+- **Icons**: state-dependent icons for the status, error, Matter, problem and charging entities (icons.json), and the vacuum entity wears its own state-coloured robot picture.
+- **Furniture** on the map is now drawn as filled, anti-aliased illustrations (beds with pillows, sofas with cushions, tables with chairs, appliances, plants, toilet, pet items) instead of line glyphs.
+
 
 ### New
 

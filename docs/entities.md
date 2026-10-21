@@ -5,7 +5,7 @@ plus a settings probe), so a feature the robot lacks simply has no entity.
 
 ## Vacuum
 
-`vacuum.<name>`: start, pause, stop, return to base, locate, clean spot, fan speed
+`vacuum.<name>` (shown with the integration's own state-coloured robot picture): start, pause, stop, return to base, locate, clean spot, fan speed
 (Quiet / Standard / Turbo / Max / Ultra), and the native `vacuum.clean_area` action (map rooms
 to Home Assistant areas in the entity's settings). Attributes: `fan_speed`, `water_level`,
 `clean_passes`, `mop_attached`, `clean_area`, `clean_time_min`, `clean_percent`,

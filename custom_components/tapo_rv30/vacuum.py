@@ -27,6 +27,7 @@ from .const import (
     WATER_INT_TO_NAME,
 )
 from .coordinator import TapoCoordinator
+from .frontend import STATIC_URL
 from .mapdata import b64name
 
 _LOGGER = logging.getLogger(__name__)
@@ -110,6 +111,15 @@ class TapoVacuumEntity(CoordinatorEntity[TapoCoordinator], StateVacuumEntity):
         if d is None:
             return None
         return FAN_INT_TO_NAME.get(d.get("suction", 4), "Max").capitalize()
+
+    @property
+    def entity_picture(self) -> str | None:
+        """Our own robot picture, coloured by state (served with the card)."""
+        act = self.activity
+        name = act.value if act is not None else "idle"
+        if name not in ("docked", "cleaning", "paused", "returning", "error", "idle"):
+            name = "idle"
+        return f"{STATIC_URL}/icons/robot-{name}.png"
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:

@@ -1,6 +1,9 @@
 {
   "domain": "tapo_rv30",
   "name": "Tapo Robot Vacuum",
+  "after_dependencies": [
+    "conversation"
+  ],
   "codeowners": [
     "@epg-pers"
   ],
@@ -10,6 +13,14 @@
     "http",
     "lovelace"
   ],
+  "dhcp": [
+    {
+      "registered_devices": true
+    },
+    {
+      "macaddress": "E0D362*"
+    }
+  ],
   "documentation": "https://github.com/epg-pers/tapo-rv30-ha",
   "iot_class": "local_polling",
   "issue_tracker": "https://github.com/epg-pers/tapo-rv30-ha/issues",
@@ -17,5 +28,5 @@
     "ecdsa>=0.18",
     "python-kasa>=0.10.0"
   ],
-  "version": "0.15.0"
+  "version": "0.16.0"
 }

@@ -28,6 +28,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry,
 
 class TapoCharging(TapoEntity, BinarySensorEntity):
     _attr_device_class = BinarySensorDeviceClass.BATTERY_CHARGING
+    _attr_translation_key = "charging"
 
     @property
     def is_on(self) -> bool | None:
@@ -61,6 +62,7 @@ class TapoDndActive(TapoEntity, BinarySensorEntity):
 class TapoProblem(TapoEntity, BinarySensorEntity):
     """On while the robot reports an error (dust bin removed, trapped, ...)."""
     _attr_device_class = BinarySensorDeviceClass.PROBLEM
+    _attr_translation_key = "problem"
 
     def _code(self) -> int:
         d = self.coordinator.data or {}

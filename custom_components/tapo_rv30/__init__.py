@@ -13,6 +13,9 @@ from .const import CONF_TRANSPORT, DEFAULT_PORT, DOMAIN, TRANSPORT_AES
 from .coordinator import TapoCoordinator
 from .frontend import async_setup_frontend
 from .services import async_setup_services, async_unload_services
+from .voice import async_setup_voice
+
+VOICE_KEY = f"{DOMAIN}_voice"
 from .tpap import TapoVacuumClient
 
 _LOGGER = logging.getLogger(__name__)
@@ -39,6 +42,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     async_setup_services(hass)
+    if VOICE_KEY not in hass.data:
+        hass.data[VOICE_KEY] = async_setup_voice(hass)
     return True
 
 
@@ -50,4 +55,6 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             coordinator.client.close()
         if not hass.data[DOMAIN]:
             async_unload_services(hass)
+            if (unregister := hass.data.pop(VOICE_KEY, None)) is not None:
+                unregister()
     return ok

@@ -1,0 +1,78 @@
+blueprint:
+  name: Tapo vacuum - clean when everyone has left
+  description: >-
+    Start a clean once every selected person has been away for a while, within a time
+    window, and only if the robot is docked. Give room names to clean just those rooms
+    (as the Tapo app names them), or leave empty for the whole house. Needs the Tapo
+    Robot Vacuum integration.
+  domain: automation
+  source_url: https://github.com/epg-pers/tapo-rv30-ha/blob/main/blueprints/automation/epg-pers/clean_when_everyone_leaves.yaml
+  input:
+    vacuum_entity:
+      name: Robot
+      selector:
+        entity:
+          integration: tapo_rv30
+          domain: vacuum
+    people:
+      name: People
+      description: Everyone who must be away.
+      selector:
+        entity:
+          domain: person
+          multiple: true
+    away_for:
+      name: Away for
+      description: How long everyone must have been away before starting.
+      default:
+        minutes: 15
+      selector:
+        duration:
+    rooms:
+      name: Rooms
+      description: Room names to clean, comma separated, e.g. "Kitchen, Hallway". Empty cleans the whole house.
+      default: ""
+      selector:
+        text:
+    after:
+      name: Not before
+      default: "08:00:00"
+      selector:
+        time:
+    before:
+      name: Not after
+      default: "20:00:00"
+      selector:
+        time:
+mode: single
+triggers:
+  - trigger: state
+    entity_id: !input people
+    to: not_home
+    for: !input away_for
+conditions:
+  - condition: template
+    value_template: >-
+      {{ people | map('states') | select('ne', 'not_home') | list | count == 0 }}
+  - condition: time
+    after: !input after
+    before: !input before
+  - condition: state
+    entity_id: !input vacuum_entity
+    state: docked
+actions:
+  - choose:
+      - conditions: "{{ rooms | trim | length > 0 }}"
+        sequence:
+          - action: tapo_rv30.clean_rooms
+            target:
+              entity_id: !input vacuum_entity
+            data:
+              rooms: "{{ rooms.split(',') | map('trim') | select('ne', '') | list }}"
+    default:
+      - action: vacuum.start
+        target:
+          entity_id: !input vacuum_entity
+variables:
+  people: !input people
+  rooms: !input rooms

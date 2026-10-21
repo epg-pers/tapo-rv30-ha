@@ -25,6 +25,14 @@
           "username": "Tapo account email",
           "password": "Tapo account password"
         }
+      },
+      "discovery_confirm": {
+        "title": "Tapo robot vacuum found",
+        "description": "A Tapo robot vacuum answered at {host}. Enter your Tapo account to add it.",
+        "data": {
+          "username": "Tapo account email",
+          "password": "Tapo account password"
+        }
       }
     },
     "error": {
@@ -34,8 +42,10 @@
     "abort": {
       "already_configured": "This device is already configured",
       "reconfigure_successful": "Connection settings updated",
-      "reauth_successful": "Re-authentication successful"
-    }
+      "reauth_successful": "Re-authentication successful",
+      "not_tapo_vacuum": "The device at this address does not answer on the robot's port"
+    },
+    "flow_title": "Tapo robot vacuum ({host})"
   },
   "services": {
     "clean_rooms": {
@@ -301,6 +311,13 @@
     "local_api_unreachable": {
       "title": "{name} has stopped answering locally",
       "description": "Home Assistant could reach {name} at {host} before, but every poll has failed for the last 10 minutes. If nothing changed on your network, this is most likely the known Tapo firmware regression that breaks local access until the robot is power-cycled. Reboot the vacuum (hold the power button), and consider turning off automatic firmware updates in the Tapo app. This issue clears itself when polling works again."
+    }
+  },
+  "device_automation": {
+    "trigger_type": {
+      "clean_started": "{entity_name} started cleaning",
+      "clean_finished": "{entity_name} finished cleaning",
+      "error": "{entity_name} reported an error"
     }
   }
 }

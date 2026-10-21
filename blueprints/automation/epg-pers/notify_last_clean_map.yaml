@@ -1,0 +1,55 @@
+blueprint:
+  name: Tapo vacuum - notify with the last clean map
+  description: >-
+    When a Tapo robot vacuum finishes a run, send a phone notification with the area and
+    time cleaned and the Last Clean Map image attached. Needs the Tapo Robot Vacuum
+    integration (0.13 or newer) and the Home Assistant companion app.
+  domain: automation
+  source_url: https://github.com/epg-pers/tapo-rv30-ha/blob/main/blueprints/automation/epg-pers/notify_last_clean_map.yaml
+  input:
+    vacuum_device:
+      name: Robot
+      description: The Tapo robot vacuum.
+      selector:
+        device:
+          integration: tapo_rv30
+    last_clean_image:
+      name: Last Clean Map image
+      description: The robot's Last Clean Map image entity (image.<name>_last_clean_map).
+      selector:
+        entity:
+          integration: tapo_rv30
+          domain: image
+    notify_service:
+      name: Notify action
+      description: The companion app notify action for your phone, e.g. notify.mobile_app_my_phone.
+      selector:
+        text:
+    title:
+      name: Title
+      default: Vacuum finished
+      selector:
+        text:
+mode: queued
+max: 5
+triggers:
+  - trigger: device
+    domain: tapo_rv30
+    device_id: !input vacuum_device
+    type: clean_finished
+actions:
+  - delay:
+      seconds: 45
+  - action: !input notify_service
+    data:
+      title: !input title
+      message: >-
+        {% set r = trigger.event.data.get('record') or {} %}
+        {{ trigger.event.data.device }} cleaned
+        {% if r.get('area') is not none %}{{ r.area }} m2{% endif %}
+        {% if r.get('minutes') is not none %} in {{ r.minutes }} min{% endif %}
+        {% if r.get('error') %} and reported error {{ r.error }}{% endif %}.
+      data:
+        image: "/api/image_proxy/{{ last_clean_image }}"
+variables:
+  last_clean_image: !input last_clean_image

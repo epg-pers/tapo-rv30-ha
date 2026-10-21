@@ -2,6 +2,8 @@
 they can be unit-tested without a running HA."""
 from __future__ import annotations
 
+import re
+
 import base64
 import unicodedata
 from typing import Any, Callable
@@ -409,3 +411,14 @@ def matter_state(status: dict | None, read_at: float | None, now: float) -> dict
     else:
         state = "Not paired"
     return {"state": state, "fabrics": fabrics, "window_seconds_left": left}
+
+
+def split_room_phrase(text: str) -> list[str]:
+    """'the kitchen, lounge and the hallway' -> ['kitchen', 'lounge', 'hallway']."""
+    parts = re.split(r",|\band\b|&|\bplus\b", text or "", flags=re.I)
+    out = []
+    for p in parts:
+        p = re.sub(r"^\s*(the|my)\s+", "", p.strip(), flags=re.I).strip()
+        if p:
+            out.append(p)
+    return out

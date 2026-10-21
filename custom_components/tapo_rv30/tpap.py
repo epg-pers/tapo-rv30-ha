@@ -770,6 +770,7 @@ class TapoVacuumClient:
             "hw_ver": raw.get("hw_ver"),
             "rssi":   raw.get("rssi"),
             "signal_level": raw.get("signal_level"),
+            "mac":    raw.get("mac"),
         }
 
     def get_latest_firmware(self) -> dict:

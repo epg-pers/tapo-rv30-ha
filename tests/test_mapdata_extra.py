@@ -97,3 +97,10 @@ def test_matter_state():
     assert s["state"] == "Not paired" and s["window_seconds_left"] == 0        # window ran out before the next read
     s = matter_state({"status": 2, "bind_fabrics": [{"label": "Home Assistant", "vendor_id": 4939, "fabric_index": 1, "fabric_id": "x"}]}, 0, 0)
     assert s["state"] == "Paired" and s["fabrics"][0]["fabric_index"] == 1
+
+
+def test_split_room_phrase():
+    from custom_components.tapo_rv30.mapdata import split_room_phrase
+    assert split_room_phrase("the kitchen, lounge and the hallway") == ["kitchen", "lounge", "hallway"]
+    assert split_room_phrase("Dining Room & my office") == ["Dining Room", "office"]
+    assert split_room_phrase("") == []

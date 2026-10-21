@@ -1,0 +1,109 @@
+{
+  "entity": {
+    "sensor": {
+      "status": {
+        "default": "mdi:robot-vacuum",
+        "state": {
+          "Standby": "mdi:robot-vacuum-variant",
+          "Cleaning": "mdi:robot-vacuum",
+          "Mapping": "mdi:map-plus",
+          "Remote Control": "mdi:gamepad-variant",
+          "Returning": "mdi:home-import-outline",
+          "Charging": "mdi:battery-charging",
+          "Charged": "mdi:battery",
+          "Paused": "mdi:pause-circle",
+          "Sleeping": "mdi:power-sleep",
+          "Emptying Dust": "mdi:delete-empty",
+          "Mapping Paused": "mdi:map-clock",
+          "Going To Point": "mdi:map-marker-right",
+          "Going To Point Paused": "mdi:map-marker-off",
+          "Exploring": "mdi:compass",
+          "Exploring Paused": "mdi:compass-off",
+          "Washing Mop": "mdi:washing-machine",
+          "Drying Mop": "mdi:hair-dryer",
+          "Attaching Mop": "mdi:water-plus",
+          "Removing Mop": "mdi:water-minus",
+          "Cutting Hair": "mdi:content-cut"
+        }
+      },
+      "error": {
+        "default": "mdi:alert-circle",
+        "state": {
+          "Ok": "mdi:check-circle"
+        }
+      },
+      "matter": {
+        "default": "mdi:link-variant",
+        "state": {
+          "Not paired": "mdi:link-off",
+          "Pairing window open": "mdi:link-plus",
+          "Paired": "mdi:link"
+        }
+      },
+      "matter_setup_code": {
+        "default": "mdi:qrcode"
+      },
+      "current_room": {
+        "default": "mdi:floor-plan"
+      },
+      "schedules": {
+        "default": "mdi:calendar-clock"
+      }
+    },
+    "binary_sensor": {
+      "problem": {
+        "default": "mdi:check-circle-outline",
+        "state": {
+          "on": "mdi:alert-circle"
+        }
+      },
+      "charging": {
+        "default": "mdi:battery",
+        "state": {
+          "on": "mdi:battery-charging"
+        }
+      }
+    }
+  },
+  "services": {
+    "clean_rooms": {
+      "service": "mdi:floor-plan"
+    },
+    "clean_zone": {
+      "service": "mdi:vector-square"
+    },
+    "set_room_settings": {
+      "service": "mdi:tune"
+    },
+    "run_schedule": {
+      "service": "mdi:calendar-play"
+    },
+    "run_preset": {
+      "service": "mdi:playlist-play"
+    },
+    "set_map": {
+      "service": "mdi:map"
+    },
+    "go_to": {
+      "service": "mdi:map-marker-right"
+    },
+    "get_clean_records": {
+      "service": "mdi:history"
+    },
+    "send_raw": {
+      "service": "mdi:code-json"
+    },
+    "add_schedule": {
+      "service": "mdi:calendar-plus"
+    },
+    "set_schedule": {
+      "service": "mdi:calendar-edit"
+    },
+    "remove_schedule": {
+      "service": "mdi:calendar-remove"
+    },
+    "remove_matter_fabric": {
+      "service": "mdi:link-off"
+    }
+  }
+}

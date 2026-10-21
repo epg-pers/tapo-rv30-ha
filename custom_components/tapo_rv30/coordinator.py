@@ -11,6 +11,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers import issue_registry as ir
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from PIL import Image, ImageDraw
@@ -64,6 +65,7 @@ class TapoCoordinator(DataUpdateCoordinator):
         self.device_name: str = "Tapo RV30"
         self.device_model: str = "RV30"
         self.fw_version: str | None = None
+        self.device_mac: str | None = None
         self._info_fetched = False
         self.settings: dict = {}           # get_settings(), refreshed with the map
         self.settings_read_at: float | None = None
@@ -88,8 +90,10 @@ class TapoCoordinator(DataUpdateCoordinator):
     @property
     def device_info(self) -> DeviceInfo:
         ident = self.entry.entry_id if self.entry else self.client.host
+        mac = (self.settings.get("device") or {}).get("mac") or self.device_mac
         return DeviceInfo(
             identifiers={(DOMAIN, ident)},
+            connections={(dr.CONNECTION_NETWORK_MAC, dr.format_mac(mac))} if mac else set(),
             name=self.device_name,
             manufacturer="TP-Link",
             model=f"Tapo {self.device_model}",
@@ -134,6 +138,7 @@ class TapoCoordinator(DataUpdateCoordinator):
                 info = await self.hass.async_add_executor_job(self.client.get_device_info)
                 self.device_name = info["name"]
                 self.device_model = info["model"]
+                self.device_mac = info.get("mac") or self.device_mac
                 self.fw_version = info.get("fw_ver")
                 self._info_fetched = True
             except AuthError as exc:
@@ -187,7 +192,11 @@ class TapoCoordinator(DataUpdateCoordinator):
 
     # ---- events ------------------------------------------------------------------
     def _event_base(self) -> dict:
-        return {"entry_id": self.entry.entry_id if self.entry else None,
+        device_id = None
+        if self.entry:
+            dev = dr.async_get(self.hass).async_get_device(identifiers={(DOMAIN, self.entry.entry_id)})
+            device_id = dev.id if dev else None
+        return {"entry_id": self.entry.entry_id if self.entry else None, "device_id": device_id,
                 "device": self.device_name, "model": self.device_model}
 
     async def _fire_events(self, prev: dict | None, new: dict) -> None:
@@ -485,6 +494,10 @@ class TapoCoordinator(DataUpdateCoordinator):
         self.map_hash = str(map_data.get("map_hash") or len(self.room_mask))
         self._apply_position(map_data)
         _LOGGER.debug("Map rendered: %d bytes, %d rooms", len(self.map_image_bytes or b""), len(self.rooms))
+
+    def rooms_named(self) -> list[dict]:
+        """Rooms of the current map with the decoded name under name_text."""
+        return [{**r, "name_text": b64name(r.get("name", ""))} for r in self.rooms]
 
     def map_names(self) -> dict[int, str]:
         """{map_id: name} for every map stored on the vacuum."""

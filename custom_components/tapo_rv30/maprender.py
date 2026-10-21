@@ -25,84 +25,142 @@ def _font(size: int = FONT_SIZE):
         return ImageFont.load_default()
 
 
-# Furniture glyphs, our own drawing, in the unit square of each item's rectangle
-# (a across its width, b down its height; the robot's rotation comes for free
-# because the square is mapped onto the item's rotated outline). Each entry is a
-# list of shapes: ("poly", [(a, b), ...]) closed outline, ("line", [...]) open
-# polyline, ("circle", (ca, cb), r) with r in width units, ("dot", (ca, cb)).
-def _rect(a0, b0, a1, b1):
-    return ("poly", [(a0, b0), (a1, b0), (a1, b1), (a0, b1)])
+# Furniture: our own little illustrations, defined in the unit square of each item's
+# rectangle (a across its width, b down its height) and mapped onto the item's rotated
+# outline, so the robot's angle comes for free. Shapes are drawn on a 2x overlay and
+# downsampled, which is what makes the curves smooth.
+#   ("rrect", a0, b0, a1, b1, radius, fill, outline)   rounded rectangle
+#   ("ellipse", ca, cb, ra, rb, fill, outline)          ra, rb in width / height units
+#   ("poly", [(a, b), ...], fill, outline)
+#   ("line", [(a, b), ...], colour, width)
+WOOD, WOOD_D = (222, 196, 160), (160, 128, 90)
+FABRIC, FABRIC_D = (214, 206, 198), (130, 120, 110)
+LINEN, LINEN_D = (236, 232, 244), (150, 140, 170)
+STEEL, STEEL_D = (222, 228, 236), (120, 130, 150)
+LEAF, LEAF_D = (134, 196, 120), (60, 120, 60)
+CERAMIC, CERAMIC_D = (246, 248, 252), (130, 140, 160)
+PET, PET_D = (246, 214, 180), (170, 120, 70)
+PILLOW = (252, 252, 255)
 
 
-_SOFA = [_rect(0.0, 0.0, 1.0, 0.28), _rect(0.0, 0.28, 0.13, 1.0), _rect(0.87, 0.28, 1.0, 1.0)]
+def _bed(double: bool):
+    pillows = ([("rrect", 0.10, 0.06, 0.47, 0.24, 0.05, PILLOW, LINEN_D), ("rrect", 0.53, 0.06, 0.90, 0.24, 0.05, PILLOW, LINEN_D)]
+               if double else [("rrect", 0.16, 0.06, 0.84, 0.24, 0.05, PILLOW, LINEN_D)])
+    return [("rrect", 0, 0, 1, 1, 0.08, LINEN, LINEN_D), ("rrect", 0, 0, 1, 0.05, 0.02, LINEN_D, LINEN_D),
+            *pillows, ("rrect", 0.04, 0.30, 0.96, 0.97, 0.06, (200, 190, 230), LINEN_D),
+            ("line", [(0.04, 0.42), (0.96, 0.42)], LINEN_D, 1)]
+
+
+def _sofa(seats: int, corner: bool = False):
+    g = [("rrect", 0, 0, 1, 1, 0.12, FABRIC, FABRIC_D), ("rrect", 0.02, 0.02, 0.98, 0.30, 0.10, FABRIC_D, FABRIC_D),
+         ("rrect", 0.0, 0.25, 0.13, 1.0, 0.08, FABRIC_D, FABRIC_D), ("rrect", 0.87, 0.25, 1.0, 1.0, 0.08, FABRIC_D, FABRIC_D)]
+    w = (0.87 - 0.13) / seats
+    for i in range(seats):
+        g.append(("rrect", 0.13 + i * w + 0.015, 0.33, 0.13 + (i + 1) * w - 0.015, 0.96, 0.06, (228, 222, 214), FABRIC_D))
+    if corner:
+        g.append(("rrect", 0.13, 0.55, 0.50, 0.96, 0.06, (228, 222, 214), FABRIC_D))
+    return g
+
+
+def _chairs():
+    pts = [(0.03, 0.30), (0.03, 0.56), (0.83, 0.30), (0.83, 0.56), (0.30, 0.02), (0.56, 0.02), (0.30, 0.82), (0.56, 0.82)]
+    return [("rrect", a, b, a + 0.14, b + 0.16, 0.04, WOOD_D, WOOD_D) for a, b in pts]
+
+
 FURNITURE_GLYPHS = {
-    1:   [_rect(0.12, 0.06, 0.88, 0.24), ("line", [(0.0, 0.32), (1.0, 0.32)])],                    # single bed
-    2:   [_rect(0.08, 0.06, 0.46, 0.24), _rect(0.54, 0.06, 0.92, 0.24), ("line", [(0.0, 0.32), (1.0, 0.32)])],
-    101: _SOFA,
-    102: _SOFA + [("line", [(0.5, 0.28), (0.5, 1.0)])],
-    103: _SOFA + [("line", [(0.5, 0.28), (0.5, 1.0)]), _rect(0.0, 0.6, 0.45, 1.0)],
-    201: [_rect(0.2, 0.25, 0.8, 0.75)] + [("dot", p) for p in ((0.1, 0.38), (0.1, 0.62), (0.9, 0.38), (0.9, 0.62),
-                                                                 (0.35, 0.12), (0.65, 0.12), (0.35, 0.88), (0.65, 0.88))],
-    202: [_rect(0.15, 0.15, 0.85, 0.85)],
-    203: [_rect(0.2, 0.2, 0.8, 0.8), ("dot", (0.5, 0.5))],
-    301: [("line", [(0.0, 0.5), (1.0, 0.5)]), _rect(0.3, 0.1, 0.7, 0.4)],                            # tv cabinet
-    302: [("line", [(0.5, 0.0), (0.5, 1.0)]), ("dot", (0.42, 0.5)), ("dot", (0.58, 0.5))],          # wardrobe
-    303: [_rect(0.2, 0.2, 0.8, 0.8), ("dot", (0.5, 0.5))],
-    401: [("line", [(0.0, 0.35), (1.0, 0.35)]), ("dot", (0.85, 0.2)), ("dot", (0.85, 0.6))],       # fridge
-    402: [("circle", (0.5, 0.55), 0.3), ("circle", (0.5, 0.55), 0.18)],                             # washer
-    403: [("line", [(0.1, 0.3), (0.9, 0.3)]), ("line", [(0.1, 0.42), (0.9, 0.42)]), ("line", [(0.1, 0.54), (0.9, 0.54)])],
-    503: [("circle", (0.5, 0.5), 0.42), ("circle", (0.5, 0.5), 0.22)],                              # plants
-    601: [_rect(0.15, 0.0, 0.85, 0.3), ("circle", (0.5, 0.66), 0.3)],                              # toilet
-    701: [("poly", [(0.0, 0.42), (0.5, 0.0), (1.0, 0.42)]), _rect(0.1, 0.42, 0.9, 1.0)],           # pet house
-    702: [_rect(0.1, 0.1, 0.9, 0.9)] + [("dot", p) for p in ((0.3, 0.4), (0.6, 0.3), (0.5, 0.65), (0.7, 0.7))],
-    703: [("circle", (0.3, 0.5), 0.2), ("circle", (0.7, 0.5), 0.2)],                                 # pet bowl
+    1:   _bed(False),
+    2:   _bed(True),
+    101: _sofa(1),
+    102: _sofa(2),
+    103: _sofa(3, corner=True),
+    201: _chairs() + [("rrect", 0.17, 0.20, 0.83, 0.80, 0.08, WOOD, WOOD_D), ("line", [(0.22, 0.5), (0.78, 0.5)], WOOD_D, 1)],
+    202: [("rrect", 0.08, 0.08, 0.92, 0.92, 0.10, WOOD, WOOD_D), ("line", [(0.14, 0.5), (0.86, 0.5)], WOOD_D, 1)],
+    203: [("rrect", 0.08, 0.08, 0.92, 0.92, 0.12, WOOD, WOOD_D), ("ellipse", 0.5, 0.5, 0.16, 0.16, (255, 244, 200), WOOD_D)],
+    301: [("rrect", 0, 0.30, 1, 1, 0.06, WOOD, WOOD_D), ("line", [(0.0, 0.65), (1.0, 0.65)], WOOD_D, 1),
+          ("rrect", 0.22, 0.04, 0.78, 0.30, 0.03, (40, 44, 52), (20, 22, 28))],
+    302: [("rrect", 0, 0, 1, 1, 0.05, WOOD, WOOD_D), ("line", [(0.5, 0.04), (0.5, 0.96)], WOOD_D, 1),
+          ("ellipse", 0.44, 0.5, 0.03, 0.05, WOOD_D, WOOD_D), ("ellipse", 0.56, 0.5, 0.03, 0.05, WOOD_D, WOOD_D)],
+    303: [("rrect", 0.06, 0.06, 0.94, 0.94, 0.10, WOOD, WOOD_D), ("ellipse", 0.5, 0.5, 0.18, 0.18, (255, 244, 200), WOOD_D)],
+    401: [("rrect", 0, 0, 1, 1, 0.08, STEEL, STEEL_D), ("line", [(0.04, 0.36), (0.96, 0.36)], STEEL_D, 1),
+          ("rrect", 0.82, 0.10, 0.88, 0.30, 0.02, STEEL_D, STEEL_D), ("rrect", 0.82, 0.42, 0.88, 0.80, 0.02, STEEL_D, STEEL_D)],
+    402: [("rrect", 0, 0, 1, 1, 0.10, STEEL, STEEL_D), ("ellipse", 0.5, 0.56, 0.32, 0.32, (200, 210, 224), STEEL_D),
+          ("ellipse", 0.5, 0.56, 0.20, 0.20, (120, 150, 190), STEEL_D), ("ellipse", 0.5, 0.56, 0.09, 0.09, (170, 200, 230), STEEL_D),
+          ("rrect", 0.10, 0.06, 0.40, 0.16, 0.03, STEEL_D, STEEL_D)],
+    403: [("rrect", 0, 0, 1, 1, 0.12, STEEL, STEEL_D), ("ellipse", 0.5, 0.18, 0.12, 0.08, (120, 150, 190), STEEL_D),
+          ("line", [(0.15, 0.40), (0.85, 0.40)], STEEL_D, 1), ("line", [(0.15, 0.52), (0.85, 0.52)], STEEL_D, 1),
+          ("line", [(0.15, 0.64), (0.85, 0.64)], STEEL_D, 1), ("line", [(0.15, 0.76), (0.85, 0.76)], STEEL_D, 1)],
+    503: [("ellipse", 0.5, 0.78, 0.26, 0.18, (186, 120, 80), (120, 70, 40)),
+          ("ellipse", 0.36, 0.42, 0.26, 0.28, LEAF, LEAF_D), ("ellipse", 0.64, 0.42, 0.26, 0.28, LEAF, LEAF_D),
+          ("ellipse", 0.5, 0.30, 0.26, 0.26, (160, 212, 140), LEAF_D)],
+    601: [("rrect", 0.12, 0.0, 0.88, 0.34, 0.06, CERAMIC, CERAMIC_D), ("ellipse", 0.5, 0.66, 0.36, 0.32, CERAMIC, CERAMIC_D),
+          ("ellipse", 0.5, 0.66, 0.24, 0.20, (214, 226, 240), CERAMIC_D)],
+    701: [("rrect", 0.08, 0.40, 0.92, 1.0, 0.04, PET, PET_D), ("poly", [(0.0, 0.44), (0.5, 0.02), (1.0, 0.44)], (210, 120, 90), PET_D),
+          ("rrect", 0.36, 0.60, 0.64, 1.0, 0.10, (120, 80, 60), PET_D)],
+    702: [("rrect", 0.04, 0.04, 0.96, 0.96, 0.10, (200, 210, 220), STEEL_D), ("rrect", 0.12, 0.14, 0.88, 0.90, 0.08, PET, PET_D),
+          ("ellipse", 0.32, 0.40, 0.05, 0.05, PET_D, PET_D), ("ellipse", 0.58, 0.32, 0.05, 0.05, PET_D, PET_D),
+          ("ellipse", 0.50, 0.68, 0.05, 0.05, PET_D, PET_D), ("ellipse", 0.70, 0.72, 0.05, 0.05, PET_D, PET_D)],
+    703: [("ellipse", 0.28, 0.5, 0.24, 0.40, STEEL, STEEL_D), ("ellipse", 0.28, 0.5, 0.15, 0.25, (120, 150, 190), STEEL_D),
+          ("ellipse", 0.72, 0.5, 0.24, 0.40, STEEL, STEEL_D), ("ellipse", 0.72, 0.5, 0.15, 0.25, PET, PET_D)],
 }
-FURNITURE_FILL = (255, 255, 255, 90)
+_SS = 2   # supersampling factor for the furniture overlay
+
+
+def _unit_rrect(a0, b0, a1, b1, r, steps=5):
+    """Rounded-rectangle outline in unit coordinates (radius r in width units)."""
+    r = min(r, (a1 - a0) / 2, (b1 - b0) / 2)
+    pts = []
+    for cx, cy, start in ((a1 - r, b0 + r, -90), (a1 - r, b1 - r, 0), (a0 + r, b1 - r, 90), (a0 + r, b0 + r, 180)):
+        for i in range(steps + 1):
+            t = math.radians(start + 90 * i / steps)
+            pts.append((cx + r * math.cos(t), cy + r * math.sin(t)))
+    return pts
 
 
 def _draw_furniture(img: Image.Image, furniture: list[dict], to_px) -> None:
-    """Outline, a light fill, our own glyph and a small label per item. The glyph
-    is drawn in the unit square of the item's four corners, so the item's own
-    rotation applies without any trig here."""
-    overlay = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    """Illustration and (when it fits) a label per item, drawn in the unit square of the
+    item's four corners so the item's own rotation applies."""
+    W, H = img.size
+    overlay = Image.new("RGBA", (W * _SS, H * _SS), (0, 0, 0, 0))
     od = ImageDraw.Draw(overlay)
     draw = ImageDraw.Draw(img)
     small_font = _font(max(8, FONT_SIZE - 4))
+    labels = []
     for f in furniture:
         verts = f.get("vertexs") or []
         if len(verts) < 4:
             continue
         p0, p1, p2, p3 = [to_px(x, y) for x, y in verts[:4]]
-        poly = [p0, p1, p2, p3]
 
         def at(a: float, b: float):
-            return (p0[0] + a * (p1[0] - p0[0]) + b * (p3[0] - p0[0]),
-                    p0[1] + a * (p1[1] - p0[1]) + b * (p3[1] - p0[1]))
+            return ((p0[0] + a * (p1[0] - p0[0]) + b * (p3[0] - p0[0])) * _SS,
+                    (p0[1] + a * (p1[1] - p0[1]) + b * (p3[1] - p0[1])) * _SS)
 
-        od.polygon(poly, fill=FURNITURE_FILL)
-        draw.polygon(poly, outline=FURNITURE_OUTLINE, width=2)
-        width_px = max(1.0, ((p1[0] - p0[0]) ** 2 + (p1[1] - p0[1]) ** 2) ** 0.5)
-        height_px = max(1.0, ((p3[0] - p0[0]) ** 2 + (p3[1] - p0[1]) ** 2) ** 0.5)
-        for shape in FURNITURE_GLYPHS.get(f.get("type"), []):
+        shapes = FURNITURE_GLYPHS.get(f.get("type")) or [("rrect", 0, 0, 1, 1, 0.06, (236, 236, 240), FURNITURE_OUTLINE)]
+        for shape in shapes:
             kind = shape[0]
-            if kind == "poly":
-                draw.polygon([at(a, b) for a, b in shape[1]], outline=FURNITURE_OUTLINE, width=1)
+            if kind == "rrect":
+                _, a0, b0, a1, b1, r, fill, outline = shape
+                od.polygon([at(a, b) for a, b in _unit_rrect(a0, b0, a1, b1, r)], fill=(*fill, 255), outline=(*outline, 255), width=_SS)
+            elif kind == "ellipse":
+                _, ca, cb, ra, rb, fill, outline = shape
+                od.polygon([at(ca + ra * math.cos(t), cb + rb * math.sin(t)) for t in (i * math.pi / 16 for i in range(32))],
+                           fill=(*fill, 255), outline=(*outline, 255), width=_SS)
+            elif kind == "poly":
+                _, pts, fill, outline = shape
+                od.polygon([at(a, b) for a, b in pts], fill=(*fill, 255), outline=(*outline, 255), width=_SS)
             elif kind == "line":
-                draw.line([at(a, b) for a, b in shape[1]], fill=FURNITURE_OUTLINE, width=1)
-            elif kind == "circle":
-                (ca, cb), r = shape[1], shape[2]
-                rb = r * width_px / height_px          # keep it round on the screen
-                draw.polygon([at(ca + r * math.cos(t), cb + rb * math.sin(t))
-                              for t in (i * math.pi / 12 for i in range(24))], outline=FURNITURE_OUTLINE, width=1)
-            elif kind == "dot":
-                cx, cy = at(*shape[1])
-                draw.ellipse([cx - 2, cy - 2, cx + 2, cy + 2], fill=FURNITURE_OUTLINE)
+                _, pts, colour, width = shape
+                od.line([at(a, b) for a, b in pts], fill=(*colour, 255), width=width * _SS)
+        width_px = ((p1[0] - p0[0]) ** 2 + (p1[1] - p0[1]) ** 2) ** 0.5
+        height_px = ((p3[0] - p0[0]) ** 2 + (p3[1] - p0[1]) ** 2) ** 0.5
         name = FURNITURE_TYPES.get(f.get("type"))
         if name and height_px >= 24 and draw.textlength(name, font=small_font) <= width_px - 8:
-            cx, cy = at(0.5, 0.5)
-            draw.text((cx + 1, cy + 1), name, fill=(255, 255, 255), font=small_font, anchor="mm")
-            draw.text((cx, cy), name, fill=(60, 60, 60), font=small_font, anchor="mm")
-    img.alpha_composite(overlay)
+            labels.append((((p0[0] + p2[0]) / 2, (p0[1] + p2[1]) / 2), name))
+    img.alpha_composite(overlay.resize((W, H), Image.Resampling.LANCZOS))
+    draw = ImageDraw.Draw(img)
+    for (cx, cy), name in labels:
+        draw.text((cx + 1, cy + 1), name, fill=(255, 255, 255), font=small_font, anchor="mm")
+        draw.text((cx, cy), name, fill=(60, 60, 60), font=small_font, anchor="mm")
 
 
 def _px_transform(map_data: dict):

@@ -17,8 +17,10 @@ domain name is historical; it is one integration for the range.
 
 1. Click the badge above, or in HACS add `https://github.com/epg-pers/tapo-rv30-ha` as a
    custom repository of type Integration. Download it and restart Home Assistant.
-2. Settings, Devices and services, Add integration, **Tapo Robot Vacuum**. Enter the robot's
-   IP address and your Tapo account email and password. The robot must be on firmware 1.2 or
+2. Home Assistant finds the robot on its own (it watches for its network address) and offers
+   "Tapo robot vacuum found": enter your Tapo account email and password. If it is not
+   offered, Settings, Devices and services, Add integration, **Tapo Robot Vacuum**, and type
+   the robot's IP address. If the robot's IP changes later, the entry follows it. The robot must be on firmware 1.2 or
    newer (TPAP); the older AES models (RV30C) are detected automatically, best effort.
 3. Add a card to a dashboard and pick **Tapo Vacuum**. Tap rooms to select them, drag a zone,
    long-press a room for levels, switch floors. Nothing else to install.
@@ -32,11 +34,39 @@ Needs Home Assistant 2026.3 or newer (HACS enforces it).
 - **Live cleaning path** on the map, and a **Last Clean Map** of where the robot actually went
 - **Schedules from Home Assistant**: add, change, enable / disable and remove the robot's own
 - **Matter**: pairing state, setup code, and a button that opens the pairing window
-- **Furniture** drawn and named on the map, from the app's own type table
+- **Furniture** drawn as little illustrations on the map, from the app's own type table
+- **Voice**: "vacuum the kitchen and the lounge" works in Assist with nothing to configure
+- **Discovery**: the robot is found on the network and its entry follows IP changes
+- Device triggers and blueprints for the automation editor; the vacuum wears its own
+  state-coloured picture instead of a generic icon
 - **Go to point**, per-run suction / water / passes, presets as buttons, native
   `vacuum.clean_area` with Home Assistant areas, events for start / finish / error
 - Adaptive polling, hardened TPAP login, a repair issue when the robot stops answering,
   diagnostics, reconfigure and reauth from the integration page
+
+## Voice
+
+Assist understands the robot out of the box, no sentences to write:
+
+- "vacuum the kitchen", "clean the lounge and the hallway", "hoover the dining room"
+- "clean everywhere", "start the vacuum"
+- "send the robot home", "tell the vacuum to dock"
+- "stop the vacuum", "pause the robot"
+
+Room names are matched against the robot's current map (partial matches work), and the reply
+says what it did or which room it did not recognise. With more than one robot, say its name in
+the sentence.
+
+## Automations
+
+Our events show up as device triggers in the automation editor ("Jarvis finished cleaning",
+"Jarvis reported an error", "Jarvis started cleaning"), no raw event trigger needed. Two
+ready-made blueprints:
+
+| Blueprint | What it does | |
+|---|---|---|
+| Notify with the last clean map | Phone notification with area, minutes and the Last Clean Map image when a run finishes | [![Import](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2Fepg-pers%2Ftapo-rv30-ha%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Fepg-pers%2Fnotify_last_clean_map.yaml) |
+| Clean when everyone has left | Start the house or chosen rooms once everyone has been away for a while, within a time window, only if docked | [![Import](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2Fepg-pers%2Ftapo-rv30-ha%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Fepg-pers%2Fclean_when_everyone_leaves.yaml) |
 
 ## Everything else
 

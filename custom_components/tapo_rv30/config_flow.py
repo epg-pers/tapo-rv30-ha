@@ -2,6 +2,8 @@
 and reauth (the robot started rejecting the stored credentials)."""
 from __future__ import annotations
 
+import asyncio
+
 import logging
 from collections.abc import Mapping
 from typing import Any
@@ -9,6 +11,8 @@ from typing import Any
 import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.const import CONF_HOST, CONF_PASSWORD, CONF_USERNAME
+from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers.service_info.dhcp import DhcpServiceInfo
 from homeassistant.core import HomeAssistant
 
 from .aes import AesVacuumClient
@@ -63,6 +67,17 @@ async def _test_connection(
         return None, "cannot_connect"
 
 
+async def _tpap_port_open(host: str, port: int = 4433, timeout: float = 3.0) -> bool:
+    """Cheap check that the address is a TPAP robot before offering it: only the robots
+    listen on 4433; plugs, bulbs and cameras on the same MAC prefix do not."""
+    try:
+        _, writer = await asyncio.wait_for(asyncio.open_connection(host, port), timeout)
+    except (OSError, asyncio.TimeoutError):
+        return False
+    writer.close()
+    return True
+
+
 class TapoRV30ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     VERSION = 1
 
@@ -85,6 +100,47 @@ class TapoRV30ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             if data:
                 return self.async_create_entry(title=f"Tapo Vacuum ({data[CONF_HOST]})", data=data)
         return self.async_show_form(step_id="user", data_schema=_schema(user_input), errors=errors)
+
+    # ---- DHCP discovery: Home Assistant hands us every lease whose MAC prefix matches the
+    # manifest (E0:D3:62 so far) and every lease of a robot already set up. A new address
+    # for a known robot updates its entry; a new robot is confirmed only if it answers on
+    # the TPAP port, so other TP-Link gear on the same prefix is ignored.
+    async def async_step_dhcp(self, discovery_info: DhcpServiceInfo):
+        ip, mac = discovery_info.ip, dr.format_mac(discovery_info.macaddress)
+        for entry in self._async_current_entries(include_ignore=False):
+            if entry.data.get(CONF_HOST) == ip:
+                return self.async_abort(reason="already_configured")
+        dev_reg = dr.async_get(self.hass)
+        device = dev_reg.async_get_device(connections={(dr.CONNECTION_NETWORK_MAC, mac)})
+        if device:
+            for entry_id in device.config_entries:
+                entry = self.hass.config_entries.async_get_entry(entry_id)
+                if entry and entry.domain == DOMAIN and entry.data.get(CONF_HOST) != ip:
+                    self.hass.config_entries.async_update_entry(
+                        entry, data={**entry.data, CONF_HOST: ip}, unique_id=ip,
+                        title=f"Tapo Vacuum ({ip})")
+                    self.hass.config_entries.async_schedule_reload(entry.entry_id)
+            return self.async_abort(reason="already_configured")
+        if not await _tpap_port_open(ip):
+            return self.async_abort(reason="not_tapo_vacuum")
+        await self.async_set_unique_id(ip)
+        self._abort_if_unique_id_configured()
+        self._discovered_host = ip
+        self.context["title_placeholders"] = {"host": ip}
+        return await self.async_step_discovery_confirm()
+
+    async def async_step_discovery_confirm(self, user_input: dict[str, Any] | None = None):
+        errors: dict[str, str] = {}
+        host = getattr(self, "_discovered_host", "")
+        if user_input is not None:
+            data, errors = await self._validate({**user_input, CONF_HOST: host})
+            if data:
+                return self.async_create_entry(title=f"Tapo Vacuum ({host})", data=data)
+        return self.async_show_form(
+            step_id="discovery_confirm",
+            data_schema=vol.Schema({vol.Required(CONF_USERNAME, default=(user_input or {}).get(CONF_USERNAME, "")): str,
+                                    vol.Required(CONF_PASSWORD): str}),
+            description_placeholders={"host": host}, errors=errors)
 
     async def async_step_reconfigure(self, user_input: dict[str, Any] | None = None):
         """Change IP address or credentials of an existing entry."""
