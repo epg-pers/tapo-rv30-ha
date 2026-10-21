@@ -43,3 +43,5 @@ class TapoEntity(CoordinatorEntity[TapoCoordinator]):
         """Run a client write, then re-read settings so the UI updates immediately."""
         await self._call(fn)
         await self.coordinator.async_settings_changed()
+        # The robot can still answer with the old value for a second or two.
+        await self.coordinator.async_settings_changed_later(2.5)
