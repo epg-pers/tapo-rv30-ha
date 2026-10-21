@@ -1,4 +1,4 @@
-# Example dashboard for the Tapo RV30 integration.
+# Example dashboard for the Tapo Robot Vacuum integration (tapo_rv30).
 # Replace "robot" in every entity id with your vacuum's name (Settings > Devices & services
 # > the vacuum shows them). Needs the Mushroom cards from HACS for the chip rows; the rest
 # is stock Home Assistant.
