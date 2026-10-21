@@ -27,6 +27,9 @@ to Home Assistant areas in the entity's settings). Attributes: `fan_speed`, `wat
   cleaned cells, skipped rooms, path, start, end and dock. Attributes: area, minutes, start
   type, map name.
 
+The vacuum's attributes include `rooms`, `position_mm`, `current_room`, `consumables` and the
+capability flags `goto_point` and `remote_control`.
+
 ## Sensors
 
 Status, Battery, Error, Area Cleaned, Clean Progress, Last Clean (with run totals), Total

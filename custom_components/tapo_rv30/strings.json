@@ -194,6 +194,16 @@
         }
       }
     },
+    "remote_drive": {
+      "name": "Remote drive",
+      "description": "The Tapo app's remote control. 'enter' takes control (the robot leaves the dock; the response carries how many ms that takes), a direction nudges it one step, 'stop' halts it, 'exit' hands control back. Hold-to-drive is on the Tapo Vacuum sidebar page, which repeats the direction like the app does.",
+      "fields": {
+        "command": {
+          "name": "Command",
+          "description": "enter, forward, backward, left, right, stop or exit."
+        }
+      }
+    },
     "add_schedule": {
       "name": "Add schedule",
       "description": "Create a cleaning schedule on the robot (same as the Tapo app's Schedules). Returns the new schedule id when called with a response.",

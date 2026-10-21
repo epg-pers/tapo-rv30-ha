@@ -58,6 +58,21 @@ table, 301 TV cabinet, 302 wardrobe, 303 bedside table, 401 refrigerator, 402 fr
 washer, 403 vertical air conditioner, 503 green plants, 601 toilet, 701 pet house, 702 cat
 litter box, 703 pet bowl. The glyphs are the integration's own drawings, not the app's icons.
 
+## Remote control
+
+From the app's `RobotRemoteControlViewModel` and its control view (component
+`direction_control`). Not yet verified on a robot.
+
+- `directionControl {"direction": 0, "control": true}` enters remote control; the answer
+  carries `away_sta_ms`, how long the robot takes to leave the dock (the app counts it
+  down and assumes 4000 ms when absent). `{"direction": 4, "control": false}` leaves it.
+- `directionControl {"direction": n}` drives: 0 forward, 1 backward, 2 left, 3 right,
+  4 stop. The app sends the held direction, waits for the answer, pauses 300 ms and sends
+  it again while the finger stays down; lifting sends 4. Status is 3 ("Remote Control")
+  meanwhile.
+- `getSweepWalk` / `setSweepWalk {"sweep_walk": bool}` is "clean while moving" (the Sweep
+  Walk switch). The app's "spot clean here" is an ordinary spot clean (clean_mode 2).
+
 ## Schedules
 
 The app posts the schedule rule as-is. Verified on an RV30 Max Plus:

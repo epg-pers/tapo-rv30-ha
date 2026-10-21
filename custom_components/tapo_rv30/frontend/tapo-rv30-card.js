@@ -10,7 +10,7 @@
  * the vacuum's device automatically.
  */
 
-const CARD_VERSION = "0.18.0";
+const CARD_VERSION = "0.19.0b1";
 const ROOM_COLORS = ["#ffb3ba", "#bae1ff", "#baffc9", "#ffffba", "#dcbaff", "#ffdcba", "#baffff"];
 
 const ICONS = {
@@ -19,6 +19,7 @@ const ICONS = {
   zone: "mdi:vector-square", clear: "mdi:close", preset: "mdi:play-box-multiple",
   battery: "mdi:battery", charging: "mdi:battery-charging", robot: "mdi:robot-vacuum",
   alert: "mdi:alert-circle", room: "mdi:map-marker", history: "mdi:history", bin: "mdi:delete-variant",
+  goto: "mdi:map-marker-path",
 };
 
 const FRESH = (ts) => {
@@ -222,6 +223,7 @@ class TapoRV30Card extends HTMLElement {
         <div class="tools">
           <button class="t-rooms" title="Select rooms"><ha-icon icon="${ICONS.rooms}"></ha-icon></button>
           <button class="t-zone" title="Draw a zone"><ha-icon icon="${ICONS.zone}"></ha-icon></button>
+          <button class="t-goto" title="Send the robot to a point" hidden><ha-icon icon="${ICONS.goto}"></ha-icon></button>
           <button class="t-status" title="Last clean and status"><ha-icon icon="${ICONS.history}"></ha-icon></button>
           <button class="t-clear" title="Clear" hidden><ha-icon icon="${ICONS.clear}"></ha-icon></button>
         </div>
@@ -237,12 +239,14 @@ class TapoRV30Card extends HTMLElement {
       battery: root.querySelector(".battery"), progress: root.querySelector(".progress"),
       banner: root.querySelector(".banner"), canvas: root.querySelector("canvas"), hint: root.querySelector(".hint"),
       tRooms: root.querySelector(".t-rooms"), tZone: root.querySelector(".t-zone"), tClear: root.querySelector(".t-clear"),
+      tGoto: root.querySelector(".t-goto"),
       tStatus: root.querySelector(".t-status"), status: root.querySelector(".status"),
       go: root.querySelector(".go"), chips: root.querySelector(".chips"), controls: root.querySelector(".controls"),
       mapwrap: root.querySelector(".mapwrap"), floors: root.querySelector(".floors"), stage: root.querySelector(".stage"),
     };
     this._el.tRooms.onclick = () => this._setMode("rooms");
     this._el.tZone.onclick = () => this._setMode("zone");
+    this._el.tGoto.onclick = () => this._setMode("goto");
     this._el.tStatus.onclick = () => this._toggleStatus();
     this._el.tClear.onclick = () => this._clearSelection();
     this._el.go.onclick = () => this._go();
@@ -267,6 +271,7 @@ class TapoRV30Card extends HTMLElement {
     this._el.name.textContent = name;
     this._el.sub.innerHTML = `<span>${status}</span>` + (room && room !== "unknown" ? `<span class="dot">&middot;</span><ha-icon icon="${ICONS.room}" style="--mdc-icon-size:14px"></ha-icon><span>${room}</span>` : "");
     this._el.avatar.classList.toggle("active", state === "cleaning" || state === "returning");
+    this._el.tGoto.hidden = vac.attributes.goto_point === false;
 
     const batt = parseInt(this._val(r.battery, ""), 10);
     const charging = this._val(r.charging, "off") === "on" || state === "docked";
@@ -476,6 +481,12 @@ class TapoRV30Card extends HTMLElement {
       ctx.fillStyle = "rgba(40,110,220,.22)"; ctx.fillRect(x, y, w, h);
       ctx.strokeStyle = "rgba(40,110,220,.95)"; ctx.lineWidth = 3; ctx.setLineDash([8, 6]); ctx.strokeRect(x, y, w, h); ctx.setLineDash([]);
     }
+    if (this._target) {
+      const [x, y] = this._target;
+      ctx.beginPath(); ctx.arc(x, y, 9, 0, Math.PI * 2); ctx.fillStyle = "rgba(40,110,220,.25)"; ctx.fill();
+      ctx.strokeStyle = "rgba(40,110,220,.95)"; ctx.lineWidth = 2.5; ctx.stroke();
+      ctx.beginPath(); ctx.arc(x, y, 3, 0, Math.PI * 2); ctx.fillStyle = "rgba(40,110,220,1)"; ctx.fill();
+    }
     this._drawRobot(ctx);
   }
 
@@ -544,6 +555,7 @@ class TapoRV30Card extends HTMLElement {
     const [x, y] = this._canvasPoint(e);
     this._longPressed = false;
     if (this._mode === "zone") { this._drag = { x0: x, y0: y }; this._zone = { x0: x, y0: y, x1: x, y1: y }; this._el.canvas.setPointerCapture(e.pointerId); }
+    else if (this._mode === "goto") { this._tapStart = [x, y]; }
     else {
       this._tapStart = [x, y];
       clearTimeout(this._pressTimer);
@@ -597,6 +609,8 @@ class TapoRV30Card extends HTMLElement {
           this._zone = z ? { ...this._bbox(z.px), saved: z } : null;
         }
       }
+    } else if (this._mode === "goto") {
+      if (this._tapStart && Math.hypot(x - this._tapStart[0], y - this._tapStart[1]) < 10) this._target = this._roomAt(x, y) != null ? [x, y] : null;
     } else if (this._tapStart && Math.hypot(x - this._tapStart[0], y - this._tapStart[1]) < 10) {
       const id = this._roomAt(x, y);
       if (id != null) { if (this._selected.has(id)) this._selected.delete(id); else this._selected.add(id); }
@@ -623,13 +637,15 @@ class TapoRV30Card extends HTMLElement {
     this._mode = mode;
     this._el.tRooms.classList.toggle("on", mode === "rooms");
     this._el.tZone.classList.toggle("on", mode === "zone");
+    this._el.tGoto.classList.toggle("on", mode === "goto");
     const zones = (this._mapAttrs().map_geometry?.saved_zones || []).length;
-    this._el.hint.textContent = mode === "zone" ? (zones ? "Drag a rectangle, or tap a saved zone" : "Drag a rectangle to clean") : "Tap rooms to select, hold for settings";
+    this._el.hint.textContent = mode === "zone" ? (zones ? "Drag a rectangle, or tap a saved zone" : "Drag a rectangle to clean")
+      : mode === "goto" ? "Tap where the robot should go" : "Tap rooms to select, hold for settings";
     this._updateTools();
     this._draw();
   }
 
-  _clearSelection() { this._selected.clear(); this._zone = null; this._updateTools(); this._draw(); }
+  _clearSelection() { this._selected.clear(); this._zone = null; this._target = null; this._updateTools(); this._draw(); }
 
   _updateTools() {
     const go = this._el.go;
@@ -638,8 +654,11 @@ class TapoRV30Card extends HTMLElement {
       go.hidden = false; go.querySelector("span").textContent = `Clean ${names.join(", ")}`;
     } else if (this._mode === "zone" && this._zone) {
       go.hidden = false; go.querySelector("span").textContent = this._zone.saved ? "Clean saved zone" : "Clean this zone";
+    } else if (this._mode === "goto" && this._target) {
+      const room = this._roomAt(this._target[0], this._target[1]);
+      go.hidden = false; go.querySelector("span").textContent = room != null ? `Go to the ${this._roomName(room)}` : "Go here";
     } else go.hidden = true;
-    this._el.tClear.hidden = !(this._selected.size || this._zone);
+    this._el.tClear.hidden = !(this._selected.size || this._zone || this._target);
   }
 
   _go() {
@@ -657,6 +676,9 @@ class TapoRV30Card extends HTMLElement {
         if (!a || !b) return;
         this._call("tapo_rv30", "clean_zone", { zones: [[a[0], a[1], b[0], b[1]]] }, target);
       }
+    } else if (this._mode === "goto" && this._target) {
+      const mm = this._pxToMm(this._target[0], this._target[1]);
+      if (mm) this._call("tapo_rv30", "go_to", { x: Math.round(mm[0]), y: Math.round(mm[1]) }, target);
     }
     this._clearSelection();
   }

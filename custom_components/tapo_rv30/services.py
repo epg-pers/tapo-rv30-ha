@@ -8,7 +8,7 @@ from homeassistant.core import HomeAssistant, ServiceCall, ServiceResponse, Supp
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import entity_registry as er
 
-from .const import DOMAIN, FAN_NAME_TO_INT, WATER_NAME_TO_INT
+from .const import DOMAIN, FAN_NAME_TO_INT, REMOTE_CONTROL_CODE, REMOTE_DIRECTIONS, WATER_NAME_TO_INT
 from .coordinator import TapoCoordinator
 from .mapdata import build_schedule_rule, decode_clean_record, dnd_active, dnd_window, encode_weekdays, parse_hhmm
 
@@ -173,6 +173,32 @@ def async_setup_services(hass: HomeAssistant) -> None:
             raise ServiceValidationError(f"{call.service}: 'x' and 'y' (integers, mm) are required") from None
         await _send(hass, call, coord.client.goto_point, x, y)
         await coord.async_refresh_soon()
+
+    async def handle_remote_drive(call: ServiceCall) -> ServiceResponse:
+        """The app's remote control: enter, hold a direction, stop, exit. One call per step;
+        the sidebar page repeats the held direction like the app does."""
+        coord = _one(hass, call)
+        if not coord.has("direction_control"):
+            raise ServiceValidationError(f"{call.service}: {coord.device_name} has no remote control")
+        command = str(call.data.get("command", "")).strip().lower()
+        if command not in ("enter", "exit", *REMOTE_DIRECTIONS):
+            raise ServiceValidationError(f"{call.service}: 'command' must be one of enter, forward, backward, left, "
+                                         f"right, stop, exit (got {command!r})")
+        if command == "exit":
+            await _send(hass, call, coord.client.remote_control, False)
+            await coord.async_refresh_soon()
+            return None
+        if coord.status_code != REMOTE_CONTROL_CODE and coord.busy:
+            raise ServiceValidationError(f"{call.service}: {coord.device_name} is {coord.busy}; stop it before taking control")
+        if command == "enter":
+            try:
+                away_ms = await hass.async_add_executor_job(coord.client.remote_control, True)
+            except Exception as exc:
+                raise HomeAssistantError(f"{call.service}: vacuum rejected the command: {exc}") from exc
+            await coord.async_refresh_soon()
+            return {"leaving_dock_ms": away_ms or 4000}
+        await _send(hass, call, coord.client.remote_drive, REMOTE_DIRECTIONS[command])
+        return None
 
     async def _schedule_clean_attr(call: ServiceCall, coord: TapoCoordinator, base: dict | None) -> dict:
         """clean_attr for a schedule from rooms / preset / whole house plus levels.
@@ -388,6 +414,8 @@ def async_setup_services(hass: HomeAssistant) -> None:
     hass.services.async_register(DOMAIN, "run_preset", handle_run_preset)
     hass.services.async_register(DOMAIN, "set_map", handle_set_map)
     hass.services.async_register(DOMAIN, "go_to", handle_go_to)
+    hass.services.async_register(DOMAIN, "remote_drive", handle_remote_drive,
+                                 supports_response=SupportsResponse.OPTIONAL)
     hass.services.async_register(DOMAIN, "add_schedule", handle_add_schedule,
                                  supports_response=SupportsResponse.OPTIONAL)
     hass.services.async_register(DOMAIN, "set_schedule", handle_set_schedule)

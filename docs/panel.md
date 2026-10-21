@@ -28,6 +28,11 @@ card is still there for your own dashboards; the page is the full-size version.
 ![History and statistics](panel-history.png){ width="760" }
 - **Rooms**: each room with how recently it was cleaned and how much of it the robot
   covered, with a one-tap clean button.
+- **Drive**: the app's remote control. Take control and the robot drives off the dock;
+  hold an arrow button, or an arrow key, and it moves until you let go. Stop, vacuum while
+  driving, spot clean where it stands, locate, send it home. The map on the left follows it.
+  This is new and has not been tried on a real robot yet; if yours misbehaves, press Stop
+  or Send home and please open an issue.
 - **Maintenance**: consumable life bars (amber under 30 percent, red under 10), Empty Bin,
   resets, and the Omni dock actions where the dock has them.
 - **Settings**: every switch, select and number the robot exposes.

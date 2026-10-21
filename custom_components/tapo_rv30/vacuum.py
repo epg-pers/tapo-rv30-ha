@@ -135,6 +135,8 @@ class TapoVacuumEntity(CoordinatorEntity[TapoCoordinator], StateVacuumEntity):
             "consumables":   self.coordinator.consumables_percent(),
             "position_mm":   (self.coordinator.vac_pos or [None, None])[:2],
             "current_room":  self.coordinator.current_room,
+            "goto_point":    self.coordinator.has("goto_point"),
+            "remote_control": self.coordinator.has("direction_control"),
             "integration":   DOMAIN,
         }
 

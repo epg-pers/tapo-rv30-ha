@@ -210,6 +210,25 @@ go_to:
           unit_of_measurement: mm
           mode: box
 
+remote_drive:
+  target:
+    entity:
+      domain: vacuum
+      integration: tapo_rv30
+  fields:
+    command:
+      required: true
+      example: forward
+      selector:
+        select:
+          options:
+          - enter
+          - forward
+          - backward
+          - left
+          - right
+          - stop
+          - exit
 add_schedule:
   target:
     entity:

@@ -49,6 +49,7 @@ ha-card { display: block; margin-bottom: 12px; }
 .card { padding: 14px 16px; }
 h3 { margin: 0 0 10px; font-size: 1em; font-weight: 500; display: flex; align-items: center; justify-content: space-between; }
 h5 { margin: 12px 0 6px; font-size: .76em; font-weight: 500; letter-spacing: .04em; text-transform: uppercase; color: var(--secondary-text-color); }
+[hidden] { display: none !important; }
 .btn { border: none; cursor: pointer; border-radius: 10px; padding: 9px 14px; font-size: .9em; display: inline-flex; align-items: center; gap: 6px;
   background: color-mix(in srgb, var(--primary-text-color) 7%, transparent); color: var(--primary-text-color); }
 .btn.primary { background: var(--primary-color); color: var(--text-primary-color, #fff); }
@@ -92,6 +93,18 @@ canvas.chart { width: 100%; height: 140px; display: block; }
 .bar-row.warn .track > div { background: var(--warning-color, #ffa600); }
 .bar-row.bad .track > div { background: var(--error-color, #db4437); }
 .bar-row .r { text-align: right; color: var(--secondary-text-color); }
+.dpad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; max-width: 300px; margin: 14px auto; touch-action: none; user-select: none; -webkit-user-select: none; }
+.dpad button { aspect-ratio: 1; border: none; border-radius: 14px; cursor: pointer; display: flex; align-items: center; justify-content: center;
+  background: color-mix(in srgb, var(--primary-text-color) 8%, transparent); color: var(--primary-text-color); touch-action: none; -webkit-touch-callout: none; }
+.dpad button ha-icon { --mdc-icon-size: 32px; pointer-events: none; }
+.dpad button.held { background: var(--primary-color); color: var(--text-primary-color, #fff); }
+.dpad button.halt { background: color-mix(in srgb, var(--error-color, #db4437) 18%, transparent); color: var(--error-color, #db4437); }
+.dpad[aria-disabled="true"] button { opacity: .35; pointer-events: none; }
+.drv-status { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-radius: 10px; margin-bottom: 8px; font-size: .9em;
+  background: color-mix(in srgb, var(--primary-text-color) 6%, transparent); }
+.drv-status.live { background: color-mix(in srgb, var(--primary-color) 16%, transparent); }
+.drv-status ha-icon { --mdc-icon-size: 20px; flex: none; }
+.note { font-size: .84em; color: var(--secondary-text-color); margin: 8px 0 0; }
 .empty { padding: 24px; text-align: center; color: var(--secondary-text-color); }
 .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .err { color: var(--error-color, #db4437); font-size: .86em; }
@@ -154,7 +167,7 @@ class TapoRV30Panel extends HTMLElement {
     const find = (prefix, needle) => ids.find((id) => id.startsWith(prefix) && (!needle || id.includes(needle)));
     const all = (prefix) => ids.filter((id) => id.startsWith(prefix)).sort();
     return {
-      ids, camera: find("camera."), schedules: find("sensor.", "schedules"),
+      ids, camera: find("camera."), schedules: find("sensor.", "schedules"), status: find("sensor.", "status"),
       presets: all("button.").filter((id) => id.includes("preset")),
       switches: all("switch."), selects: all("select."), numbers: all("number."), times: all("time."),
       buttons: all("button.").filter((id) => !id.includes("preset")),
@@ -202,24 +215,24 @@ class TapoRV30Panel extends HTMLElement {
   _renderRight(first) {
     const right = this.shadowRoot.querySelector(".right");
     const tabs = [["schedules", "mdi:calendar-clock", "Schedules"], ["history", "mdi:history", "History"], ["rooms", "mdi:floor-plan", "Rooms"],
-                  ["maintenance", "mdi:wrench", "Maintenance"], ["settings", "mdi:tune", "Settings"]];
+                  ["drive", "mdi:gamepad-variant", "Drive"], ["maintenance", "mdi:wrench", "Maintenance"], ["settings", "mdi:tune", "Settings"]];
     if (!right.querySelector(".tabs")) {
       right.innerHTML = `<div class="tabs">${tabs.map(([k, i, l]) => `<button data-tab="${k}"><ha-icon icon="${i}"></ha-icon>${l}</button>`).join("")}</div><div class="pane"></div>`;
-      right.querySelectorAll(".tabs button").forEach((b) => b.onclick = () => { this._tab = b.dataset.tab; this._editing = null; this._renderRight(true); });
+      right.querySelectorAll(".tabs button").forEach((b) => b.onclick = () => { if (this._stopDrive) this._stopDrive(); this._tab = b.dataset.tab; this._editing = null; this._renderRight(true); });
     }
     right.querySelectorAll(".tabs button").forEach((b) => b.classList.toggle("on", b.dataset.tab === this._tab));
     const pane = right.querySelector(".pane");
     const sig = JSON.stringify([this._tab, this._robot, this._editing && this._editing.id, this._signature()]);
     if (!first && sig === this._paneSig) return;
     this._paneSig = sig;
-    ({ schedules: this._paneSchedules, history: this._paneHistory, rooms: this._paneRooms,
+    ({ schedules: this._paneSchedules, history: this._paneHistory, rooms: this._paneRooms, drive: this._paneDrive,
        maintenance: this._paneMaintenance, settings: this._paneSettings }[this._tab]).call(this, pane);
   }
 
   _signature() {
     const r = this._related(this._robot);
     const pick = (ids) => ids.map((id) => { const s = this._st(id); return s ? s.state + JSON.stringify(s.attributes) : ""; }).join("|");
-    return pick([this._robot, r.camera, r.schedules, ...r.switches, ...r.selects, ...r.numbers, ...r.times, ...r.presets]);
+    return pick([this._robot, r.camera, r.schedules, r.status, ...r.switches, ...r.selects, ...r.numbers, ...r.times, ...r.presets]);
   }
 
   // ---- schedules ----------------------------------------------------------------------
@@ -419,6 +432,82 @@ class TapoRV30Panel extends HTMLElement {
   }
 
   // ---- maintenance ---------------------------------------------------------------------
+  // ---- drive (the app's remote control) ------------------------------------------------
+  _paneDrive(pane) {
+    const r = this._related(this._robot), vac = this._st(this._robot), st = this._st(r.status);
+    const supported = vac.attributes.remote_control !== false;
+    const text = st ? st.state : vac.state, remote = text === "Remote Control";
+    const sweep = r.switches.find((id) => /sweep_walk|clean_while/.test(id)), sw = sweep ? this._st(sweep) : null;
+    if (!pane.querySelector(".dpad")) {
+      if (!supported) { pane.innerHTML = `<ha-card><div class="card"><div class="empty">This robot has no remote control.</div></div></ha-card>`; return; }
+      pane.innerHTML = `<ha-card><div class="card" tabindex="0">
+        <h3><span>Drive</span><span class="actions"><button class="btn primary take"><ha-icon icon="mdi:gamepad-variant"></ha-icon>Take control</button><button class="btn give" hidden><ha-icon icon="mdi:hand-back-left"></ha-icon>Hand back</button></span></h3>
+        <div class="drv-status"><ha-icon icon="mdi:robot-vacuum"></ha-icon><span></span></div>
+        <div class="dpad" aria-disabled="true">
+          <span></span><button data-dir="forward" title="Forward (up arrow)"><ha-icon icon="mdi:arrow-up-bold"></ha-icon></button><span></span>
+          <button data-dir="left" title="Turn left (left arrow)"><ha-icon icon="mdi:arrow-left-bold"></ha-icon></button>
+          <button class="halt" data-dir="stop" title="Stop (space)"><ha-icon icon="mdi:stop"></ha-icon></button>
+          <button data-dir="right" title="Turn right (right arrow)"><ha-icon icon="mdi:arrow-right-bold"></ha-icon></button>
+          <span></span><button data-dir="backward" title="Backward (down arrow)"><ha-icon icon="mdi:arrow-down-bold"></ha-icon></button><span></span>
+        </div>
+        <div class="actions" style="justify-content:center;flex-wrap:wrap">
+          ${sweep ? `<button class="btn sweep"><ha-icon icon="mdi:broom"></ha-icon><span>Vacuum while driving</span></button>` : ""}
+          <button class="btn spot"><ha-icon icon="mdi:target"></ha-icon>Spot clean here</button>
+          <button class="btn locate"><ha-icon icon="mdi:map-marker-radius"></ha-icon>Locate</button>
+          <button class="btn dock"><ha-icon icon="mdi:home-import-outline"></ha-icon>Send home</button>
+        </div>
+        <p class="note">Take control and the robot drives off the dock. It moves while you hold a button or an arrow key and stops when you let go. Hand back control, or send it home, when you are done.</p>
+      </div></ha-card>`;
+      const q = (s) => pane.querySelector(s), dpad = q(".dpad");
+      const send = (command) => this._hass.callService(DOMAIN, "remote_drive", { command }, { entity_id: this._robot }, false, true);
+      const fail = (e) => this.dispatchEvent(new CustomEvent("hass-notification", { detail: { message: (e && (e.message || (e.body && e.body.message))) || "The robot rejected that" }, bubbles: true, composed: true }));
+      let held = null;
+      const paint = () => dpad.querySelectorAll("[data-dir]").forEach((b) => b.classList.toggle("held", b.dataset.dir === held));
+      const loop = async (dir) => {
+        // like the app: send, wait for the answer, pause 300 ms, repeat while still held
+        while (held === dir) {
+          try { await send(dir); } catch (e) { held = null; paint(); fail(e); return; }
+          await new Promise((res) => setTimeout(res, 300));
+        }
+      };
+      const start = (dir) => { if (dpad.getAttribute("aria-disabled") === "true" || held === dir) return; held = dir; paint(); loop(dir); };
+      const stop = () => { if (held == null) return; held = null; paint(); send("stop").catch(fail); };
+      dpad.querySelectorAll("[data-dir]").forEach((b) => {
+        if (b.dataset.dir === "stop") { b.onclick = () => { held = null; paint(); send("stop").catch(fail); }; return; }
+        b.onpointerdown = (e) => { e.preventDefault(); b.setPointerCapture(e.pointerId); start(b.dataset.dir); };
+        b.onpointerup = b.onpointercancel = b.onlostpointercapture = () => stop();
+        b.oncontextmenu = (e) => e.preventDefault();
+      });
+      const keys = { ArrowUp: "forward", ArrowDown: "backward", ArrowLeft: "left", ArrowRight: "right" };
+      q(".card").onkeydown = (e) => { if (e.repeat) return; if (keys[e.key]) { e.preventDefault(); start(keys[e.key]); } else if (e.key === " ") { e.preventDefault(); stop(); } };
+      q(".card").onkeyup = (e) => { if (keys[e.key] && held === keys[e.key]) stop(); };
+      window.addEventListener("blur", stop);
+      this._stopDrive = stop;
+      q(".take").onclick = async () => {
+        try {
+          const res = await send("enter");
+          const ms = (res && res.response && res.response.leaving_dock_ms) || 4000;
+          this._entered = true; dpad.setAttribute("aria-disabled", "false"); q(".take").hidden = true; q(".give").hidden = false;
+          q(".drv-status").classList.add("live"); q(".drv-status span").textContent = "Remote control: leaving the dock";
+          this.dispatchEvent(new CustomEvent("hass-notification", { detail: { message: `You have the controls. Give it ${Math.round(ms / 1000)} s to leave the dock.` }, bubbles: true, composed: true }));
+        } catch (e) { fail(e); }
+      };
+      q(".give").onclick = () => { stop(); this._entered = false; send("exit").catch(fail); };
+      q(".spot").onclick = () => { stop(); this._call("vacuum", "clean_spot", {}, { entity_id: this._robot }); };
+      q(".locate").onclick = () => this._call("vacuum", "locate", {}, { entity_id: this._robot });
+      q(".dock").onclick = async () => { stop(); this._entered = false; try { await send("exit"); } catch (e) { /* not in control */ } this._call("vacuum", "return_to_base", {}, { entity_id: this._robot }); };
+      if (sweep) q(".sweep").onclick = () => this._call("switch", (this._st(sweep).state === "on") ? "turn_off" : "turn_on", {}, { entity_id: sweep });
+    }
+    const live = remote || !!this._entered;
+    const s = pane.querySelector(".drv-status");
+    s.classList.toggle("live", live);
+    s.querySelector("span").textContent = !live ? `Robot is ${String(text).toLowerCase()}. Take control to drive it.`
+      : remote ? "You have the controls. Hold an arrow to drive." : `Remote control requested, robot reports ${String(text).toLowerCase()}`;
+    pane.querySelector(".dpad").setAttribute("aria-disabled", live ? "false" : "true");
+    pane.querySelector(".take").hidden = live; pane.querySelector(".give").hidden = !live;
+    if (sw) { const b = pane.querySelector(".sweep"); b.classList.toggle("primary", sw.state === "on"); b.querySelector("span").textContent = sw.state === "on" ? "Vacuuming while driving" : "Vacuum while driving"; }
+  }
+
   _paneMaintenance(pane) {
     const r = this._related(this._robot), vac = this._st(this._robot), cons = vac.attributes.consumables || {};
     const bars = Object.entries(cons).map(([k, v]) => `<div class="bar-row ${v <= 10 ? "bad" : v <= 30 ? "warn" : ""}"><span>${esc(k)}</span><div class="track"><div style="width:${v}%"></div></div><span class="r">${v}%</span></div>`).join("");

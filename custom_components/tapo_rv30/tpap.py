@@ -1007,6 +1007,19 @@ class TapoVacuumClient:
     def stop_goto(self) -> None:
         self.send("gotoPoint", {"switch": False, "point": [0, 0]})
 
+    # ---- Remote control (component "direction_control"; call, codes and timing from the
+    # app's RobotRemoteControlViewModel / RobotRemoteControlActivity). Entering sends
+    # direction 0 with control=true and answers away_sta_ms, how long the robot takes to
+    # leave the dock (the app counts it down, 4000 ms when absent). Leaving sends
+    # direction 4 (stop) with control=false. While driving the app re-sends the held
+    # direction about every 300 ms after each answer and sends 4 when the finger lifts.
+    def remote_control(self, enable: bool) -> int | None:
+        r = self.send("directionControl", {"direction": 0 if enable else 4, "control": bool(enable)})
+        return (r.get("result") or {}).get("away_sta_ms")
+
+    def remote_drive(self, direction: int) -> None:
+        self.send("directionControl", {"direction": int(direction)})
+
     def set_fan_speed(self, value: int) -> None:
         self.send("setCleanAttr", {"suction": value, "type": "global"})
 

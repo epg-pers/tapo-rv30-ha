@@ -148,6 +148,10 @@ CARPET_COLOR       = (205, 205, 205)
 ZONE_OUTLINE       = (40, 110, 220)       # saved clean zone
 FURNITURE_OUTLINE  = (120, 120, 120)
 # Auto-empty frequency (dust_collection_mode in get/setDustCollectionInfo).
+# directionControl direction codes (Tapo app, ButtonsWithoutDownControlView -> view model)
+REMOTE_DIRECTIONS = {"forward": 0, "backward": 1, "left": 2, "right": 3, "stop": 4}
+REMOTE_CONTROL_CODE = 3   # status while the robot is under remote control
+
 AUTO_EMPTY_MODES = {0: "smart", 1: "light", 2: "balanced", 3: "max"}
 
 # Furniture type codes as placed in the Tapo app (RobotFurnitureType in the app;

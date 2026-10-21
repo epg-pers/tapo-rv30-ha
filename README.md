@@ -37,6 +37,8 @@ Same domain, so your config entry and entities carry over; see
 - **Live cleaning path** on the map, and a **Last Clean Map** of where the robot actually went
 - **Per-room "last cleaned"**: worked out from the robot's own run maps, shown when you hold a room, and available to automations
 - **Sidebar page**: map, a schedules editor for the robot's own schedules, history and statistics, rooms with freshness, maintenance and settings, no dashboard needed (switch it off in the integration options if you prefer)
+- **Remote drive** (beta): take control from the sidebar page and steer the robot with arrows or keys, like the Tapo app
+- **Go to a point** from the card: tap the map, press Go
 - **Do Not Disturb aware**: a schedule inside the robot's Do Not Disturb window never runs; the sidebar page and the services flag it before you save, instead of leaving a dead schedule on the robot
 - **One-click dashboard**: a dashboard strategy that builds the whole thing for every robot
 - **Schedules from Home Assistant**: add, change, enable / disable and remove the robot's own
