@@ -291,6 +291,19 @@ class TapoRV30Card extends HTMLElement {
     if (this._statusOpen) this._renderStatus(false);
   }
 
+  async _loadLastClean(url) {
+    // The endpoint needs Home Assistant auth, which a plain <img> cannot send.
+    if (this._lastCleanUrl !== url || !this._lastCleanBlob) {
+      try {
+        const resp = await this._hass.fetchWithAuth(url);
+        if (!resp.ok) return;
+        if (this._lastCleanBlob) URL.revokeObjectURL(this._lastCleanBlob);
+        this._lastCleanBlob = URL.createObjectURL(await resp.blob()); this._lastCleanUrl = url;
+      } catch (e) { return; }
+    }
+    const img = this._el.status.querySelector("img"); if (img) img.src = this._lastCleanBlob;
+  }
+
   _toggleStatus() {
     this._statusOpen = !this._statusOpen;
     this._el.tStatus.classList.toggle("on", this._statusOpen);
@@ -302,15 +315,15 @@ class TapoRV30Card extends HTMLElement {
     const a = this._mapAttrs(), vac = this._st(this._config.entity) || { attributes: {} };
     const last = a.last_clean || {};
     const cons = vac.attributes.consumables || {};
-    const url = a.last_clean_url ? `${a.last_clean_url}&t=${this._lastCleanHash === a.last_clean_url ? "" : Date.now()}` : null;
-    this._lastCleanHash = a.last_clean_url;
+    const url = a.last_clean_url || null;
     const lastLine = last.started ? `${FRESH(last.started)}${last.area != null ? `, ${last.area} m²` : ""}${last.minutes != null ? `, ${last.minutes} min` : ""}` : "no run recorded yet";
     const consHtml = Object.entries(cons).map(([k, v]) =>
       `<div class="con ${v <= 10 ? "low" : v <= 30 ? "mid" : ""}"><div class="row"><span>${k}</span><span>${v}%</span></div><div class="bar"><div style="width:${v}%"></div></div></div>`).join("");
     this._el.status.innerHTML =
-      `<h5>Last clean, ${lastLine}</h5>` + (url ? `<img src="${url}" alt="Last clean map">` : "") +
+      `<h5>Last clean, ${lastLine}</h5>` + (url ? `<img alt="Last clean map">` : "") +
       `<h5>Recent runs</h5><div class="runs"><div class="run"><ha-icon icon="${ICONS.history}"></ha-icon><span class="when">Loading</span></div></div>` +
       (consHtml ? `<h5>Consumables</h5><div class="cons">${consHtml}</div>` : "");
+    if (url) this._loadLastClean(url);
     if (!fetchRuns && this._runsHtml) { this._el.status.querySelector(".runs").innerHTML = this._runsHtml; return; }
     try {
       const resp = await this._hass.connection.sendMessagePromise({
