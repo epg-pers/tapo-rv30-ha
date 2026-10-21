@@ -1,7 +1,9 @@
 {
   "domain": "tapo_rv30",
   "name": "Tapo Robot Vacuum",
-  "codeowners": [],
+  "codeowners": [
+    "@epg-pers"
+  ],
   "config_flow": true,
   "dependencies": [
     "frontend",

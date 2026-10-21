@@ -18,7 +18,7 @@ jobs:
   release:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - id: version
         run: echo "tag=v$(python3 -c 'import json; print(json.load(open("custom_components/tapo_rv30/manifest.json"))["version"])')" >> "$GITHUB_OUTPUT"
