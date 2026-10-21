@@ -65,3 +65,13 @@ def test_decode_preset():
     # no detail, unnamed rule
     q = decode_preset({"rule_id": 9, "invalid": 1}, None, {}, None)
     assert q["name"] == "Preset 9" and q["rooms"] == [] and q["valid"] is False
+
+
+def test_decode_path_from_live_sample():
+    from custom_components.tapo_rv30.mapdata import decode_path
+    sample = "8C3/xQAMAAEAAPzRCnz/8f/k/MkKnPyVCoz8YQqI/C0KgPv5Cnj7wAps+2wKaPtsCjT7bAoA+2wJzPtsCZQ="
+    pts = decode_path(sample, 60)
+    assert pts[0] == (-815, 2684) and pts[-1] == (-1172, 2452)
+    assert (-15, -28) not in pts                 # marker dropped
+    assert len(pts) == 12
+    assert len(decode_path(sample, 60, max_jump_mm=10_000)) == 13   # nothing dropped when the threshold is huge

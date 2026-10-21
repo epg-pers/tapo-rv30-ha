@@ -13,7 +13,7 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import PERCENTAGE, UnitOfTime
+from homeassistant.const import PERCENTAGE, EntityCategory, UnitOfTime
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -116,6 +116,15 @@ _TOTAL_TIME = TapoSensorDescription(
 )
 
 
+_WIFI_SENSOR = TapoSensorDescription(
+    key="wifi_signal", name="Wi-Fi Signal", icon="mdi:wifi",
+    native_unit_of_measurement="dBm", device_class=SensorDeviceClass.SIGNAL_STRENGTH,
+    state_class=SensorStateClass.MEASUREMENT, entity_category=EntityCategory.DIAGNOSTIC,
+    entity_registry_enabled_default=False,
+    value_fn=lambda d: d.get("rssi"),
+)
+
+
 _STATUS_SENSOR = TapoSensorDescription(
     key="status",
     name="Status",
@@ -189,6 +198,7 @@ async def async_setup_entry(
         TapoStatusSensor(coordinator, entry, _TOTAL_RUNS),
         TapoStatusSensor(coordinator, entry, _TOTAL_AREA),
         TapoStatusSensor(coordinator, entry, _TOTAL_TIME),
+        TapoStatusSensor(coordinator, entry, _WIFI_SENSOR),
         TapoStatusSensor(coordinator, entry, _CURRENT_ROOM_SENSOR),
         TapoStatusSensor(coordinator, entry, _SCHEDULES_SENSOR),
         TapoStatusSensor(coordinator, entry, _used_h("main_brush_lid_time")),

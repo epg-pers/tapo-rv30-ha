@@ -21,7 +21,8 @@ for name, path in (("custom_components", ROOT / "custom_components"), ("custom_c
 for name in ("homeassistant", "homeassistant.components", "homeassistant.components.camera",
              "homeassistant.config_entries", "homeassistant.core", "homeassistant.helpers",
              "homeassistant.helpers.device_registry", "homeassistant.helpers.entity_platform",
-             "homeassistant.helpers.update_coordinator", "homeassistant.exceptions"):
+             "homeassistant.helpers.update_coordinator", "homeassistant.exceptions",
+             "homeassistant.helpers.issue_registry"):
     if name not in sys.modules:
         sys.modules[name] = types.ModuleType(name)
 _stub = sys.modules
@@ -44,3 +45,5 @@ _stub["homeassistant.helpers.update_coordinator"].UpdateFailed = Exception
 _stub["homeassistant.exceptions"].ConfigEntryAuthFailed = Exception
 _stub["homeassistant.exceptions"].HomeAssistantError = Exception
 _stub["homeassistant.exceptions"].ServiceValidationError = Exception
+
+_stub["homeassistant.helpers"].issue_registry = _stub["homeassistant.helpers.issue_registry"]

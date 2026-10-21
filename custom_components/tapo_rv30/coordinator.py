@@ -9,20 +9,21 @@ from typing import Any
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryAuthFailed
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from PIL import Image, ImageDraw
 
 from .const import (
-    CLEANING_CODES, CONF_POLL_INTERVAL, DOMAIN, ERROR_CODES, EVENT_CLEAN_FINISHED,
-    EVENT_CLEAN_STARTED, EVENT_ERROR, FAST_INTERVAL, MAP_INTERVAL, MAX_POLL_INTERVAL,
-    MIN_POLL_INTERVAL, PAUSED_CODES,
+    ACTIVE_POLL_INTERVAL, CLEANING_CODES, CONF_POLL_INTERVAL, DOMAIN, ERROR_CODES,
+    EVENT_CLEAN_FINISHED, EVENT_CLEAN_STARTED, EVENT_ERROR, FAST_INTERVAL, ISSUE_UNREACHABLE,
+    MAP_INTERVAL, MAX_POLL_INTERVAL, MIN_POLL_INTERVAL, PAUSED_CODES, UNREACHABLE_AFTER,
 )
 from .mapdata import (
-    b64name, clean_transition, decode_clean_record, decode_preset, decode_schedule, fold,
-    resolve_rooms, room_at_vac,
+    b64name, clean_transition, decode_clean_record, decode_path, decode_preset, decode_schedule,
+    fold, resolve_rooms, room_at_vac,
 )
-from .maprender import _dot, _grid_px, _jpeg, render_map, room_mask_png
+from .maprender import _dot, _grid_px, _png, _px_transform, render_map, room_mask_png
 from .tpap import AuthError, TapoVacuumClient
 
 _LOGGER = logging.getLogger(__name__)
@@ -68,6 +69,12 @@ class TapoCoordinator(DataUpdateCoordinator):
         self.presets: list[dict] = []
         self._caps_fetched = False
         self._last_record_ts: int | None = None   # newest getCleanRecords timestamp seen
+        self.maps: list[dict] = []                 # [{id, name, current}] refreshed with the map
+        self.path_points: list[tuple[int, int]] = []   # mm, current or last run
+        self._path_id: int | None = None
+        self._last_ok: float | None = None         # monotonic time of the last good poll
+        self._first_fail: float | None = None
+        self._issue_open = False
         self.vac_pos: list | None = None
         self.current_room: str | None = None
 
@@ -161,7 +168,12 @@ class TapoCoordinator(DataUpdateCoordinator):
         data["presets"] = self.presets
         data["current_room"] = self.current_room
         data["position_mm"] = self.vac_pos
+        data["path_points"] = len(self.path_points)
         data["charging"] = data.get("status_code") == 5
+        dev = self.settings.get("device") or {}
+        data["rssi"] = dev.get("rssi")
+        data["signal_level"] = dev.get("signal_level")
+        data["firmware"] = self.settings.get("firmware") or {}
         await self._fire_events(self.data, data)
         return data
 
@@ -289,20 +301,57 @@ class TapoCoordinator(DataUpdateCoordinator):
 
     async def _fetch_status(self) -> dict[str, Any]:
         """get_status with a short retry so one dropped packet doesn't flip
-        every entity to unavailable."""
+        every entity to unavailable. Tracks reachability for the repair issue
+        and adapts the poll interval to what the robot is doing."""
         delay = STATUS_RETRY_DELAY
         for attempt in range(1, STATUS_RETRIES + 1):
             try:
-                return await self.hass.async_add_executor_job(self.client.get_status)
+                data = await self.hass.async_add_executor_job(self.client.get_status)
             except AuthError as exc:
                 raise ConfigEntryAuthFailed(str(exc)) from exc
             except Exception as exc:
                 if attempt == STATUS_RETRIES:
+                    self._note_failure()
                     raise UpdateFailed(f"Failed to fetch vacuum status: {exc}") from exc
                 _LOGGER.debug("Status fetch failed (attempt %d/%d): %s", attempt, STATUS_RETRIES, exc)
                 await asyncio.sleep(delay)
                 delay *= 2
+                continue
+            self._note_success()
+            self._adapt_interval(data.get("status_code"))
+            return data
         raise UpdateFailed("unreachable")   # pragma: no cover
+
+    def _adapt_interval(self, status_code) -> None:
+        active = status_code in CLEANING_CODES or status_code == 4
+        seconds = min(self.poll_interval, ACTIVE_POLL_INTERVAL) if active else self.poll_interval
+        if self.update_interval != timedelta(seconds=seconds):
+            self.update_interval = timedelta(seconds=seconds)
+
+    def _note_success(self) -> None:
+        self._last_ok = self.hass.loop.time()
+        self._first_fail = None
+        if self._issue_open:
+            ir.async_delete_issue(self.hass, DOMAIN, f"{ISSUE_UNREACHABLE}_{self.entry.entry_id if self.entry else self.client.host}")
+            self._issue_open = False
+
+    def _note_failure(self) -> None:
+        """After UNREACHABLE_AFTER seconds of failures on a robot that used to
+        answer, raise a repair pointing at the known firmware regression."""
+        now = self.hass.loop.time()
+        if self._last_ok is None:
+            return
+        if self._first_fail is None:
+            self._first_fail = now
+            return
+        if now - self._first_fail >= UNREACHABLE_AFTER and not self._issue_open:
+            ir.async_create_issue(
+                self.hass, DOMAIN, f"{ISSUE_UNREACHABLE}_{self.entry.entry_id if self.entry else self.client.host}",
+                is_fixable=False, severity=ir.IssueSeverity.WARNING, translation_key=ISSUE_UNREACHABLE,
+                translation_placeholders={"name": self.device_name, "host": self.client.host},
+                learn_more_url="https://github.com/epg-pers/tapo-rv30-ha#known-issue-firmware-updates-and-local-access",
+            )
+            self._issue_open = True
 
     async def async_refresh_soon(self) -> None:
         """Re-poll at 2, 5 and 10 s after a command.
@@ -353,15 +402,44 @@ class TapoCoordinator(DataUpdateCoordinator):
     def _apply_position(self, map_data: dict) -> None:
         self.vac_pos = map_data.get("real_vac_coor")
         self.current_room = room_at_vac(map_data)
+        self._update_path(map_data)
         if self._map_base is not None:
             img = self._map_base.copy()
+            draw = ImageDraw.Draw(img)
+            if len(self.path_points) > 1:
+                to_px = _px_transform(map_data)
+                draw.line([to_px(x, y) for x, y in self.path_points], fill=(0, 140, 220, 200), width=2, joint="curve")
             vac = map_data.get("vac_coor")
             if vac:
-                _dot(ImageDraw.Draw(img), *_grid_px(vac[0], vac[1], map_data["height"]), (0, 180, 255))
-            self.map_image_bytes = _jpeg(img)
+                _dot(draw, *_grid_px(vac[0], vac[1], map_data["height"]), (0, 180, 255))
+            self.map_image_bytes = _png(img)
+
+    def _update_path(self, map_data: dict) -> None:
+        """Read the run's path while the robot is active (new path_id = new run)."""
+        path_id = map_data.get("path_id")
+        code = self.status_code
+        active = code in CLEANING_CODES or code in PAUSED_CODES or code == 4
+        if path_id is None or not active:
+            return
+        if path_id != self._path_id:
+            self._path_id = path_id
+            self.path_points = []
+        try:
+            r = self.client.get_path(path_id, 0)
+            if r.get("pos_array") and r.get("pos_len"):
+                self.path_points = decode_path(r["pos_array"], int(r["pos_len"]))
+        except Exception as exc:
+            _LOGGER.debug("Path fetch failed: %s", exc)
+
+    async def async_request_map_refresh(self) -> None:
+        """Re-render the map on the next poll (after set_map)."""
+        self._map_tick = self._map_cycles
+        await self.async_refresh_soon()
 
     def _refresh_map(self) -> None:
-        current_id, _ = self.client.get_map_info()
+        current_id, map_list = self.client.get_map_info()
+        self.maps = [{"id": m["map_id"], "name": b64name(m.get("map_name", "")), "current": m["map_id"] == current_id}
+                     for m in map_list]
         map_data = self.client.get_map_data(current_id)
         self.map_id = current_id
         self.map_name = b64name(map_data.get("map_name", ""))

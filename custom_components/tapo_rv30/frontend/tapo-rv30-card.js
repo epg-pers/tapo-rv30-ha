@@ -10,7 +10,7 @@
  * the vacuum's device automatically.
  */
 
-const CARD_VERSION = "0.10.0";
+const CARD_VERSION = "0.11.0";
 const ROOM_COLORS = ["#ffb3ba", "#bae1ff", "#baffc9", "#ffffba", "#dcbaff", "#ffdcba", "#baffff"];
 
 const ICONS = {
@@ -74,6 +74,22 @@ canvas { display: block; width: 100%; height: auto; touch-action: none; cursor: 
 .ctl ha-icon { --mdc-icon-size: 24px; }
 .ctl[disabled] { opacity: .35; pointer-events: none; }
 .empty { padding: 24px; text-align: center; color: var(--secondary-text-color); }
+.floors { position: absolute; left: 10px; bottom: 12px; display: flex; gap: 4px; padding: 3px; border-radius: 999px;
+  background: color-mix(in srgb, var(--card-background-color) 80%, transparent); backdrop-filter: blur(6px); }
+.floors button { border: none; cursor: pointer; padding: 5px 10px; border-radius: 999px; font-size: .78em; background: transparent; color: var(--secondary-text-color); }
+.floors button.on { background: var(--primary-color); color: var(--text-primary-color, #fff); }
+.sheet { position: absolute; inset: 0; display: flex; align-items: flex-end; background: rgba(0,0,0,.35); backdrop-filter: blur(2px); z-index: 3; }
+.sheet .panel { width: 100%; background: var(--card-background-color); border-radius: 16px 16px 0 0; padding: 14px 16px 16px; box-shadow: 0 -6px 24px rgba(0,0,0,.3); }
+.sheet h4 { margin: 0 0 10px; font-size: 1em; font-weight: 500; color: var(--primary-text-color); display: flex; justify-content: space-between; align-items: center; }
+.sheet h4 button { border: none; background: none; color: var(--secondary-text-color); cursor: pointer; }
+.opt { display: flex; align-items: center; gap: 8px; margin: 8px 0; font-size: .85em; color: var(--secondary-text-color); }
+.opt span:first-child { width: 64px; flex: none; }
+.seg { display: flex; flex: 1; gap: 4px; }
+.seg button { flex: 1; border: none; cursor: pointer; padding: 7px 4px; border-radius: 8px; font-size: .82em;
+  background: color-mix(in srgb, var(--primary-text-color) 7%, transparent); color: var(--primary-text-color); }
+.seg button.on { background: var(--primary-color); color: var(--text-primary-color, #fff); }
+.sheet .save { width: 100%; margin-top: 10px; padding: 11px; border: none; border-radius: 10px; cursor: pointer; font-size: .95em; font-weight: 500;
+  background: var(--primary-color); color: var(--text-primary-color, #fff); }
 `;
 
 class TapoRV30Card extends HTMLElement {
@@ -177,6 +193,7 @@ class TapoRV30Card extends HTMLElement {
           <button class="t-clear" title="Clear" hidden><ha-icon icon="${ICONS.clear}"></ha-icon></button>
         </div>
         <button class="go" hidden><ha-icon icon="${ICONS.start}"></ha-icon><span></span></button>
+        <div class="floors" hidden></div>
       </div>
       <div class="chips"></div>
       <div class="controls"></div>
@@ -187,7 +204,7 @@ class TapoRV30Card extends HTMLElement {
       banner: root.querySelector(".banner"), canvas: root.querySelector("canvas"), hint: root.querySelector(".hint"),
       tRooms: root.querySelector(".t-rooms"), tZone: root.querySelector(".t-zone"), tClear: root.querySelector(".t-clear"),
       go: root.querySelector(".go"), chips: root.querySelector(".chips"), controls: root.querySelector(".controls"),
-      mapwrap: root.querySelector(".mapwrap"),
+      mapwrap: root.querySelector(".mapwrap"), floors: root.querySelector(".floors"),
     };
     this._el.tRooms.onclick = () => this._setMode("rooms");
     this._el.tZone.onclick = () => this._setMode("zone");
@@ -230,7 +247,19 @@ class TapoRV30Card extends HTMLElement {
 
     this._renderChips();
     this._renderControls(state);
+    this._renderFloors();
     this._draw();
+  }
+
+  _renderFloors() {
+    const el = this._el.floors, maps = this._mapAttrs().maps || [];
+    if (maps.length < 2) { el.hidden = true; return; }
+    el.hidden = false; el.innerHTML = "";
+    for (const m of maps) {
+      const b = document.createElement("button"); b.textContent = m.name || `Map ${m.id}`; b.className = m.current ? "on" : "";
+      b.onclick = () => { if (!m.current) this._call("tapo_rv30", "set_map", { map: String(m.id) }, { entity_id: this._config.entity }); };
+      el.appendChild(b);
+    }
   }
 
   _batteryIcon(p) {
@@ -279,6 +308,7 @@ class TapoRV30Card extends HTMLElement {
 
   // ---- map image + mask ------------------------------------------------------------------
   _mapAttrs() {
+    if (!this._hass || !this._related) return {};
     const cam = this._st(this._related.camera);
     return cam ? cam.attributes : {};
   }
@@ -342,6 +372,10 @@ class TapoRV30Card extends HTMLElement {
     ctx.clearRect(0, 0, c.width, c.height);
     ctx.drawImage(img, 0, 0);
     if (this._selected.size && this._mask) this._drawSelection(ctx);
+    if (this._mode === "zone") for (const z of this._mapAttrs().map_geometry?.saved_zones || []) {
+      ctx.beginPath(); z.px.forEach((p, i) => i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1])); ctx.closePath();
+      ctx.fillStyle = "rgba(40,110,220,.10)"; ctx.fill(); ctx.strokeStyle = "rgba(40,110,220,.8)"; ctx.lineWidth = 2; ctx.setLineDash([4, 4]); ctx.stroke(); ctx.setLineDash([]);
+    }
     if (this._zone) {
       const z = this._zone, x = Math.min(z.x0, z.x1), y = Math.min(z.y0, z.y1), w = Math.abs(z.x1 - z.x0), h = Math.abs(z.y1 - z.y0);
       ctx.fillStyle = "rgba(40,110,220,.22)"; ctx.fillRect(x, y, w, h);
@@ -407,8 +441,38 @@ class TapoRV30Card extends HTMLElement {
   _down(e) {
     e.preventDefault();
     const [x, y] = this._canvasPoint(e);
+    this._longPressed = false;
     if (this._mode === "zone") { this._drag = { x0: x, y0: y }; this._zone = { x0: x, y0: y, x1: x, y1: y }; this._el.canvas.setPointerCapture(e.pointerId); }
-    else this._tapStart = [x, y];
+    else {
+      this._tapStart = [x, y];
+      clearTimeout(this._pressTimer);
+      this._pressTimer = setTimeout(() => { const id = this._roomAt(x, y); if (id != null) { this._longPressed = true; this._openRoomSheet(id); } }, 550);
+    }
+  }
+
+  _openRoomSheet(id) {
+    const g = (this._mapAttrs().room_geometry || []).find((r) => r.id === id); if (!g) return;
+    const cur = { suction: g.suction ?? 3, water_level: g.water_level ?? 0, passes: g.passes ?? 1 };
+    const sheet = document.createElement("div"); sheet.className = "sheet";
+    const seg = (key, opts) => `<div class="opt"><span>${{ suction: "Suction", water_level: "Water", passes: "Passes" }[key]}</span><div class="seg" data-key="${key}">` +
+      opts.map(([v, l]) => `<button data-v="${v}" class="${cur[key] === v ? "on" : ""}">${l}</button>`).join("") + `</div></div>`;
+    sheet.innerHTML = `<div class="panel"><h4><span>${g.name}</span><button class="x"><ha-icon icon="${ICONS.clear}"></ha-icon></button></h4>` +
+      seg("suction", [[1, "Quiet"], [2, "Standard"], [3, "Turbo"], [4, "Max"], [5, "Ultra"]]) +
+      seg("water_level", [[0, "Off"], [1, "Low"], [2, "Medium"], [3, "High"]]) +
+      seg("passes", [[1, "1"], [2, "2"], [3, "3"]]) +
+      `<button class="save">Save for ${g.name}</button></div>`;
+    sheet.onclick = (e) => { if (e.target === sheet) sheet.remove(); };
+    sheet.querySelector(".x").onclick = () => sheet.remove();
+    sheet.querySelectorAll(".seg button").forEach((b) => b.onclick = () => {
+      const segEl = b.parentElement; segEl.querySelectorAll("button").forEach((o) => o.classList.remove("on")); b.classList.add("on");
+      cur[segEl.dataset.key] = Number(b.dataset.v);
+    });
+    const fan = ["", "quiet", "standard", "turbo", "max", "ultra"], water = ["off", "low", "medium", "high"];
+    sheet.querySelector(".save").onclick = () => {
+      this._call("tapo_rv30", "set_room_settings", { rooms: [g.name], suction: fan[cur.suction], water: water[cur.water_level], passes: cur.passes }, { entity_id: this._config.entity });
+      sheet.remove();
+    };
+    this._el.mapwrap.appendChild(sheet);
   }
 
   _move(e) {
@@ -420,8 +484,17 @@ class TapoRV30Card extends HTMLElement {
 
   _up(e) {
     const [x, y] = this._canvasPoint(e);
+    clearTimeout(this._pressTimer);
+    if (this._longPressed) { this._longPressed = false; this._drag = null; this._tapStart = null; return; }
     if (this._mode === "zone") {
-      if (this._drag) { this._drag = null; if (Math.abs(this._zone.x1 - this._zone.x0) < 6 || Math.abs(this._zone.y1 - this._zone.y0) < 6) this._zone = null; }
+      if (this._drag) {
+        this._drag = null;
+        if (Math.abs(this._zone.x1 - this._zone.x0) < 6 || Math.abs(this._zone.y1 - this._zone.y0) < 6) {
+          // a tap, not a drag: pick a saved zone under the finger if there is one
+          const z = this._savedZoneAt(x, y);
+          this._zone = z ? { ...this._bbox(z.px), saved: z } : null;
+        }
+      }
     } else if (this._tapStart && Math.hypot(x - this._tapStart[0], y - this._tapStart[1]) < 10) {
       const id = this._roomAt(x, y);
       if (id != null) { if (this._selected.has(id)) this._selected.delete(id); else this._selected.add(id); }
@@ -431,11 +504,25 @@ class TapoRV30Card extends HTMLElement {
     this._draw();
   }
 
+  _bbox(pts) {
+    const xs = pts.map((p) => p[0]), ys = pts.map((p) => p[1]);
+    return { x0: Math.min(...xs), y0: Math.min(...ys), x1: Math.max(...xs), y1: Math.max(...ys) };
+  }
+
+  _savedZoneAt(x, y) {
+    for (const z of this._mapAttrs().map_geometry?.saved_zones || []) {
+      const b = this._bbox(z.px);
+      if (x >= b.x0 && x <= b.x1 && y >= b.y0 && y <= b.y1) return z;
+    }
+    return null;
+  }
+
   _setMode(mode) {
     this._mode = mode;
     this._el.tRooms.classList.toggle("on", mode === "rooms");
     this._el.tZone.classList.toggle("on", mode === "zone");
-    this._el.hint.textContent = mode === "zone" ? "Drag a rectangle to clean" : "Tap rooms to select";
+    const zones = (this._mapAttrs().map_geometry?.saved_zones || []).length;
+    this._el.hint.textContent = mode === "zone" ? (zones ? "Drag a rectangle, or tap a saved zone" : "Drag a rectangle to clean") : "Tap rooms to select, hold for settings";
     this._updateTools();
     this._draw();
   }
@@ -448,7 +535,7 @@ class TapoRV30Card extends HTMLElement {
       const names = [...this._selected].map((id) => this._roomName(id));
       go.hidden = false; go.querySelector("span").textContent = `Clean ${names.join(", ")}`;
     } else if (this._mode === "zone" && this._zone) {
-      go.hidden = false; go.querySelector("span").textContent = "Clean this zone";
+      go.hidden = false; go.querySelector("span").textContent = this._zone.saved ? "Clean saved zone" : "Clean this zone";
     } else go.hidden = true;
     this._el.tClear.hidden = !(this._selected.size || this._zone);
   }
@@ -459,9 +546,15 @@ class TapoRV30Card extends HTMLElement {
       const rooms = [...this._selected].map((id) => this._roomName(id));
       this._call("tapo_rv30", "clean_rooms", { rooms }, target);
     } else if (this._mode === "zone" && this._zone) {
-      const z = this._zone, a = this._pxToMm(Math.min(z.x0, z.x1), Math.max(z.y0, z.y1)), b = this._pxToMm(Math.max(z.x0, z.x1), Math.min(z.y0, z.y1));
-      if (!a || !b) return;
-      this._call("tapo_rv30", "clean_zone", { zones: [[a[0], a[1], b[0], b[1]]] }, target);
+      const z = this._zone;
+      if (z.saved) {
+        const xs = z.saved.mm.map((p) => p[0]), ys = z.saved.mm.map((p) => p[1]);
+        this._call("tapo_rv30", "clean_zone", { zones: [[Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)]] }, target);
+      } else {
+        const a = this._pxToMm(Math.min(z.x0, z.x1), Math.max(z.y0, z.y1)), b = this._pxToMm(Math.max(z.x0, z.x1), Math.min(z.y0, z.y1));
+        if (!a || !b) return;
+        this._call("tapo_rv30", "clean_zone", { zones: [[a[0], a[1], b[0], b[1]]] }, target);
+      }
     }
     this._clearSelection();
   }

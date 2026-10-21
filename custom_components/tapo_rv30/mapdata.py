@@ -154,6 +154,31 @@ def clean_transition(prev_code, new_code, cleaning: set, paused: set) -> str | N
     return None
 
 
+def decode_path(pos_array: str, pos_len: int, max_jump_mm: int = 1500) -> list[tuple[int, int]]:
+    """getPathData pos_array -> [(x_mm, y_mm), ...] in the map frame.
+
+    The LZ4 block holds an 8-byte header then big-endian int16 pairs. A lone
+    sample further than max_jump_mm from both neighbours is a marker, not a
+    position, and is dropped.
+    """
+    import struct
+    raw = lz4_block_decompress(base64.b64decode(pos_array), pos_len)
+    body = raw[8:]
+    pts = [tuple(struct.unpack(">hh", body[i:i + 4])) for i in range(0, len(body) - 3, 4)]
+    if len(pts) < 3:
+        return pts
+    far = lambda a, b: abs(a[0] - b[0]) + abs(a[1] - b[1]) > max_jump_mm
+    # interior markers: far from both neighbours
+    out = [p for i, p in enumerate(pts)
+           if not (0 < i < len(pts) - 1 and far(pts[i - 1], p) and far(pts[i + 1], p))]
+    # then the ends, against the cleaned sequence
+    if len(out) > 1 and far(out[0], out[1]):
+        out = out[1:]
+    if len(out) > 1 and far(out[-1], out[-2]):
+        out = out[:-1]
+    return out
+
+
 def decode_clean_record(rec: dict) -> dict:
     """One getCleanRecords entry, readable."""
     return {

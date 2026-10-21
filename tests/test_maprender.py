@@ -21,9 +21,9 @@ def _lz4_literal(raw: bytes) -> bytes:
     return out + bytes([ext]) + raw
 
 
-def _map():
+def _map(fill=255):
     width, height = 10, 8
-    px = bytearray([255] * (width * height))     # floor
+    px = bytearray([fill] * (width * height))    # floor (255) or unexplored (127)
     for col in range(10):
         px[0 * width + col] = 0                   # wall along the bottom row (gy=0)
     for row in range(1, 4):
@@ -65,7 +65,7 @@ def test_render_map_geometry_and_image():
     # dock marker position is reported for cards
     assert geom["dock_px"] == [2 * MAP_SCALE + MAP_SCALE // 2, (8 - 1 - 2) * MAP_SCALE + MAP_SCALE // 2]
     # the wall row (gy=0) is at the bottom of the image and dark
-    assert img.getpixel((MAP_SCALE * 9 + 1, img.height - 1)) == (60, 60, 60)
+    assert img.getpixel((MAP_SCALE * 9 + 1, img.height - 1))[:3] == (60, 60, 60)
 
 
 def test_render_map_without_overlays():
@@ -74,3 +74,19 @@ def test_render_map_without_overlays():
     md.pop("furniture_list"); md.pop("charge_coor")
     img, rooms, geom = render_map(md)
     assert len(rooms) == 2 and geom["dock_px"] is None
+
+
+def test_unknown_area_is_transparent():
+    img, _, _ = render_map(_map(fill=127))
+    assert img.mode == "RGBA"
+    assert img.getpixel((img.width - 2, 2))[3] == 0          # unexplored corner: transparent
+    assert img.getpixel((MAP_SCALE * 2 + 1, img.height - MAP_SCALE * 2 - 1))[3] == 255   # room 1 cell: opaque
+
+
+def test_saved_zones_and_room_settings_in_geometry():
+    md = _map(); md["area_list"][0]["suction"] = 3; md["area_list"][0]["cistern"] = 1; md["area_list"][0]["clean_number"] = 2
+    _, rooms, geom = render_map(md)
+    assert geom["saved_zones"][0]["id"] == 501 and len(geom["saved_zones"][0]["px"]) == 4
+    assert geom["saved_zones"][0]["mm"] == [[150, 150], [250, 150], [250, 250], [150, 250]]
+    r1 = next(r for r in rooms if r["id"] == 1)
+    assert (r1["suction"], r1["water_level"], r1["passes"]) == (3, 1, 2)

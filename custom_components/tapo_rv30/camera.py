@@ -46,6 +46,7 @@ class TapoMapCamera(CoordinatorEntity[TapoCoordinator], Camera):
     _attr_is_streaming = False
     _attr_is_recording = False
     _attr_brand = "TP-Link"
+    _attr_content_type = "image/png"
 
     def __init__(self, coordinator: TapoCoordinator, entry: ConfigEntry) -> None:
         CoordinatorEntity.__init__(self, coordinator)
@@ -61,6 +62,8 @@ class TapoMapCamera(CoordinatorEntity[TapoCoordinator], Camera):
         return {
             "map_id": self.coordinator.map_id,
             "map_name": self.coordinator.map_name,
+            "maps": self.coordinator.maps,
+            "path_points": len(self.coordinator.path_points),
             "rooms": [r["name"] for r in self.coordinator.room_geometry],
             "room_geometry": self.coordinator.room_geometry,
             "map_geometry": self.coordinator.map_geometry,

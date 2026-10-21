@@ -22,17 +22,19 @@ through python-kasa.
 - **Presets**: one button per preset saved in the Tapo app, plus `tapo_rv30.run_preset`
 - Entities adapt to the model: optional settings (AI avoidance, re-mopping, pet deep clean, ...)
   appear only when the robot supports them
-- Live colour **map image** with rooms, no-go zones, virtual walls, carpets, saved zones and
-  furniture; the robot marker moves every poll. `room_geometry` / `map_geometry` attributes
-  for custom cards
+- Live **map image** (transparent PNG, theme-friendly) with rooms, no-go zones, virtual walls,
+  carpets, saved zones, furniture, the robot and its cleaning path. `room_geometry` /
+  `map_geometry` attributes for custom cards
 - Fan speed selection (Quiet / Standard / Turbo / Max / Ultra)
 - Water level select (Off / Low / Medium / High)
 - Clean passes select (1 / 2 / 3)
-- Battery, charging, clean progress, mop attached, do-not-disturb-active and problem sensors
+- Battery, charging, clean progress, mop attached, do-not-disturb-active, problem and Wi-Fi
+  signal sensors; read-only firmware update entity
 - "Replace soon" sensors per consumable and lifetime totals (cleans, area, hours) for statistics
 - Events on clean start / finish / error for automations
 - Map as both a camera and an image entity (instant updates in the frontend)
-- Poll interval setting (10 to 300 s), reconfigure and reauth from the integration page
+- Adaptive polling (10 s while cleaning, your chosen interval otherwise), reconfigure and
+  reauth from the integration page, a repair issue when the robot stops answering locally
 - Error state sensor (e.g. "Ok", "Dust Bin Removed", "Trapped")
 - Consumable wear sensors (main brush, side brush, filter, sensor, charge contacts)
 - Zone cleaning via `tapo_rv30.clean_zone` and per-room suction / water / passes via `tapo_rv30.set_room_settings`
@@ -111,8 +113,9 @@ type: custom:tapo-rv30-card
 entity: vacuum.robot
 ```
 
-- Tap rooms on the live map to select them, then **Clean**; switch to zone mode and drag a
-  rectangle to clean just that area. Taps map to rooms exactly, no calibration.
+- Tap rooms on the live map to select them, then **Clean**; hold a room to set its suction,
+  water and passes. Switch to zone mode and drag a rectangle, or tap a saved zone. Taps map
+  to rooms exactly, no calibration. A floor switcher appears when the robot has several maps.
 - Status, current room, battery and progress in the header; a banner when the robot reports a
   problem.
 - Preset chips (one per preset saved in the Tapo app), start/pause, stop, dock, locate and

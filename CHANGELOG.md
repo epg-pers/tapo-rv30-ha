@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.11.0
+
+### New
+
+- **Cleaning path** drawn on the map while the robot works (read with `getPathData`, decoded here for the first time) and kept until the next run starts.
+- **Card**: floor switcher when the robot has several maps; in zone mode, tap a saved zone to clean it; long-press a room for its suction / water / passes.
+- **Firmware** update entity (read-only, from the robot's own update check; installing is left to the app on purpose) and a **Wi-Fi Signal** diagnostic sensor (disabled by default).
+- **Repair issue** when a robot that used to answer has failed every poll for 10 minutes, pointing at the known firmware regression and the fix (power-cycle).
+
+### Changed
+
+- **Adaptive polling**: 10 s while cleaning or returning, your configured interval otherwise.
+- The map is now a PNG with a transparent background, so it looks right on light and dark themes in the card and in picture cards.
+- Display name is now "Tapo Robot Vacuum" (integration, HACS, card picker). The `tapo_rv30` domain, entity ids and card type are unchanged.
+
 ## v0.10.0
 
 ### New

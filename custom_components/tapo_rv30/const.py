@@ -152,3 +152,7 @@ EVENT_CLEAN_STARTED  = "tapo_rv30_clean_started"
 EVENT_CLEAN_FINISHED = "tapo_rv30_clean_finished"
 EVENT_ERROR          = "tapo_rv30_error"
 CONSUMABLE_WARN_FRACTION = 0.10   # "replace soon" below this fraction of life left
+
+ACTIVE_POLL_INTERVAL = 10   # seconds while cleaning / returning (adaptive polling)
+ISSUE_UNREACHABLE = "local_api_unreachable"
+UNREACHABLE_AFTER = 600     # seconds of failed polls (after having worked) before raising the repair

@@ -20,7 +20,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry,
 
 
 class TapoMapImage(TapoEntity, ImageEntity):
-    _attr_content_type = "image/jpeg"
+    _attr_content_type = "image/png"
     _attr_icon = "mdi:map"
 
     def __init__(self, hass: HomeAssistant, coordinator, entry: ConfigEntry) -> None:

@@ -768,13 +768,23 @@ class TapoVacuumClient:
             "model":  raw.get("model") or "RV30",
             "fw_ver": raw.get("fw_ver"),
             "hw_ver": raw.get("hw_ver"),
+            "rssi":   raw.get("rssi"),
+            "signal_level": raw.get("signal_level"),
         }
+
+    def get_latest_firmware(self) -> dict:
+        """{fw_ver, need_to_upgrade, release_note, ...} from the robot's own update check."""
+        return self.send("get_latest_fw")["result"]
 
     def get_nickname(self) -> str:
         return self.get_device_info()["name"]
 
     def get_clean_records(self) -> dict:
         return self.send("getCleanRecords")["result"]
+
+    def get_path(self, path_id: int, start_pos: int = 0) -> dict:
+        """Points of the current/last run: {path_id, point_counts, total_points, pos_array, pos_len}."""
+        return self.send("getPathData", {"path_id": int(path_id), "start_pos": int(start_pos)})["result"]
 
     # ---- Capabilities ------------------------------------------------------------
     def get_components(self) -> dict[str, int]:
@@ -961,7 +971,8 @@ class TapoVacuumClient:
     _SETTINGS = (("dust", "getDustCollectionInfo", None), ("dnd", "getDoNotDisturb", None),
                  ("volume", "getVolume", None), ("child_lock", "getChildLockInfo", None),
                  ("carpet_boost", "getCarpetAutoBoost", None), ("records", "getCleanRecords", None),
-                 ("schedules", "get_schedule_rules", {"start_index": 0}))
+                 ("schedules", "get_schedule_rules", {"start_index": 0}),
+                 ("firmware", "get_latest_fw", None), ("device", "get_device_info", None))
 
     def get_settings(self) -> dict:
         """Slow-changing settings; a getter the model doesn't support is just left out."""

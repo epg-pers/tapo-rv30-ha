@@ -226,7 +226,7 @@ def async_setup_services(hass: HomeAssistant) -> None:
             raise ServiceValidationError(
                 f"{call.service}: no unique map matching '{ref}'. Available: {sorted(names.values())}")
         await _send(hass, call, coord.client.set_current_map, hits[0])
-        await coord.async_refresh_soon()
+        await coord.async_request_map_refresh()
 
     hass.services.async_register(DOMAIN, "clean_rooms", handle_clean_rooms)
     hass.services.async_register(DOMAIN, "run_preset", handle_run_preset)

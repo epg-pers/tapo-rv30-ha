@@ -66,8 +66,9 @@ def render_map(map_data: dict) -> tuple[Image.Image, list[dict], dict]:
             lut[rid] = color
 
     # Paint the grid at 1 px per cell, then scale: far faster than per-cell rectangles.
-    small = Image.new("RGB", (width, height))
-    small.putdata([lut[p] if p < 256 else UNKNOWN_COLOR for p in pixels])
+    # Unknown area is transparent so the map sits on light and dark themes alike.
+    small = Image.new("RGBA", (width, height))
+    small.putdata([(*lut[p], 255) if (p < 256 and p != 127) else (0, 0, 0, 0) for p in pixels])
     small = small.transpose(Image.Transpose.FLIP_TOP_BOTTOM)
     img = small.resize((width * MAP_SCALE, height * MAP_SCALE), Image.Resampling.NEAREST)
 
@@ -94,7 +95,7 @@ def render_map(map_data: dict) -> tuple[Image.Image, list[dict], dict]:
         od = ImageDraw.Draw(overlay)
         for a in forbid:
             od.polygon(poly(a), fill=FORBID_COLOR, outline=FORBID_OUTLINE + (255,), width=2)
-        img = Image.alpha_composite(img.convert("RGBA"), overlay).convert("RGB")
+        img = Image.alpha_composite(img, overlay)
         draw = ImageDraw.Draw(img)
     for a in areas:
         if a.get("type") == "virtual_wall" and len(a.get("vertexs", [])) >= 2:
@@ -122,7 +123,8 @@ def render_map(map_data: dict) -> tuple[Image.Image, list[dict], dict]:
         x1, y1 = _grid_px(max(xs), min(ys), height)
         name = b64name(room.get("name", ""))
         geometry.append({"id": rid, "name": name, "bbox": [x0, y0, x1, y1], "centre": [cx, cy],
-                         "cells": len(pts)})
+                         "cells": len(pts), "suction": room.get("suction"), "water_level": room.get("cistern"),
+                         "passes": room.get("clean_number")})
         draw.text((cx + 1, cy + 1), name, fill=(0, 0, 0), font=font, anchor="mm")
         draw.text((cx, cy), name, fill=(255, 255, 255), font=font, anchor="mm")
 
@@ -130,8 +132,13 @@ def render_map(map_data: dict) -> tuple[Image.Image, list[dict], dict]:
     if charge:
         _dot(draw, *_grid_px(charge[0], charge[1], height), (255, 200, 0))
 
+    zones = [{"id": a.get("id"), "px": [list(p) for p in poly(a)],
+              "mm": [list(v) for v in a.get("vertexs", [])],
+              "suction": a.get("suction"), "water_level": a.get("cistern"), "passes": a.get("clean_number")}
+             for a in areas if a.get("type") == "area" and len(a.get("vertexs", [])) >= 3]
     map_geometry = {
         "map_id": map_data.get("map_id"),
+        "saved_zones": zones,
         "map_name": b64name(map_data.get("map_name", "")),
         "image_size": [img.width, img.height],
         "grid_size": [width, height],
@@ -150,10 +157,13 @@ def _dot(draw: ImageDraw.ImageDraw, sx: int, sy: int, color, radius: int = 6) ->
                  fill=color, outline=(255, 255, 255), width=2)
 
 
-def _jpeg(img: Image.Image) -> bytes:
+def _png(img: Image.Image) -> bytes:
     buf = io.BytesIO()
-    img.save(buf, format="JPEG", quality=85)
+    img.save(buf, format="PNG", optimize=True)
     return buf.getvalue()
+
+
+_jpeg = _png   # kept for callers; the map is PNG with transparency since 0.11
 
 
 
