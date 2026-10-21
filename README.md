@@ -25,7 +25,9 @@ domain name is historical; it is one integration for the range.
 3. Add a card to a dashboard and pick **Tapo Vacuum**. Tap rooms to select them, drag a zone,
    long-press a room for levels, switch floors. Nothing else to install.
 
-Needs Home Assistant 2026.3 or newer (HACS enforces it).
+Needs Home Assistant 2026.3 or newer (HACS enforces it). Coming from a fork of this project?
+Same domain, so your config entry and entities carry over; see
+[switching from a fork](docs/troubleshooting.md#switching-from-a-fork).
 
 ## Only here
 

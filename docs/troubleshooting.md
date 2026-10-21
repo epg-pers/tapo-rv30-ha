@@ -97,6 +97,17 @@ seconds only while cleaning or returning.
 **Fix.** Lower the Poll Interval number entity. The map itself is re-rendered on a slower
 cycle and immediately after map changes you make through the integration.
 
+## Switching from a fork
+
+Every fork of this project uses the same integration domain, `tapo_rv30`, so switching is
+a swap, not a reinstall: in HACS remove the fork (keep the config entry when asked, or
+simply do not delete the integration in Home Assistant), add
+`https://github.com/epg-pers/tapo-rv30-ha` as a custom repository of type Integration,
+download it and restart. Your config entry, entity ids, dashboards and automations carry
+over. Entities the fork had and this project does not are removed on the first start;
+entities new here appear. If the fork used a different domain, set the robot up again
+here and remove the old entry afterwards.
+
 ## Still stuck
 
 Download diagnostics (Settings, Devices and services, Tapo Robot Vacuum, three-dot menu),
