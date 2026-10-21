@@ -147,6 +147,9 @@ VIRTUAL_WALL_COLOR = (200, 30, 30)
 CARPET_COLOR       = (205, 205, 205)
 ZONE_OUTLINE       = (40, 110, 220)       # saved clean zone
 FURNITURE_OUTLINE  = (120, 120, 120)
+# Furniture type codes as placed in the Tapo app. Only codes confirmed on a real
+# robot are named; everything else is reported as its number.
+FURNITURE_TYPES = {201: "Dining table"}
 
 EVENT_CLEAN_STARTED  = "tapo_rv30_clean_started"
 EVENT_CLEAN_FINISHED = "tapo_rv30_clean_finished"

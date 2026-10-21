@@ -8,7 +8,7 @@ import io
 from PIL import Image, ImageDraw, ImageFont
 
 from .const import (
-    CARPET_COLOR, FLOOR_COLOR, FORBID_COLOR, FORBID_OUTLINE, FURNITURE_OUTLINE, ROOM_PALETTE,
+    CARPET_COLOR, FLOOR_COLOR, FORBID_COLOR, FORBID_OUTLINE, FURNITURE_OUTLINE, FURNITURE_TYPES, ROOM_PALETTE,
     UNKNOWN_COLOR, VIRTUAL_WALL_COLOR, WALL_COLOR, ZONE_OUTLINE,
 )
 from .mapdata import b64name, lz4_block_decompress, mm_to_grid, validate_map
@@ -136,9 +136,14 @@ def render_map(map_data: dict) -> tuple[Image.Image, list[dict], dict]:
               "mm": [list(v) for v in a.get("vertexs", [])],
               "suction": a.get("suction"), "water_level": a.get("cistern"), "passes": a.get("clean_number")}
              for a in areas if a.get("type") == "area" and len(a.get("vertexs", [])) >= 3]
+    furniture = [{"id": f.get("id"), "type": f.get("type"),
+                  "type_name": FURNITURE_TYPES.get(f.get("type")), "angle": f.get("angle"),
+                  "px": [list(p) for p in poly(f)], "mm": [list(v) for v in f.get("vertexs", [])]}
+                 for f in map_data.get("furniture_list", []) if len(f.get("vertexs", [])) >= 3]
     map_geometry = {
         "map_id": map_data.get("map_id"),
         "saved_zones": zones,
+        "furniture": furniture,
         "map_name": b64name(map_data.get("map_name", "")),
         "image_size": [img.width, img.height],
         "grid_size": [width, height],

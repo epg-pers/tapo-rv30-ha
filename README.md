@@ -197,6 +197,11 @@ what the app uses for spot clean), `5` a saved preset (`custom_rule_id`, listed 
 `getCustomizationRulesInfo`). `room_list` holds the room ids, which are the pixel values
 in the LZ4 map. `tapo_rv30.send_raw` lets you try any method against your own robot.
 
+Furniture placed in the app comes back from `getFurnitureInfo {"map_id": <int>}` (and inside
+the map blob) as `{id, type, angle, vertexs}`; the map camera lists it in
+`map_geometry.furniture`. Type codes confirmed so far: `201` dining table. If you have other
+furniture on your map, open an issue with the code and what it is and it will be added.
+
 ## Credits
 
 The TPAP / SPAKE2+ transport code (`custom_components/tapo_rv30/tpap.py` and

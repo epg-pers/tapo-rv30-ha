@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Furniture is listed in `map_geometry.furniture` (px and mm outlines, type code and, where known, its name: `201` is a dining table).
+
 ## v0.11.0
 
 ### New

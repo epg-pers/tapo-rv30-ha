@@ -90,3 +90,10 @@ def test_saved_zones_and_room_settings_in_geometry():
     assert geom["saved_zones"][0]["mm"] == [[150, 150], [250, 150], [250, 250], [150, 250]]
     r1 = next(r for r in rooms if r["id"] == 1)
     assert (r1["suction"], r1["water_level"], r1["passes"]) == (3, 1, 2)
+
+
+def test_furniture_in_geometry():
+    _, _, geom = render_map(_map())
+    assert geom["furniture"][0]["type"] == 201
+    assert geom["furniture"][0]["type_name"] == "Dining table"
+    assert len(geom["furniture"][0]["px"]) == 4
