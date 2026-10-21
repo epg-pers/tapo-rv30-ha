@@ -16,6 +16,12 @@ card is still there for your own dashboards; the page is the full-size version.
   edit, enable or disable and delete them with a form (start time, days, rooms or a preset or
   the whole house, suction, water, passes). Nothing is stored in Home Assistant; it all
   goes to the robot through `add_schedule`, `set_schedule` and `remove_schedule`.
+  A schedule whose start time falls inside the robot's **Do Not Disturb** window is
+  flagged in the list and in the editor, because the robot keeps it but never runs it
+  (verified on an RV30 Max Plus; the Tapo app shows the same warning). Saving or enabling
+  one asks first. The Do Not Disturb times are editable on the Settings tab.
+
+<p align="center"><img src="panel-dnd.png" width="640" alt="Schedule editor warning about Do Not Disturb"></p>
 - **History**: lifetime totals, cleans per day for the last 30 days, minutes per week for
   the last 8 weeks, and the recent runs with how they were started.
 

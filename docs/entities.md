@@ -31,7 +31,7 @@ to Home Assistant areas in the entity's settings). Attributes: `fan_speed`, `wat
 
 Status, Battery, Error, Area Cleaned, Clean Progress, Last Clean (with run totals), Total
 Cleans, Total Area Cleaned, Total Cleaning Time, Current Room, Schedules (count, decoded list
-as attributes), consumable wear (main brush, side brush, filter, sensor, charge contacts,
+as attributes, each with `blocked_by_dnd` when its time falls inside Do Not Disturb), consumable wear (main brush, side brush, filter, sensor, charge contacts,
 main brush lid, mop), Wi-Fi Signal (diagnostic, off by default), Matter and Matter Setup Code
 (diagnostic, off by default; see [matter.md](matter.md)).
 

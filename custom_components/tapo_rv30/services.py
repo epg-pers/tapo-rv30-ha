@@ -10,7 +10,7 @@ from homeassistant.helpers import entity_registry as er
 
 from .const import DOMAIN, FAN_NAME_TO_INT, WATER_NAME_TO_INT
 from .coordinator import TapoCoordinator
-from .mapdata import build_schedule_rule, decode_clean_record, encode_weekdays, parse_hhmm
+from .mapdata import build_schedule_rule, decode_clean_record, dnd_active, dnd_window, encode_weekdays, parse_hhmm
 
 _LOGGER = logging.getLogger(__name__)
 SERVICES = ("clean_rooms", "set_room_settings", "clean_zone", "run_schedule", "send_raw",
@@ -200,6 +200,19 @@ def async_setup_services(hass: HomeAssistant) -> None:
         attr.update(_levels(call))
         return attr
 
+    def _check_dnd(call: ServiceCall, coord: TapoCoordinator, minutes: int, enabled: bool) -> None:
+        """The robot does not run a schedule whose start falls inside Do Not Disturb
+        (verified: it stays docked, nothing is logged). The app warns; we refuse unless
+        the caller says ignore_dnd, so an automation can't quietly create a dead schedule."""
+        dnd = coord.settings.get("dnd")
+        if not enabled or call.data.get("ignore_dnd") or not dnd_active(dnd, minutes):
+            return
+        w = dnd_window(dnd)
+        raise ServiceValidationError(
+            f"{call.service}: {minutes // 60:02d}:{minutes % 60:02d} is inside {coord.device_name}'s Do Not Disturb "
+            f"window ({w['start']} to {w['end']}), so the robot would never run it. Move the time, change the "
+            f"Do Not Disturb times, or pass ignore_dnd: true to save it anyway.")
+
     async def handle_add_schedule(call: ServiceCall) -> ServiceResponse:
         coord = _one(hass, call)
         try:
@@ -210,6 +223,7 @@ def async_setup_services(hass: HomeAssistant) -> None:
         if not mask:
             raise ServiceValidationError(f"{call.service}: 'days' is required (Mon..Sun, daily, weekdays or weekend); "
                                          "one-off schedules are not supported, the robot stored a different date in testing")
+        _check_dnd(call, coord, minutes, call.data.get("enabled", True))
         attr = await _schedule_clean_attr(call, coord, None)
         rule = build_schedule_rule(minutes, mask, attr, enabled=call.data.get("enabled", True))
         try:
@@ -239,8 +253,10 @@ def async_setup_services(hass: HomeAssistant) -> None:
             raise ServiceValidationError(f"{call.service}: {exc}") from exc
         if not mask:
             raise ServiceValidationError(f"{call.service}: 'days' must leave at least one day")
-        attr = await _schedule_clean_attr(call, coord, rule.get("clean_attr") or {})
         enabled = call.data.get("enabled", rule.get("enable", True))
+        if "time" in call.data or call.data.get("enabled"):
+            _check_dnd(call, coord, minutes, enabled)
+        attr = await _schedule_clean_attr(call, coord, rule.get("clean_attr") or {})
         body = build_schedule_rule(minutes, mask, attr, enabled=enabled, rule_id=rule["id"])
         try:
             await hass.async_add_executor_job(coord.client.edit_schedule, body)

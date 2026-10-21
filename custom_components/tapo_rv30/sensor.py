@@ -27,7 +27,7 @@ from .const import (
     STATUS_LABELS,
 )
 from .coordinator import TapoCoordinator
-from .mapdata import matter_state
+from .mapdata import dnd_window, matter_state
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -96,7 +96,7 @@ _SCHEDULES_SENSOR = TapoSensorDescription(
     key="schedules", translation_key="schedules", name="Schedules",
     # Count of schedules saved in the Tapo app; the decoded list is in the attributes.
     value_fn=lambda d: len(d.get("schedules") or []),
-    attrs_fn=lambda d: {"schedules": d.get("schedules") or []},
+    attrs_fn=lambda d: {"schedules": d.get("schedules") or [], "dnd": dnd_window((d.get("settings") or {}).get("dnd"))},
 )
 
 

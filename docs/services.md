@@ -11,8 +11,8 @@ vacuum set up the target is optional.
 | `tapo_rv30.run_schedule` | Replay a saved schedule's rooms and settings now. The vacuum has no "run schedule by id" call, so the settings are re-sent and the clean started. |
 | `tapo_rv30.run_preset` | Start a preset saved in the Tapo app, by name or id. |
 | `tapo_rv30.set_map` | Switch the active map (multi-floor). |
-| `tapo_rv30.add_schedule` | Create a schedule on the robot: time, days, rooms / preset / whole house, levels. Returns the id. |
-| `tapo_rv30.set_schedule` | Change a schedule (enable / disable, time, days, rooms, levels). |
+| `tapo_rv30.add_schedule` | Create a schedule on the robot: time, days, rooms / preset / whole house, levels. Returns the id. Refused when the start time is inside the robot's Do Not Disturb window (the robot would never run it); `ignore_dnd: true` saves it anyway. |
+| `tapo_rv30.set_schedule` | Change a schedule (enable / disable, time, days, rooms, levels). Same Do Not Disturb check when the time changes or the schedule is enabled. |
 | `tapo_rv30.remove_schedule` | Delete one schedule or all. |
 | `tapo_rv30.remove_matter_fabric` | Unpair the robot from one Matter ecosystem (fabric index from the Matter sensor). Untested. |
 | `tapo_rv30.go_to` | Drive to a point (x, y in map mm) on robots with go-to-point; `vacuum.stop` cancels it. |

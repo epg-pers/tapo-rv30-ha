@@ -72,6 +72,12 @@ The app posts the schedule rule as-is. Verified on an RV30 Max Plus:
   5 preset with `custom_rule_id`), `suction`, `cistern`, `clean_number`, `clean_order`.
 - A one-off rule (`mode: "once"` with `year`, `month`, `day`) was stored by the robot on a
   different date than asked, so the integration refuses to create them.
+- A schedule whose `s_min` falls inside the Do Not Disturb window (`getDoNotDisturb`,
+  `s_min` / `e_min`, may cross midnight) is accepted and stored but never fires: with DND
+  covering the time, a daily rule three minutes ahead left the robot docked and logged
+  nothing. The app warns about this; the integration flags such schedules
+  (`blocked_by_dnd` in the schedules sensor) and refuses to create or enable one unless
+  asked with `ignore_dnd`.
 
 ## Path and records
 

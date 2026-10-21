@@ -9,6 +9,7 @@ Beta. Install it from HACS with "Show beta versions" on.
 - **Tapo Vacuum sidebar page.** One page with everything: the live map card, a **schedules editor** (add, edit, enable, disable and delete the robot's own schedules with a form: time, days, rooms or preset or whole house, levels), **history and statistics** (cleans per day, minutes per week, lifetime totals, the recent runs), **rooms** with freshness bars and one-tap cleaning, **maintenance** (consumable life, bin, resets, dock actions) and **settings** (every switch, select and number). Several robots become tabs. Turn it off in the integration's options if you only want the card and entities.
 - Integration **options** (Settings, Devices and services, Tapo Robot Vacuum, Configure): show or hide the sidebar page.
 - Preset buttons expose `preset_id` and `preset_name`.
+- **Do Not Disturb aware schedules.** The robot keeps a schedule whose start time is inside its Do Not Disturb window but never runs it (verified: it stays docked). The schedules sensor marks such schedules `blocked_by_dnd` and carries the window (`dnd`), the sidebar page flags them in the list and in the editor and asks before saving or enabling one, and `add_schedule` / `set_schedule` refuse them unless `ignore_dnd: true`. The Do Not Disturb times are editable on the page's Settings tab.
 
 
 ### New

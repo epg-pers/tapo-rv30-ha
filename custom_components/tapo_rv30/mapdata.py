@@ -141,6 +141,15 @@ def dnd_active(dnd: dict | None, now_minutes: int) -> bool:
     return now_minutes >= start or now_minutes < end
 
 
+def dnd_window(dnd: dict | None) -> dict | None:
+    """The DND window as the UI shows it: {"enabled", "start": "22:00", "end": "08:00"}."""
+    if not dnd:
+        return None
+    hhmm = lambda m: f"{int(m) // 60:02d}:{int(m) % 60:02d}"
+    return {"enabled": bool(dnd.get("do_not_disturb")), "start": hhmm(dnd.get("s_min", 0)),
+            "end": hhmm(dnd.get("e_min", 0))}
+
+
 def clean_transition(prev_code, new_code, cleaning: set, paused: set) -> str | None:
     """'started' when a clean begins, 'finished' when a running or paused clean
     ends (stopped, docked, idle), else None. Pause/resume is not a transition."""
@@ -276,8 +285,11 @@ def build_schedule_rule(minutes: int, week_mask: int, clean_attr: dict, enabled:
     return rule
 
 
-def decode_schedule(rule: dict, room_names: dict[int, str]) -> dict:
-    """One get_schedule_rules entry as a readable summary (raw rule kept under 'raw')."""
+def decode_schedule(rule: dict, room_names: dict[int, str], dnd: dict | None = None) -> dict:
+    """One get_schedule_rules entry as a readable summary (raw rule kept under 'raw').
+    blocked_by_dnd: the start time falls inside the robot's Do Not Disturb window, so the
+    robot will not run it (verified on an RV30 Max Plus: the schedule simply does not
+    fire; the Tapo app shows the same warning)."""
     attr = rule.get("clean_attr") or {}
     room_ids = attr.get("room_list") or []
     s_min = rule.get("s_min", 0)
@@ -287,6 +299,7 @@ def decode_schedule(rule: dict, room_names: dict[int, str]) -> dict:
         "time":          f"{s_min // 60:02d}:{s_min % 60:02d}",
         "days":          decode_weekdays(rule.get("week_day", 0)),
         "repeat":        rule.get("mode") == "repeat",
+        "blocked_by_dnd": dnd_active(dnd, int(s_min)),
         "rooms":         [room_names.get(rid, f"Room {rid}") for rid in room_ids],
         "room_ids":      room_ids,
         "preset_id":     attr.get("custom_rule_id"),

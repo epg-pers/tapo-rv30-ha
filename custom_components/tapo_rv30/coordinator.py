@@ -539,7 +539,7 @@ class TapoCoordinator(DataUpdateCoordinator):
     def _decode_schedules(self) -> None:
         names = {r["id"]: b64name(r.get("name", "")) for r in self.rooms}
         rules = (self.settings.get("schedules") or {}).get("rule_list") or []
-        self.schedules = [decode_schedule(r, names) for r in rules]
+        self.schedules = [decode_schedule(r, names, self.settings.get("dnd")) for r in rules]
 
     # ---- map ---------------------------------------------------------------------
     def _refresh_position(self) -> None:

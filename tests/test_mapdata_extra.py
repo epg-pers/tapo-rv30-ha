@@ -109,3 +109,16 @@ def test_split_room_phrase():
     assert split_room_phrase("the kitchen, lounge and the hallway") == ["kitchen", "lounge", "hallway"]
     assert split_room_phrase("Dining Room & my office") == ["Dining Room", "office"]
     assert split_room_phrase("") == []
+
+
+def test_schedule_blocked_by_dnd():
+    from custom_components.tapo_rv30.mapdata import decode_schedule, dnd_window
+    dnd = {"do_not_disturb": True, "s_min": 22 * 60, "e_min": 8 * 60}
+    assert dnd_window(dnd) == {"enabled": True, "start": "22:00", "end": "08:00"}
+    assert dnd_window(None) is None
+    night = {"id": "S1", "enable": True, "s_min": 23 * 60, "week_day": 127, "mode": "repeat"}
+    day = {"id": "S2", "enable": True, "s_min": 9 * 60, "week_day": 127, "mode": "repeat"}
+    assert decode_schedule(night, {}, dnd)["blocked_by_dnd"] is True
+    assert decode_schedule(day, {}, dnd)["blocked_by_dnd"] is False
+    assert decode_schedule(night, {}, {**dnd, "do_not_disturb": False})["blocked_by_dnd"] is False
+    assert decode_schedule(night, {})["blocked_by_dnd"] is False

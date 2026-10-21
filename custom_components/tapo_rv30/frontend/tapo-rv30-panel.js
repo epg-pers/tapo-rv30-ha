@@ -11,6 +11,15 @@ const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const FAN = ["Quiet", "Standard", "Turbo", "Max", "Ultra"];
 const WATER = ["off", "low", "medium", "high"];
 const START = { 0: "button", 1: "app", 2: "Alexa", 3: "Google", 4: "schedule", 5: "automation", 6: "IFTTT", 7: "Alice" };
+// Minutes after midnight inside the robot's Do Not Disturb window? Windows cross midnight.
+const toMin = (hhmm) => { const [h, m] = String(hhmm || "0:0").split(":").map(Number); return h * 60 + m; };
+const inDnd = (dnd, hhmm) => {
+  if (!dnd || !dnd.enabled) return false;
+  const t = toMin(hhmm), a = toMin(dnd.start), b = toMin(dnd.end);
+  if (a === b) return true;
+  return a < b ? (t >= a && t < b) : (t >= a || t < b);
+};
+const dndText = (dnd) => `Do Not Disturb (${dnd.start} to ${dnd.end})`;
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const ago = (ts) => {
   if (!ts) return "never";
@@ -48,6 +57,8 @@ h5 { margin: 12px 0 6px; font-size: .76em; font-weight: 500; letter-spacing: .04
 .row { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid color-mix(in srgb, var(--primary-text-color) 10%, transparent); }
 .row:last-child { border-bottom: none; }
 .row .main { flex: 1; min-width: 0; }
+.warn { color: var(--warning-color, #ff9800); font-size: .84em; display: flex; gap: 5px; align-items: center; margin-top: 3px; }
+.warn ha-icon { --mdc-icon-size: 16px; }
 .row .t { font-weight: 500; }
 .row .s { font-size: .82em; color: var(--secondary-text-color); }
 .row.off .main { opacity: .5; }
@@ -145,12 +156,13 @@ class TapoRV30Panel extends HTMLElement {
     return {
       ids, camera: find("camera."), schedules: find("sensor.", "schedules"),
       presets: all("button.").filter((id) => id.includes("preset")),
-      switches: all("switch."), selects: all("select."), numbers: all("number."),
+      switches: all("switch."), selects: all("select."), numbers: all("number."), times: all("time."),
       buttons: all("button.").filter((id) => !id.includes("preset")),
       totals: { cleans: find("sensor.", "total_cleans"), area: find("sensor.", "total_area"), time: find("sensor.", "total_cleaning_time") },
     };
   }
   _schedules(r) { const s = this._st(r.schedules); return (s && s.attributes.schedules) || []; }
+  _dnd(r) { const s = this._st(r.schedules); return (s && s.attributes.dnd) || null; }
   _rooms(vac) { return (this._st(vac).attributes.rooms || []); }
   _presets(r) { return r.presets.map((id) => { const s = this._st(id); return { id: s.attributes.preset_id, name: s.attributes.preset_name || s.attributes.friendly_name, rooms: s.attributes.rooms }; }).filter((p) => p.id != null); }
 
@@ -207,21 +219,23 @@ class TapoRV30Panel extends HTMLElement {
   _signature() {
     const r = this._related(this._robot);
     const pick = (ids) => ids.map((id) => { const s = this._st(id); return s ? s.state + JSON.stringify(s.attributes) : ""; }).join("|");
-    return pick([this._robot, r.camera, r.schedules, ...r.switches, ...r.selects, ...r.numbers, ...r.presets]);
+    return pick([this._robot, r.camera, r.schedules, ...r.switches, ...r.selects, ...r.numbers, ...r.times, ...r.presets]);
   }
 
   // ---- schedules ----------------------------------------------------------------------
   _paneSchedules(pane) {
-    const r = this._related(this._robot), list = this._schedules(r);
+    const r = this._related(this._robot), list = this._schedules(r), dnd = this._dnd(r);
     if (this._editing) return this._renderEditor(pane, r);
     const rows = list.map((s) => {
+      const blocked = s.blocked_by_dnd != null ? s.blocked_by_dnd : inDnd(dnd, s.time);
+      const warn = blocked && dnd ? `<div class="warn"><ha-icon icon="mdi:bell-sleep"></ha-icon>Inside ${esc(dndText(dnd))}: the robot will skip it</div>` : "";
       const target = s.preset_id != null ? `Preset ${esc((this._presets(r).find((p) => p.id === s.preset_id) || {}).name || s.preset_id)}`
         : (s.rooms && s.rooms.length ? esc(s.rooms.join(", ")) : "Whole house");
       const days = (s.days || []).length === 7 ? "Daily" : (s.days || []).join(" ");
       const levels = [s.suction != null ? FAN[s.suction - 1] : null, s.water_level != null ? `water ${WATER[s.water_level]}` : null, s.clean_passes ? `${s.clean_passes}x` : null].filter(Boolean).join(", ");
       return `<div class="row ${s.enabled ? "" : "off"}" data-id="${esc(s.id)}">
         <button class="switch ${s.enabled ? "on" : ""}" data-act="toggle" title="${s.enabled ? "Disable" : "Enable"}"></button>
-        <div class="main"><div class="t">${esc(s.time)} &middot; ${esc(days)}</div><div class="s">${target}${levels ? " &middot; " + esc(levels) : ""}</div></div>
+        <div class="main"><div class="t">${esc(s.time)} &middot; ${esc(days)}</div><div class="s">${target}${levels ? " &middot; " + esc(levels) : ""}</div>${warn}</div>
         <button class="icon-btn" data-act="edit" title="Edit"><ha-icon icon="mdi:pencil"></ha-icon></button>
         <button class="icon-btn" data-act="delete" title="Delete"><ha-icon icon="mdi:delete"></ha-icon></button>
       </div>`;
@@ -233,7 +247,14 @@ class TapoRV30Panel extends HTMLElement {
     pane.querySelector('[data-act="add"]').onclick = () => { this._editing = {}; this._renderRight(true); };
     pane.querySelectorAll(".row").forEach((row) => {
       const s = list.find((x) => String(x.id) === row.dataset.id);
-      row.querySelector('[data-act="toggle"]').onclick = () => this._call(DOMAIN, "set_schedule", { schedule_id: s.id, enabled: !s.enabled }, { entity_id: this._robot });
+      row.querySelector('[data-act="toggle"]').onclick = () => {
+        const data = { schedule_id: s.id, enabled: !s.enabled };
+        if (!s.enabled && inDnd(dnd, s.time)) {
+          if (!confirm(`${s.time} is inside ${dndText(dnd)}, so the robot will not run this schedule. Enable it anyway?`)) return;
+          data.ignore_dnd = true;
+        }
+        this._call(DOMAIN, "set_schedule", data, { entity_id: this._robot });
+      };
       row.querySelector('[data-act="edit"]').onclick = () => { this._editing = { ...s }; this._renderRight(true); };
       row.querySelector('[data-act="delete"]').onclick = async () => {
         if (!confirm(`Delete the ${s.time} schedule from the robot?`)) return;
@@ -244,7 +265,7 @@ class TapoRV30Panel extends HTMLElement {
 
   _renderEditor(pane, r) {
     const s = this._editing, isNew = s.id == null;
-    const rooms = this._rooms(this._robot), presets = this._presets(r);
+    const rooms = this._rooms(this._robot), presets = this._presets(r), dnd = this._dnd(r);
     const state = {
       time: s.time || "09:00", days: new Set((s.days || []).map((d) => d.slice(0, 3))),
       mode: s.preset_id != null ? "preset" : (s.rooms && s.rooms.length ? "rooms" : "house"),
@@ -256,7 +277,8 @@ class TapoRV30Panel extends HTMLElement {
     const roomChips = () => rooms.map((n) => `<button class="chip ${state.rooms.has(n) ? "on" : ""}" data-room="${esc(n)}">${esc(n)}</button>`).join("");
     pane.innerHTML = `<ha-card><div class="card form">
       <h3><span>${isNew ? "New schedule" : `Edit schedule ${esc(s.id)}`}</span></h3>
-      <div><label>Start time (robot's time zone)</label><input type="time" value="${esc(state.time)}"></div>
+      <div><label>Start time (robot's time zone)</label><input type="time" value="${esc(state.time)}">
+        <div class="warn dnd" hidden><ha-icon icon="mdi:bell-sleep"></ha-icon><span></span></div></div>
       <div><label>Days</label><div class="chips days">${dayChips()}</div></div>
       <div><label>What to clean</label><div class="seg mode">
         <button data-mode="house" class="${state.mode === "house" ? "on" : ""}">Whole house</button>
@@ -284,6 +306,14 @@ class TapoRV30Panel extends HTMLElement {
         state.days = new Set(sets[b.dataset.quick]); redrawDays();
       });
     };
+    const dndCheck = () => {
+      const w = q(".warn.dnd"), t = q("input[type=time]").value;
+      const hit = dnd && dnd.enabled && inDnd(dnd, t);
+      w.hidden = !hit;
+      if (hit) w.querySelector("span").textContent = `${t} is inside ${dndText(dnd)}: the robot will not run it. Pick another time or change the window in Settings.`;
+      return hit;
+    };
+    q("input[type=time]").oninput = dndCheck; dndCheck();
     bindDays();
     q(".rooms").querySelectorAll("[data-room]").forEach((b) => b.onclick = () => { const n = b.dataset.room; state.rooms.has(n) ? state.rooms.delete(n) : state.rooms.add(n); b.classList.toggle("on"); });
     q(".mode").querySelectorAll("button").forEach((b) => b.onclick = () => {
@@ -305,6 +335,10 @@ class TapoRV30Panel extends HTMLElement {
       const su = Number(q(".suction").value), wa = Number(q(".water").value), pa = Number(q(".passes").value);
       if (su) data.suction = FAN[su - 1]; if (wa >= 0) data.water = WATER[wa]; if (pa) data.passes = pa;
       if (!isNew) data.schedule_id = s.id;
+      if (state.enabled && dndCheck()) {
+        if (!confirm(`${time} is inside ${dndText(dnd)}. The robot will keep the schedule but never run it until the time or the window changes. Save anyway?`)) return;
+        data.ignore_dnd = true;
+      }
       const ok = await this._call(DOMAIN, isNew ? "add_schedule" : "set_schedule", data, { entity_id: this._robot });
       if (ok) { this._editing = null; this._renderRight(true); }
     };
@@ -400,10 +434,12 @@ class TapoRV30Panel extends HTMLElement {
     const sw = r.switches.map((id) => { const s = this._st(id); return `<div class="row"><div class="main"><div class="t">${esc(strip(s.attributes.friendly_name))}</div></div><button class="switch ${s.state === "on" ? "on" : ""}" data-sw="${esc(id)}"></button></div>`; }).join("");
     const sel = r.selects.map((id) => { const s = this._st(id); return `<div class="row"><div class="main"><div class="t">${esc(strip(s.attributes.friendly_name))}</div></div><select data-sel="${esc(id)}">${(s.attributes.options || []).map((o) => `<option ${o === s.state ? "selected" : ""}>${esc(o)}</option>`).join("")}</select></div>`; }).join("");
     const num = r.numbers.map((id) => { const s = this._st(id); return `<div class="row"><div class="main"><div class="t">${esc(strip(s.attributes.friendly_name))}</div><div class="s">${esc(s.state)} ${esc(s.attributes.unit_of_measurement || "")}</div></div><input type="range" data-num="${esc(id)}" min="${s.attributes.min}" max="${s.attributes.max}" step="${s.attributes.step || 1}" value="${esc(s.state)}"></div>`; }).join("");
-    pane.innerHTML = `<ha-card><div class="card"><h3><span>Settings</span></h3>${sw}${sel}${num}${(sw || sel || num) ? "" : `<div class="empty">No settings entities.</div>`}</div></ha-card>`;
+    const tim = r.times.map((id) => { const s = this._st(id); return `<div class="row"><div class="main"><div class="t">${esc(strip(s.attributes.friendly_name))}</div></div><input type="time" data-time="${esc(id)}" value="${esc(String(s.state).slice(0, 5))}"></div>`; }).join("");
+    pane.innerHTML = `<ha-card><div class="card"><h3><span>Settings</span></h3>${sw}${sel}${tim}${num}${(sw || sel || num || tim) ? "" : `<div class="empty">No settings entities.</div>`}</div></ha-card>`;
     pane.querySelectorAll("[data-sw]").forEach((b) => b.onclick = () => this._call("switch", b.classList.contains("on") ? "turn_off" : "turn_on", {}, { entity_id: b.dataset.sw }));
     pane.querySelectorAll("[data-sel]").forEach((e) => e.onchange = () => this._call("select", "select_option", { option: e.value }, { entity_id: e.dataset.sel }));
     pane.querySelectorAll("[data-num]").forEach((e) => e.onchange = () => this._call("number", "set_value", { value: Number(e.value) }, { entity_id: e.dataset.num }));
+    pane.querySelectorAll("[data-time]").forEach((e) => e.onchange = () => { if (e.value) this._call("time", "set_value", { time: e.value + ":00" }, { entity_id: e.dataset.time }); });
   }
 }
 customElements.define("tapo-rv30-panel", TapoRV30Panel);
