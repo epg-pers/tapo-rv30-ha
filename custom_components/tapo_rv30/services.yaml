@@ -209,3 +209,126 @@ go_to:
           step: 10
           unit_of_measurement: mm
           mode: box
+
+add_schedule:
+  target:
+    entity:
+      domain: vacuum
+      integration: tapo_rv30
+  fields:
+    time:
+      required: true
+      example: "08:00"
+      selector:
+        time: {}
+    days:
+      required: true
+      example:
+      - Mon
+      - Wed
+      - Fri
+      selector:
+        object: {}
+    rooms:
+      example:
+      - Kitchen
+      selector:
+        object: {}
+    preset:
+      example: Night Vacuum
+      selector:
+        text: {}
+    map:
+      selector:
+        text: {}
+    suction:
+      selector:
+        select:
+          options:
+          - Quiet
+          - Standard
+          - Turbo
+          - Max
+          - Ultra
+    water:
+      selector:
+        select:
+          options:
+          - 'off'
+          - low
+          - medium
+          - high
+    passes:
+      selector:
+        number:
+          min: 1
+          max: 3
+    enabled:
+      default: true
+      selector:
+        boolean: {}
+set_schedule:
+  target:
+    entity:
+      domain: vacuum
+      integration: tapo_rv30
+  fields:
+    schedule_id:
+      required: true
+      example: S1
+      selector:
+        text: {}
+    enabled:
+      selector:
+        boolean: {}
+    time:
+      selector:
+        time: {}
+    days:
+      selector:
+        object: {}
+    rooms:
+      selector:
+        object: {}
+    preset:
+      selector:
+        text: {}
+    map:
+      selector:
+        text: {}
+    suction:
+      selector:
+        select:
+          options:
+          - Quiet
+          - Standard
+          - Turbo
+          - Max
+          - Ultra
+    water:
+      selector:
+        select:
+          options:
+          - 'off'
+          - low
+          - medium
+          - high
+    passes:
+      selector:
+        number:
+          min: 1
+          max: 3
+remove_schedule:
+  target:
+    entity:
+      domain: vacuum
+      integration: tapo_rv30
+  fields:
+    schedule_id:
+      example: S1
+      selector:
+        text: {}
+    all:
+      default: false
+      selector:
+        boolean: {}

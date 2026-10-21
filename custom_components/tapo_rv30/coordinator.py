@@ -23,7 +23,7 @@ from .mapdata import (
     b64name, clean_transition, decode_clean_record, decode_path, decode_preset, decode_schedule,
     fold, resolve_rooms, room_at_vac,
 )
-from .maprender import _dot, _grid_px, _png, _px_transform, render_map, room_mask_png
+from .maprender import render_record, _dot, _grid_px, _png, _px_transform, render_map, room_mask_png
 from .tpap import AuthError, TapoVacuumClient
 
 _LOGGER = logging.getLogger(__name__)
@@ -49,6 +49,9 @@ class TapoCoordinator(DataUpdateCoordinator):
         self.poll_interval = interval
         self._map_tick = 0
         self.map_image_bytes: bytes | None = None
+        self.last_clean_image_bytes: bytes | None = None   # render of the newest clean record
+        self.last_clean_info: dict = {}
+        self._record_rendered_ts: int | None = None
         self._map_base: Image.Image | None = None     # rendered map without the vacuum marker
         self.room_geometry: list[dict] = []
         self.map_geometry: dict = {}
@@ -165,6 +168,7 @@ class TapoCoordinator(DataUpdateCoordinator):
 
         data["settings"] = self.settings
         data["schedules"] = self.schedules
+        await self._maybe_render_last_clean(data.get("status_code"))
         data["bool_settings"] = self.bool_settings
         data["presets"] = self.presets
         data["current_room"] = self.current_room
@@ -202,6 +206,29 @@ class TapoCoordinator(DataUpdateCoordinator):
             self.hass.bus.async_fire(EVENT_ERROR, {**self._event_base(), "code": new_err,
                                                    "error": ERROR_CODES.get(new_err, f"Code({new_err})"),
                                                    "current_room": self.current_room})
+
+    async def _maybe_render_last_clean(self, status_code) -> None:
+        """Render the newest clean record's map once it exists and the robot is
+        not working (the detail read is left alone while a run is in progress)."""
+        recs = (self.settings.get("records") or {}).get("record_list") or []
+        if not recs or status_code in CLEANING_CODES or status_code in PAUSED_CODES or status_code == 4:
+            return
+        newest = max(recs, key=lambda r: r.get("timestamp", 0))
+        ts = newest.get("timestamp", 0)
+        if ts == self._record_rendered_ts:
+            return
+        try:
+            detail = await self.hass.async_add_executor_job(
+                self.client.get_clean_record_detail, newest.get("record_index", 0))
+            img = await self.hass.async_add_executor_job(render_record, detail)
+            self.last_clean_image_bytes = _png(img)
+            self.last_clean_info = {**decode_clean_record(newest),
+                                    "map_name": b64name(detail.get("map_name", "")),
+                                    "map_id": detail.get("map_id")}
+            self._record_rendered_ts = ts
+        except Exception as exc:
+            _LOGGER.debug("Last clean render failed: %s", exc)
+            self._record_rendered_ts = ts     # do not retry every poll on a bad record
 
     def _note_latest_record(self) -> None:
         recs = (self.settings.get("records") or {}).get("record_list") or []

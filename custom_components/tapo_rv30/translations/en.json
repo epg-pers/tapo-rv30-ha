@@ -183,6 +183,108 @@
           "description": "Y in mm."
         }
       }
+    },
+    "add_schedule": {
+      "name": "Add schedule",
+      "description": "Create a cleaning schedule on the robot (same as the Tapo app's Schedules). Returns the new schedule id when called with a response.",
+      "fields": {
+        "time": {
+          "name": "Time",
+          "description": "Start time, in the robot's own time zone."
+        },
+        "days": {
+          "name": "Days",
+          "description": "Days to repeat on: a list of Mon..Sun, or daily, weekdays or weekend."
+        },
+        "rooms": {
+          "name": "Rooms",
+          "description": "Room names to clean (partial match). Leave rooms and preset empty for the whole house."
+        },
+        "preset": {
+          "name": "Preset",
+          "description": "A preset saved in the Tapo app, by name or id, instead of rooms."
+        },
+        "map": {
+          "name": "Map",
+          "description": "Map the rooms are on. Defaults to the current map."
+        },
+        "suction": {
+          "name": "Suction",
+          "description": "Suction level for the scheduled run."
+        },
+        "water": {
+          "name": "Water",
+          "description": "Water level for the scheduled run."
+        },
+        "passes": {
+          "name": "Passes",
+          "description": "Passes for the scheduled run, 1 to 3."
+        },
+        "enabled": {
+          "name": "Enabled",
+          "description": "Create the schedule switched on (default) or off."
+        }
+      }
+    },
+    "set_schedule": {
+      "name": "Change schedule",
+      "description": "Change a schedule on the robot. Only the fields you give change; use the schedules sensor for the ids.",
+      "fields": {
+        "schedule_id": {
+          "name": "Schedule id",
+          "description": "The robot's id for the schedule, e.g. S1."
+        },
+        "enabled": {
+          "name": "Enabled",
+          "description": "Switch the schedule on or off."
+        },
+        "time": {
+          "name": "Time",
+          "description": "New start time, in the robot's own time zone."
+        },
+        "days": {
+          "name": "Days",
+          "description": "New days: a list of Mon..Sun, or daily, weekdays or weekend."
+        },
+        "rooms": {
+          "name": "Rooms",
+          "description": "Room names to clean (partial match). Leave rooms and preset empty for the whole house."
+        },
+        "preset": {
+          "name": "Preset",
+          "description": "A preset saved in the Tapo app, by name or id, instead of rooms."
+        },
+        "map": {
+          "name": "Map",
+          "description": "Map the rooms are on. Defaults to the current map."
+        },
+        "suction": {
+          "name": "Suction",
+          "description": "Suction level for the scheduled run."
+        },
+        "water": {
+          "name": "Water",
+          "description": "Water level for the scheduled run."
+        },
+        "passes": {
+          "name": "Passes",
+          "description": "Passes for the scheduled run, 1 to 3."
+        }
+      }
+    },
+    "remove_schedule": {
+      "name": "Remove schedule",
+      "description": "Delete one schedule from the robot, or all of them.",
+      "fields": {
+        "schedule_id": {
+          "name": "Schedule id",
+          "description": "The robot's id for the schedule, e.g. S1."
+        },
+        "all": {
+          "name": "All",
+          "description": "Remove every schedule instead of one."
+        }
+      }
     }
   },
   "issues": {

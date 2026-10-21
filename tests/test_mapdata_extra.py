@@ -69,3 +69,19 @@ def test_clean_transition():
     assert clean_transition(1, 1, C, P) is None
     assert clean_transition(None, 1, C, P) is None
     assert clean_transition(5, 6, C, P) is None           # charging -> charged
+
+
+def test_schedule_helpers():
+    from custom_components.tapo_rv30.mapdata import build_schedule_rule, encode_weekdays, parse_hhmm
+    import pytest
+    assert encode_weekdays(["Mon", "wed", "FRI"]) == 42          # matches the app's documented 2+8+32
+    assert encode_weekdays("daily") == 127 and encode_weekdays("weekdays") == 62 and encode_weekdays("weekend") == 65
+    assert encode_weekdays(None) == 0 and encode_weekdays(10) == 10
+    with pytest.raises(ValueError):
+        encode_weekdays(["Funday"])
+    assert parse_hhmm("08:00") == 480 and parse_hhmm("23:59") == 1439
+    with pytest.raises(ValueError):
+        parse_hhmm("25:00")
+    rule = build_schedule_rule(480, 42, {"clean_mode": 0}, enabled=False, rule_id="S1")
+    assert rule == {"enable": False, "mode": "repeat", "week_day": 42, "s_min": 480, "start_remind": False,
+                    "alarm_min": 0, "clean_attr": {"clean_mode": 0}, "id": "S1"}

@@ -908,6 +908,25 @@ class TapoVacuumClient:
         r = self.send("get_schedule_rules", {"start_index": 0})
         return (r.get("result") or {}).get("rule_list", [])
 
+    # Schedule management: the app posts the ScheduleRule bean as-is. Verified on an
+    # RV30 Max Plus: add returns {"id": "S1"}, edit needs the whole rule (a partial
+    # body is -1008), remove takes {"remove_all", "rule_list"}. s_min is minutes after
+    # midnight in the robot's own region (the app only shifts it when the phone's
+    # zone differs from the robot's).
+    def add_schedule(self, rule: dict) -> str | None:
+        r = self.send("addScheduleRule", rule)
+        return (r.get("result") or {}).get("id")
+
+    def edit_schedule(self, rule: dict) -> None:
+        self.send("editScheduleRule", rule)
+
+    def remove_schedules(self, ids: list[str] | None = None, remove_all: bool = False) -> None:
+        self.send("removeScheduleRules", {"remove_all": bool(remove_all), "rule_list": list(ids or [])})
+
+    def get_clean_record_detail(self, record_index: int) -> dict:
+        """A finished run with its own map grid, overlays and driven path."""
+        return self.send("getCleanRecordExtraInfo", {"record_index": int(record_index)})["result"]
+
     def run_schedule(self, schedule_id) -> None:
         """Start the clean a saved schedule would start, now.
 

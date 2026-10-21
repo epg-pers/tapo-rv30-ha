@@ -97,3 +97,24 @@ def test_furniture_in_geometry():
     assert geom["furniture"][0]["type"] == 201
     assert geom["furniture"][0]["type_name"] == "Table and chairs"
     assert len(geom["furniture"][0]["px"]) == 4
+
+
+def test_render_record_marks_cleaned_cells_and_path():
+    from custom_components.tapo_rv30.maprender import CLEANED_COLOR, RECORD_FLOOR, render_record
+    rec = _map()
+    # a record: room 1 cells cleaned (255), room 2 left as room id, plus a short path
+    width = rec["width"]
+    px = bytearray(base64.b64decode(rec["map_data"])[-rec["pix_len"]:])
+    for row in range(1, 4):
+        for col in range(1, 5):
+            px[row * width + col] = 255
+    rec["map_data"] = base64.b64encode(_lz4_literal(bytes(px))).decode()
+    rec["pos_array"] = "8C3/xQAMAAEAAPzRCnz/8f/k/MkKnPyVCoz8YQqI/C0KgPv5Cnj7wAps+2wKaPtsCjT7bAoA+2wJzPtsCZQ="
+    rec["pos_len"] = 60
+    rec["real_charge_coor"] = [0, 0, 0]
+    img = render_record(rec)
+    assert img.size == (width * MAP_SCALE, rec["height"] * MAP_SCALE)
+    # room 1 (cols 1-4, rows 1-3 in grid coords) is now painted as cleaned; room 2 as plain floor
+    cleaned = img.getpixel((2 * MAP_SCALE + 1, (rec["height"] - 1 - 2) * MAP_SCALE + 1))[:3]
+    skipped = img.getpixel((6 * MAP_SCALE + 1, (rec["height"] - 1 - 5) * MAP_SCALE + 1))[:3]
+    assert cleaned == CLEANED_COLOR and skipped == RECORD_FLOOR

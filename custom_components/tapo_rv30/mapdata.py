@@ -216,6 +216,65 @@ def decode_weekdays(mask: int) -> list[str]:
     return [name for i, name in enumerate(_WEEKDAYS) if mask & (1 << i)]
 
 
+_DAY_ALIASES = {"daily": 127, "everyday": 127, "every day": 127, "weekdays": 62, "weekend": 65, "weekends": 65}
+
+
+def encode_weekdays(days) -> int:
+    """Day names ("Mon", "monday"), aliases ("daily", "weekdays", "weekend") or a
+    ready mask -> the robot's bitmask (Sun=1 ... Sat=64). Empty -> 0 (one-off)."""
+    if days is None:
+        return 0
+    if isinstance(days, int):
+        return days & 127
+    if isinstance(days, str):
+        days = [d for d in days.replace(",", " ").split()]
+    mask = 0
+    for d in days:
+        key = str(d).strip().lower()
+        if key in _DAY_ALIASES:
+            mask |= _DAY_ALIASES[key]; continue
+        try:
+            mask |= 1 << [w.lower() for w in _WEEKDAYS].index(key[:3])
+        except ValueError:
+            raise ValueError(f"unknown day {d!r}; use Mon..Sun, daily, weekdays or weekend")
+    return mask
+
+
+def parse_hhmm(value) -> int:
+    """'HH:MM' (or a time object) -> minutes after midnight."""
+    if hasattr(value, "hour"):
+        return value.hour * 60 + value.minute
+    try:
+        h, m = str(value).strip().split(":")[:2]
+        h, m = int(h), int(m)
+    except (ValueError, AttributeError):
+        raise ValueError(f"time {value!r} is not HH:MM")
+    if not (0 <= h < 24 and 0 <= m < 60):
+        raise ValueError(f"time {value!r} is out of range")
+    return h * 60 + m
+
+
+def build_schedule_rule(minutes: int, week_mask: int, clean_attr: dict, enabled: bool = True,
+                        once_date=None, rule_id: str | None = None) -> dict:
+    """The addScheduleRule / editScheduleRule body (ScheduleRule in the Tapo app).
+    s_min is minutes after midnight in the robot's own region. A one-off rule
+    (no days) carries the date in year / month / day and mode "once"."""
+    rule = {
+        "enable": bool(enabled),
+        "mode": "repeat" if week_mask else "once",
+        "week_day": int(week_mask),
+        "s_min": int(minutes),
+        "start_remind": False,
+        "alarm_min": 0,
+        "clean_attr": clean_attr,
+    }
+    if not week_mask and once_date is not None:
+        rule.update({"year": once_date.year, "month": once_date.month, "day": once_date.day})
+    if rule_id is not None:
+        rule["id"] = rule_id
+    return rule
+
+
 def decode_schedule(rule: dict, room_names: dict[int, str]) -> dict:
     """One get_schedule_rules entry as a readable summary (raw rule kept under 'raw')."""
     attr = rule.get("clean_attr") or {}

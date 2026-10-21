@@ -11,7 +11,7 @@ from .const import (
     CARPET_COLOR, FLOOR_COLOR, FORBID_COLOR, FORBID_OUTLINE, FURNITURE_OUTLINE, FURNITURE_TYPES, ROOM_PALETTE,
     UNKNOWN_COLOR, VIRTUAL_WALL_COLOR, WALL_COLOR, ZONE_OUTLINE,
 )
-from .mapdata import b64name, lz4_block_decompress, mm_to_grid, validate_map
+from .mapdata import decode_path, b64name, lz4_block_decompress, mm_to_grid, validate_map
 
 MAP_SCALE = 4   # px per vacuum grid cell -> ~700x700 output image
 FONT_SIZE = 14
@@ -155,6 +155,45 @@ def render_map(map_data: dict) -> tuple[Image.Image, list[dict], dict]:
         "dock_px": list(_grid_px(charge[0], charge[1], height)) if charge else None,
     }
     return img, geometry, map_geometry
+
+
+CLEANED_COLOR = (88, 170, 255)
+RECORD_FLOOR = (205, 205, 210)
+
+
+def render_record(rec: dict) -> Image.Image:
+    """A finished run from getCleanRecordExtraInfo: cells the robot cleaned (255)
+    in blue over the rooms it skipped in grey, with the path it drove, where it
+    started (green) and where it stopped (red). Same grid format as the live map."""
+    validate_map(rec)
+    width, height, pix_len = rec["width"], rec["height"], rec["pix_len"]
+    pixels = lz4_block_decompress(base64.b64decode(rec["map_data"]), pix_len)
+    lut: list[tuple[int, int, int]] = [RECORD_FLOOR] * 256
+    lut[0] = WALL_COLOR
+    lut[255] = CLEANED_COLOR
+    small = Image.new("RGBA", (width, height))
+    small.putdata([(*lut[p], 255) if (p < 256 and p != 127) else (0, 0, 0, 0) for p in pixels])
+    small = small.transpose(Image.Transpose.FLIP_TOP_BOTTOM)
+    img = small.resize((width * MAP_SCALE, height * MAP_SCALE), Image.Resampling.NEAREST)
+    draw = ImageDraw.Draw(img)
+    to_px = _px_transform(rec)
+    for a in rec.get("area_list", []):
+        if a.get("type") == "forbid" and len(a.get("vertexs", [])) >= 3:
+            draw.polygon([to_px(x, y) for x, y in a["vertexs"]], outline=FORBID_OUTLINE, width=2)
+    pts: list = []
+    if rec.get("pos_array") and rec.get("pos_len"):
+        try:
+            pts = decode_path(rec["pos_array"], int(rec["pos_len"]))
+        except Exception:
+            pts = []
+    if len(pts) > 1:
+        draw.line([to_px(x, y) for x, y in pts], fill=(20, 60, 140, 220), width=2, joint="curve")
+        _dot(draw, *map(int, to_px(*pts[0])), (40, 180, 90), 5)
+        _dot(draw, *map(int, to_px(*pts[-1])), (220, 60, 60), 5)
+    charge = rec.get("real_charge_coor")
+    if charge:
+        _dot(draw, *map(int, to_px(charge[0], charge[1])), (255, 200, 0), 5)
+    return img
 
 
 def _dot(draw: ImageDraw.ImageDraw, sx: int, sy: int, color, radius: int = 6) -> None:

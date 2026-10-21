@@ -1,6 +1,12 @@
 # Changelog
 
-## v0.12.1
+## v0.13.0
+
+### New
+
+- **Last Clean Map** image entity: the newest clean record rendered from the robot's own copy (`getCleanRecordExtraInfo`): cleaned cells in blue, skipped rooms in grey, the driven path, start (green) and end (red) points, dock. Read once per record and only while the robot is not working. Record details (area, minutes, start type, map) are its attributes.
+- **Schedules from Home Assistant**: `tapo_rv30.add_schedule`, `set_schedule` and `remove_schedule` drive the robot's own schedule list (`addScheduleRule` / `editScheduleRule` / `removeScheduleRules`, bodies verified on an RV30 Max Plus). Days accept Mon..Sun, daily, weekdays or weekend; rooms, a preset or the whole house; optional suction / water / passes. Repeating schedules only: in testing the robot stored a one-off rule on a different date than asked.
+
 
 ### Fixed
 

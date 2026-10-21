@@ -16,7 +16,8 @@ from .entity import TapoEntity
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry,
                             async_add_entities: AddEntitiesCallback) -> None:
-    async_add_entities([TapoMapImage(hass, hass.data[DOMAIN][entry.entry_id], entry)])
+    c = hass.data[DOMAIN][entry.entry_id]
+    async_add_entities([TapoMapImage(hass, c, entry), TapoLastCleanImage(hass, c, entry)])
 
 
 class TapoMapImage(TapoEntity, ImageEntity):
@@ -43,3 +44,34 @@ class TapoMapImage(TapoEntity, ImageEntity):
 
     async def async_image(self) -> bytes | None:
         return self.coordinator.map_image_bytes
+
+
+class TapoLastCleanImage(TapoEntity, ImageEntity):
+    """Where the robot actually went on its last run: cleaned cells, path, start and end."""
+    _attr_content_type = "image/png"
+    _attr_icon = "mdi:map-check"
+
+    def __init__(self, hass: HomeAssistant, coordinator, entry: ConfigEntry) -> None:
+        TapoEntity.__init__(self, coordinator, entry, "last_clean_image", "Last Clean Map")
+        ImageEntity.__init__(self, hass)
+        self._digest: str | None = None
+        self._bump()
+
+    def _bump(self) -> None:
+        data = self.coordinator.last_clean_image_bytes
+        digest = hashlib.sha1(data).hexdigest() if data else None
+        if digest != self._digest:
+            self._digest = digest
+            self._attr_image_last_updated = dt_util.utcnow()
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        self._bump()
+        super()._handle_coordinator_update()
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        return dict(self.coordinator.last_clean_info)
+
+    async def async_image(self) -> bytes | None:
+        return self.coordinator.last_clean_image_bytes

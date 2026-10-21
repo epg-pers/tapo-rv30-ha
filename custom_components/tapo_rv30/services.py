@@ -10,11 +10,12 @@ from homeassistant.helpers import entity_registry as er
 
 from .const import DOMAIN, FAN_NAME_TO_INT, WATER_NAME_TO_INT
 from .coordinator import TapoCoordinator
-from .mapdata import decode_clean_record
+from .mapdata import build_schedule_rule, encode_weekdays, parse_hhmm, decode_clean_record
 
 _LOGGER = logging.getLogger(__name__)
 SERVICES = ("clean_rooms", "set_room_settings", "clean_zone", "run_schedule", "send_raw",
-            "get_clean_records", "run_preset", "set_map", "go_to")
+            "get_clean_records", "run_preset", "set_map", "go_to",
+            "add_schedule", "set_schedule", "remove_schedule")
 
 
 # Methods the integration itself calls while the robot is working.
@@ -173,6 +174,92 @@ def async_setup_services(hass: HomeAssistant) -> None:
         await _send(hass, call, coord.client.goto_point, x, y)
         await coord.async_refresh_soon()
 
+    async def _schedule_clean_attr(call: ServiceCall, coord: TapoCoordinator, base: dict | None) -> dict:
+        """clean_attr for a schedule from rooms / preset / whole house plus levels.
+        Starts from `base` (an existing rule's clean_attr) when editing."""
+        attr = dict(base or {})
+        g = coord.data or {}
+        if "rooms" in call.data or "preset" in call.data:
+            attr.pop("room_list", None); attr.pop("custom_rule_id", None)
+            if call.data.get("preset") not in (None, ""):
+                preset = coord.find_preset(call.data["preset"])
+                if preset is None:
+                    raise ServiceValidationError(f"{call.service}: no preset matching {call.data['preset']!r}")
+                attr.update({"clean_mode": 5, "custom_rule_id": preset["id"], "map_id": preset.get("map_id") or coord.map_id})
+            elif call.data.get("rooms"):
+                room_ids, map_id = await _resolve(hass, call, coord)
+                attr.update({"clean_mode": 3, "room_list": room_ids, "map_id": map_id})
+            else:
+                attr.update({"clean_mode": 0, "map_id": coord.map_id})
+        elif "clean_mode" not in attr:
+            attr.update({"clean_mode": 0, "map_id": coord.map_id})
+        attr.setdefault("suction", g.get("suction", 2))
+        attr.setdefault("cistern", g.get("cistern", 0))
+        attr.setdefault("clean_number", g.get("clean_number", 1))
+        attr.setdefault("clean_order", True)
+        attr.update(_levels(call))
+        return attr
+
+    async def handle_add_schedule(call: ServiceCall) -> ServiceResponse:
+        coord = _one(hass, call)
+        try:
+            minutes = parse_hhmm(call.data.get("time"))
+            mask = encode_weekdays(call.data.get("days"))
+        except ValueError as exc:
+            raise ServiceValidationError(f"{call.service}: {exc}") from exc
+        if not mask:
+            raise ServiceValidationError(f"{call.service}: 'days' is required (Mon..Sun, daily, weekdays or weekend); "
+                                         "one-off schedules are not supported, the robot stored a different date in testing")
+        attr = await _schedule_clean_attr(call, coord, None)
+        rule = build_schedule_rule(minutes, mask, attr, enabled=call.data.get("enabled", True))
+        try:
+            new_id = await hass.async_add_executor_job(coord.client.add_schedule, rule)
+        except Exception as exc:
+            raise HomeAssistantError(f"{call.service}: vacuum rejected the schedule: {exc}") from exc
+        await coord.async_settings_changed()
+        return {"id": new_id}
+
+    def _find_rule(call: ServiceCall, coord: TapoCoordinator) -> dict:
+        sid = str(call.data.get("schedule_id", "")).strip()
+        if not sid:
+            raise ServiceValidationError(f"{call.service}: 'schedule_id' is required (e.g. S1)")
+        rules = (coord.settings.get("schedules") or {}).get("rule_list") or []
+        rule = next((r for r in rules if str(r.get("id")) == sid), None)
+        if rule is None:
+            raise ServiceValidationError(f"{call.service}: no schedule {sid!r}; known: {[r.get('id') for r in rules]}")
+        return rule
+
+    async def handle_set_schedule(call: ServiceCall) -> None:
+        coord = _one(hass, call)
+        rule = dict(_find_rule(call, coord))
+        try:
+            minutes = parse_hhmm(call.data["time"]) if "time" in call.data else rule.get("s_min", 0)
+            mask = encode_weekdays(call.data["days"]) if "days" in call.data else rule.get("week_day", 0)
+        except ValueError as exc:
+            raise ServiceValidationError(f"{call.service}: {exc}") from exc
+        if not mask:
+            raise ServiceValidationError(f"{call.service}: 'days' must leave at least one day")
+        attr = await _schedule_clean_attr(call, coord, rule.get("clean_attr") or {})
+        enabled = call.data.get("enabled", rule.get("enable", True))
+        body = build_schedule_rule(minutes, mask, attr, enabled=enabled, rule_id=rule["id"])
+        try:
+            await hass.async_add_executor_job(coord.client.edit_schedule, body)
+        except Exception as exc:
+            raise HomeAssistantError(f"{call.service}: vacuum rejected the change: {exc}") from exc
+        await coord.async_settings_changed()
+
+    async def handle_remove_schedule(call: ServiceCall) -> None:
+        coord = _one(hass, call)
+        if call.data.get("all"):
+            ids, remove_all = [], True
+        else:
+            ids, remove_all = [_find_rule(call, coord)["id"]], False
+        try:
+            await hass.async_add_executor_job(coord.client.remove_schedules, ids, remove_all)
+        except Exception as exc:
+            raise HomeAssistantError(f"{call.service}: vacuum rejected the removal: {exc}") from exc
+        await coord.async_settings_changed()
+
     async def handle_run_schedule(call: ServiceCall) -> None:
         """Replays a saved schedule's settings; see services.yaml."""
         coord = _one(hass, call)
@@ -270,6 +357,10 @@ def async_setup_services(hass: HomeAssistant) -> None:
     hass.services.async_register(DOMAIN, "run_preset", handle_run_preset)
     hass.services.async_register(DOMAIN, "set_map", handle_set_map)
     hass.services.async_register(DOMAIN, "go_to", handle_go_to)
+    hass.services.async_register(DOMAIN, "add_schedule", handle_add_schedule,
+                                 supports_response=SupportsResponse.OPTIONAL)
+    hass.services.async_register(DOMAIN, "set_schedule", handle_set_schedule)
+    hass.services.async_register(DOMAIN, "remove_schedule", handle_remove_schedule)
     hass.services.async_register(DOMAIN, "get_clean_records", handle_get_clean_records,
                                  supports_response=SupportsResponse.ONLY)
     hass.services.async_register(DOMAIN, "set_room_settings", handle_set_room_settings)
