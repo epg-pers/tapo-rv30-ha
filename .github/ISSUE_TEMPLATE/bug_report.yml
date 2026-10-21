@@ -1,0 +1,43 @@
+name: Bug report
+description: Something does not work as the README says it should
+labels: ["bug"]
+body:
+  - type: input
+    id: model
+    attributes:
+      label: Robot model and firmware
+      description: From the Tapo app or the Firmware entity, e.g. "RV30 Max Plus, 1.3.3 Build 260206"
+      placeholder: RV30 Max Plus, 1.3.3 Build 260206
+    validations:
+      required: true
+  - type: input
+    id: versions
+    attributes:
+      label: Home Assistant and integration versions
+      placeholder: HA 2026.10.1, tapo_rv30 0.15.0
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, what you got. For a service call, include the exact call and the error text.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Log lines
+      description: Relevant lines from Settings, System, Logs. Debug logging for `custom_components.tapo_rv30` helps.
+      render: text
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics
+      description: Attach the diagnostics download (Settings, Devices and services, Tapo Robot Vacuum, three-dot menu, Download diagnostics). Credentials are redacted.
+  - type: textarea
+    id: raw
+    attributes:
+      label: Raw device response (optional)
+      description: If a device method answers differently on your robot, paste the `tapo_rv30.send_raw` response.
+      render: json

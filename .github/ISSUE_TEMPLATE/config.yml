@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Protocol notes and known issues
+    url: https://github.com/epg-pers/tapo-rv30-ha#readme
+    about: The README covers the local protocol, what each model answers, and the known firmware issue.

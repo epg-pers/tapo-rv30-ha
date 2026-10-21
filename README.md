@@ -263,6 +263,11 @@ table, 301 TV cabinet, 302 wardrobe, 303 bedside table, 401 refrigerator, 402 fr
 washer, 403 vertical air conditioner, 503 green plants, 601 toilet, 701 pet house, 702 cat
 litter box, 703 pet bowl. The glyphs are the integration's own drawings, not the app's icons.
 
+## Contributing
+
+Bug reports and pull requests are welcome; see [CONTRIBUTING.md](CONTRIBUTING.md). Security
+problems go through [SECURITY.md](SECURITY.md), not the issue tracker.
+
 ## Credits
 
 The TPAP / SPAKE2+ transport code (`custom_components/tapo_rv30/tpap.py` and
