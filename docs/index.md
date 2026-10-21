@@ -7,9 +7,13 @@ relatives), with a live map card bundled in. No cloud, no extra downloads.
 [Project README](https://github.com/epg-pers/tapo-rv30-ha#readme){ .md-button }
 
 <p align="center">
-  <img src="card.png" width="340" alt="The bundled card, rooms mode">
-  <img src="card-status.png" width="340" alt="The card's status panel">
+  <img src="card.png" width="300" style="vertical-align: top; margin: 4px" alt="The bundled card, rooms mode">
+  <img src="card-zones.png" width="300" style="vertical-align: top; margin: 4px" alt="The bundled card, zone mode">
+  <img src="card-room.png" width="300" style="vertical-align: top; margin: 4px" alt="Room sheet with last cleaned">
 </p>
+
+*Mock-ups with a made-up house. The status panel with the last clean map, recent runs and
+consumables is on the [entities](entities.md) page.*
 
 ## What is where
 

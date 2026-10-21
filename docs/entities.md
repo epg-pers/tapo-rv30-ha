@@ -13,6 +13,10 @@ to Home Assistant areas in the entity's settings). Attributes: `fan_speed`, `wat
 
 ## Map
 
+<p align="center"><img src="card-status.png" width="320" alt="The card's status panel"></p>
+
+*The card's status panel (mock-up): last clean map, recent runs, consumable life.*
+
 - `camera.<name>_map` and `image.<name>_map_image`: the live map as a transparent PNG with
   rooms, no-go zones, virtual walls, carpets, saved zones, furniture glyphs, the dock, the
   robot and its cleaning path. Attributes on the camera: `map_id`, `map_name`, `maps`,
