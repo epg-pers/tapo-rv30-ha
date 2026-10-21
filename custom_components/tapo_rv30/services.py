@@ -187,7 +187,7 @@ def async_setup_services(hass: HomeAssistant) -> None:
         if command == "exit":
             await _send(hass, call, coord.client.remote_control, False)
             await coord.async_refresh_soon()
-            return None
+            return {}
         if coord.status_code != REMOTE_CONTROL_CODE and coord.busy:
             raise ServiceValidationError(f"{call.service}: {coord.device_name} is {coord.busy}; stop it before taking control")
         if command == "enter":
@@ -198,7 +198,7 @@ def async_setup_services(hass: HomeAssistant) -> None:
             await coord.async_refresh_soon()
             return {"leaving_dock_ms": away_ms or 4000}
         await _send(hass, call, coord.client.remote_drive, REMOTE_DIRECTIONS[command])
-        return None
+        return {"direction": REMOTE_DIRECTIONS[command]}
 
     async def _schedule_clean_attr(call: ServiceCall, coord: TapoCoordinator, base: dict | None) -> dict:
         """clean_attr for a schedule from rooms / preset / whole house plus levels.

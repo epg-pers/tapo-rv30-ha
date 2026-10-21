@@ -459,7 +459,7 @@ class TapoRV30Panel extends HTMLElement {
         <p class="note">Take control and the robot drives off the dock. It moves while you hold a button or an arrow key and stops when you let go. Hand back control, or send it home, when you are done.</p>
       </div></ha-card>`;
       const q = (s) => pane.querySelector(s), dpad = q(".dpad");
-      const send = (command) => this._hass.callService(DOMAIN, "remote_drive", { command }, { entity_id: this._robot }, false, true);
+      const send = (command) => this._hass.callService(DOMAIN, "remote_drive", { command }, { entity_id: this._robot }, false, command === "enter");
       const fail = (e) => this.dispatchEvent(new CustomEvent("hass-notification", { detail: { message: (e && (e.message || (e.body && e.body.message))) || "The robot rejected that" }, bubbles: true, composed: true }));
       let held = null;
       const paint = () => dpad.querySelectorAll("[data-dir]").forEach((b) => b.classList.toggle("held", b.dataset.dir === held));
