@@ -15,7 +15,7 @@ through python-kasa.
   zero setup
 - **Room-by-room cleaning** via `tapo_rv30.clean_rooms` service, or the native
   `vacuum.clean_area` action (map rooms to Home Assistant areas in the vacuum
-  entity's settings; HA 2026.2+)
+  entity's settings)
 - **Current Room** sensor, inferred from the vacuum's position on the map
 - **Schedules** sensor listing the Tapo-app schedules, and `tapo_rv30.run_schedule`
   to start one now
@@ -47,7 +47,7 @@ through python-kasa.
 
 ## Requirements
 
-- Home Assistant 2025.1+ (2026.8+ needs v0.4.0 or later; the integration icon needs 2026.3+)
+- Home Assistant 2026.3 or newer (the native clean-area feature the integration uses arrived in 2026.3; HACS enforces this)
 - [HACS](https://hacs.xyz) installed
 - Tapo RV20 / RV30 on firmware **1.2.x+** (TPAP protocol). Models that use the
   older AES scheme (RV30C, RV30C Mop) are detected automatically but untested, see #25.
