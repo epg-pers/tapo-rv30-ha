@@ -272,12 +272,18 @@ class TapoCoordinator(DataUpdateCoordinator):
         if ts == self._record_rendered_ts and not pending:
             return
         changed = False
-        for rec in pending[:3]:
+        todo = pending[:3]
+        render_only = ts != self._record_rendered_ts and all(int(r.get("timestamp") or 0) != ts for r in todo)
+        if render_only:
+            todo = todo + [newest]      # already folded in (e.g. after a restart): just redraw it
+        for rec in todo:
             rts = int(rec.get("timestamp") or 0)
+            already = rts in self._processed_records
             try:
                 detail = await self.hass.async_add_executor_job(
                     self.client.get_clean_record_detail, rec.get("record_index", 0))
-                await self.hass.async_add_executor_job(self._fold_coverage, rec, detail)
+                if not already:
+                    await self.hass.async_add_executor_job(self._fold_coverage, rec, detail)
                 if rts == ts:
                     img = await self.hass.async_add_executor_job(render_record, detail)
                     self.last_clean_image_bytes = _png(img)
@@ -290,8 +296,9 @@ class TapoCoordinator(DataUpdateCoordinator):
                 _LOGGER.debug("Clean record %s failed: %s", rec.get("record_index"), exc)
                 if rts == ts:
                     self._record_rendered_ts = ts     # do not retry every poll on a bad record
-            self._processed_records.add(rts)
-            changed = True
+            if not already:
+                self._processed_records.add(rts)
+                changed = True
         if changed and self._freshness_store is not None:
             keep = sorted(self._processed_records)[-200:]
             self._processed_records = set(keep)
