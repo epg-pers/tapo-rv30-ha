@@ -135,6 +135,15 @@ _MATTER_SENSOR = TapoSensorDescription(
 )
 
 
+_MATTER_CODE_SENSOR = TapoSensorDescription(
+    key="matter_setup_code", name="Matter Setup Code", icon="mdi:qrcode",
+    entity_category=EntityCategory.DIAGNOSTIC, entity_registry_enabled_default=False,
+    # The robot's fixed manual pairing code as the state, the QR payload as an attribute.
+    value_fn=lambda d: ((d.get("settings") or {}).get("matter_setup") or {}).get("setup_code"),
+    attrs_fn=lambda d: {"setup_payload": ((d.get("settings") or {}).get("matter_setup") or {}).get("setup_payload")},
+)
+
+
 _WIFI_SENSOR = TapoSensorDescription(
     key="wifi_signal", name="Wi-Fi Signal", icon="mdi:wifi",
     native_unit_of_measurement="dBm", device_class=SensorDeviceClass.SIGNAL_STRENGTH,
@@ -225,6 +234,8 @@ async def async_setup_entry(
     ]
     if coordinator.has("matter") and "matter_status" in coordinator.settings:
         entities.append(TapoStatusSensor(coordinator, entry, _MATTER_SENSOR))
+    if coordinator.has("matter") and "matter_setup" in coordinator.settings:
+        entities.append(TapoStatusSensor(coordinator, entry, _MATTER_CODE_SENSOR))
 
     for ckey, clabel in CONSUMABLE_LABELS.items():
         entities.append(

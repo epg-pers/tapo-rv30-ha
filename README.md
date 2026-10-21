@@ -18,7 +18,7 @@ through python-kasa.
   entity's settings)
 - **Current Room** sensor, inferred from the vacuum's position on the map
 - **Last Clean Map** image: where the robot actually went on its last run (cleaned area, path, start and end)
-- **Matter**: a diagnostic sensor (off by default) with the robot's pairing state, the ecosystems it is paired to, its setup code and QR payload, plus a button that opens the pairing window. See the Matter section.
+- **Matter**: diagnostic sensors (off by default) for the robot's pairing state and ecosystems, its setup code, plus a button that opens the pairing window. See the Matter section.
 - **Schedules** managed from Home Assistant: add, change, enable / disable and remove the robot's own schedules
 - **Schedules** sensor listing the Tapo-app schedules, and `tapo_rv30.run_schedule`
   to start one now
@@ -186,8 +186,10 @@ verified on an RV30 Max Plus, firmware 1.3.3):
 
 - **Matter sensor** (diagnostic, disabled by default): `Not paired`, `Pairing window open`
   or `Paired`, with attributes `fabrics` (label, vendor id, fabric index of every
-  ecosystem the robot is paired to), `window_seconds_left`, `setup_code` and
-  `setup_payload`.
+  ecosystem the robot is paired to) and `window_seconds_left`.
+- **Matter Setup Code sensor** (diagnostic, disabled by default): the 11-digit manual
+  pairing code as its state, so it reads straight off the device page; the QR payload is
+  its `setup_payload` attribute.
 - **Open Matter Pairing Window** button (diagnostic): the app's `startCommission`. The
   robot then accepts a new pairing for a few minutes (`expired_time` counts down); the
   sensor shows the window and the time left, projected from the last read so it does not
@@ -200,10 +202,10 @@ they are what is printed on the robot). What is time-limited is the pairing *win
 app opens one when you view the page and shows a countdown, and the robot only accepts a
 new ecosystem while it is open. So the flow is: enable the Matter sensor, press the button,
 then add the robot in Home Assistant's Matter integration (or any other ecosystem) with
-the setup code or QR payload before the window closes.
+the code from the Matter Setup Code sensor before the window closes.
 
-The sensor is off by default because the setup code lets anyone on your network pair the
-robot while a window is open. Enable it when you need it. The button and the remove
+Both sensors are off by default because the setup code lets anyone on your network pair
+the robot while a window is open. Enable them when you need them. The button and the remove
 service are built from the app's code but have not been exercised on hardware here; the
 status and setup-info reads have.
 

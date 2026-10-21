@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.14.1
+
+### Changed
+
+- The Matter setup code is now its own **Matter Setup Code** sensor (diagnostic, off by default) instead of an attribute buried on the Matter sensor; the QR payload is its attribute.
+
 ## v0.14.0
 
 ### New
