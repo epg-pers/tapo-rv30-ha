@@ -6,6 +6,9 @@ domain name is historical; it is one integration for the range.
 
 [![Add to Home Assistant](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=epg-pers&repository=tapo-rv30-ha&category=integration)
 
+If it does the job for you, a star on the repo is what sorts the HACS store results, so it is
+how the next person with a Tapo finds it.
+
 <p align="center">
   <img src="docs/card.png" width="340" alt="The bundled card, rooms mode">
   <img src="docs/card-zones.png" width="340" alt="The bundled card, zone mode">
