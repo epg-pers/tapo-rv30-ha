@@ -1,6 +1,6 @@
 {
   "domain": "tapo_rv30",
-  "name": "Tapo RV30 Robot Vacuum",
+  "name": "Tapo Robot Vacuum",
   "codeowners": [],
   "config_flow": true,
   "dependencies": [

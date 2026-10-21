@@ -83,7 +83,7 @@ class TapoRV30ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             self._abort_if_unique_id_configured()
             data, errors = await self._validate(user_input)
             if data:
-                return self.async_create_entry(title=f"Tapo RV30 ({data[CONF_HOST]})", data=data)
+                return self.async_create_entry(title=f"Tapo Vacuum ({data[CONF_HOST]})", data=data)
         return self.async_show_form(step_id="user", data_schema=_schema(user_input), errors=errors)
 
     async def async_step_reconfigure(self, user_input: dict[str, Any] | None = None):
@@ -94,7 +94,7 @@ class TapoRV30ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             data, errors = await self._validate(user_input)
             if data:
                 return self.async_update_reload_and_abort(
-                    entry, data=data, title=f"Tapo RV30 ({data[CONF_HOST]})", unique_id=data[CONF_HOST])
+                    entry, data=data, title=f"Tapo Vacuum ({data[CONF_HOST]})", unique_id=data[CONF_HOST])
         return self.async_show_form(
             step_id="reconfigure", data_schema=_schema(user_input or entry.data), errors=errors)
 

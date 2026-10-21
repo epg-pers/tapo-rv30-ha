@@ -496,6 +496,6 @@ if (!customElements.get("tapo-rv30-card")) customElements.define("tapo-rv30-card
 if (!customElements.get("tapo-rv30-card-editor")) customElements.define("tapo-rv30-card-editor", TapoRV30CardEditor);
 window.customCards = window.customCards || [];
 if (!window.customCards.some((c) => c.type === "tapo-rv30-card")) {
-  window.customCards.push({ type: "tapo-rv30-card", name: "Tapo RV30 Vacuum", description: "Map with tap-to-clean rooms and zones, presets and controls", preview: true });
+  window.customCards.push({ type: "tapo-rv30-card", name: "Tapo Vacuum", description: "Map with tap-to-clean rooms and zones, presets and controls", preview: true });
 }
 console.info(`%c TAPO-RV30-CARD %c ${CARD_VERSION} `, "background:#185caa;color:#fff;padding:2px 6px;border-radius:4px 0 0 4px", "background:#1ca9c9;color:#fff;padding:2px 6px;border-radius:0 4px 4px 0");

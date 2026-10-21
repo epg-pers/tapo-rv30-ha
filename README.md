@@ -1,7 +1,7 @@
-# Tapo RV30 Robot Vacuum — Home Assistant Integration
+# Tapo Robot Vacuum — Home Assistant Integration
 
-Local-only Home Assistant integration for **TP-Link Tapo robot vacuums** (RV20 / RV30
-Max Plus and relatives). No cloud dependency: it talks directly to the vacuum over your LAN.
+Local-only Home Assistant integration for **TP-Link Tapo robot vacuums** (RV20, RV30 Max Plus,
+RV30C, RV50 and relatives). The `tapo_rv30` domain name is historical; it's one integration for the range. No cloud dependency: it talks directly to the vacuum over your LAN.
 
 Newer firmware uses the **TPAP / SPAKE2+** protocol, implemented here from the work in
 [python-kasa PR #1592](https://github.com/python-kasa/python-kasa/pull/1592). Units that
@@ -47,7 +47,7 @@ through python-kasa.
 
 - Home Assistant 2025.1+ (2026.8+ needs v0.4.0 or later; the integration icon needs 2026.3+)
 - [HACS](https://hacs.xyz) installed
-- Tapo RV30 or RV20 on firmware **1.2.x+** (TPAP protocol). Models that use the
+- Tapo RV20 / RV30 on firmware **1.2.x+** (TPAP protocol). Models that use the
   older AES scheme (RV30C, RV30C Mop) are detected automatically but untested, see #25.
 - Python package `ecdsa` (installed automatically by HACS)
 
@@ -59,9 +59,9 @@ Click the button above, or manually:
 
 1. In HACS → **Integrations** → ⋮ menu → **Custom repositories**
 2. Add `https://github.com/epg-pers/tapo-rv30-ha` as category **Integration**
-3. Install **Tapo RV30 Robot Vacuum**
+3. Install **Tapo Robot Vacuum**
 4. Restart Home Assistant
-5. **Settings → Devices & Services → + Add Integration → Tapo RV30**
+5. **Settings → Devices & Services → + Add Integration → Tapo Robot Vacuum**
 6. Enter your vacuum's IP address, Tapo account email, and password
 
 ## Services
@@ -99,12 +99,12 @@ automatic firmware updates in the Tapo app. Thanks to @jan-tdy for documenting t
 
 ## The card
 
-![Tapo RV30 card](docs/card.png)
+![Tapo vacuum card](docs/card.png)
 
 *Mock-up with a made-up house.*
 
 The integration ships its own Lovelace card and registers it for you: after installing
-and restarting, add a card, pick **Tapo RV30 Vacuum** and choose the vacuum. Or in YAML:
+and restarting, add a card, pick **Tapo Vacuum** and choose the vacuum. Or in YAML:
 
 ```yaml
 type: custom:tapo-rv30-card

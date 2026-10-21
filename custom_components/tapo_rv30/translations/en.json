@@ -2,7 +2,7 @@
   "config": {
     "step": {
       "user": {
-        "title": "Connect to Tapo RV30",
+        "title": "Connect to Tapo robot vacuum",
         "data": {
           "host": "Host (IP address)",
           "username": "Tapo account email",
@@ -10,7 +10,7 @@
         }
       },
       "reconfigure": {
-        "title": "Update Tapo RV30 connection",
+        "title": "Update Tapo robot vacuum connection",
         "description": "Change the IP address or the Tapo account used for this vacuum.",
         "data": {
           "host": "Host (IP address)",
@@ -19,7 +19,7 @@
         }
       },
       "reauth_confirm": {
-        "title": "Re-authenticate Tapo RV30",
+        "title": "Re-authenticate Tapo robot vacuum",
         "description": "The vacuum at {host} rejected the stored credentials. Enter the email and password of the Tapo account it was set up with.",
         "data": {
           "username": "Tapo account email",
