@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.19.2
+
+### Fixed
+
+- Two entity writes at the same moment could undo each other: Water Level, Do Not Disturb, Auto Empty and Auto Update writes read the robot's current settings and send them back whole, and the read and the write now happen under one lock, so a Fan Speed change landing in between is no longer overwritten with the old value.
+- A capability probe that hit a transport error (typically the robot's Wi-Fi still waking after a Home Assistant restart) used to be final, leaving a dock button or a settings switch missing until the next restart. A probe the robot did not actually answer is now repeated on later polls, up to five times.
+- The map blob was LZ4-decoded up to three times per refresh (position, current room, render), in pure Python. It is decoded once and reused, which matters on a Raspberry Pi while the robot is cleaning.
+
 ## v0.19.1
 
 ### Fixed

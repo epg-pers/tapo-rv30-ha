@@ -3,6 +3,7 @@ they can be unit-tested without a running HA."""
 from __future__ import annotations
 
 import base64
+import functools
 import re
 import unicodedata
 from typing import Any, Callable
@@ -44,10 +45,12 @@ def validate_map(map_data: dict) -> None:
 
 
 
+@functools.lru_cache(maxsize=8)
 def lz4_block_decompress(data: bytes, uncompressed_size: int) -> bytes:
     """Pure-Python LZ4 block decompressor, bounds-checked on every copy so a
     malformed block raises MapValidationError instead of corrupting or growing
-    the output."""
+    the output. Cached on the input, since one poll decodes the same map blob for
+    the position, the current room and the render."""
     out = bytearray(uncompressed_size)
     src = 0
     dst = 0

@@ -107,6 +107,7 @@ class TapoCoordinator(DataUpdateCoordinator):
         self.bool_settings: dict[str, bool] = {}
         self.presets: list[dict] = []
         self._caps_fetched = False
+        self._caps_attempts = 0
         self._last_record_ts: int | None = None   # newest getCleanRecords timestamp seen
         self.maps: list[dict] = []                 # [{id, name, current}] refreshed with the map
         self.path_points: list[tuple[int, int]] = []   # mm, current or last run
@@ -367,25 +368,47 @@ class TapoCoordinator(DataUpdateCoordinator):
         self._last_record_ts = ts
         return decode_clean_record(newest)
 
+    CAPS_ATTEMPTS = 5
+
     async def _fetch_capabilities(self) -> None:
-        """Component list and which optional settings answer: read once."""
+        """Component list and which optional settings and dock actions answer. Read
+        once, but a probe that ended in a transport error (the robot's Wi-Fi still
+        waking after a Home Assistant restart, say) is inconclusive and is repeated on
+        a later poll, up to CAPS_ATTEMPTS, so an entity is not missing until the next
+        restart just because one request timed out."""
+        complete = True
         try:
             self.components = await self.hass.async_add_executor_job(self.client.get_components)
         except AuthError as exc:
             raise ConfigEntryAuthFailed(str(exc)) from exc
         except Exception as exc:
+            complete = False
             _LOGGER.debug("getComponentList failed: %s", exc)
         try:
-            probed = await self.hass.async_add_executor_job(self.client.probe_bool_settings)
-            self.bool_settings_supported = list(probed)
-            self.bool_settings = probed
+            probed, ok = await self.hass.async_add_executor_job(self.client.probe_bool_settings)
+            complete = complete and ok
+            # keep anything found on an earlier attempt
+            merged = {**self.bool_settings, **probed}
+            self.bool_settings_supported = list(merged)
+            self.bool_settings = merged
         except Exception as exc:
+            complete = False
             _LOGGER.debug("Settings probe failed: %s", exc)
         try:
-            self.dock_actions = await self.hass.async_add_executor_job(self.client.probe_dock_actions)
+            actions, ok = await self.hass.async_add_executor_job(self.client.probe_dock_actions)
+            complete = complete and ok
+            self.dock_actions = sorted(set(self.dock_actions) | set(actions))
         except Exception as exc:
+            complete = False
             _LOGGER.debug("Dock probe failed: %s", exc)
-        self._caps_fetched = True
+        self._caps_attempts += 1
+        if complete or self._caps_attempts >= self.CAPS_ATTEMPTS:
+            if not complete:
+                _LOGGER.info("%s: capability probe still inconclusive after %d attempts; "
+                             "using what answered (restart to probe again)", self.device_name, self._caps_attempts)
+            self._caps_fetched = True
+        else:
+            _LOGGER.debug("%s: capability probe inconclusive, trying again next poll", self.device_name)
 
     async def _refresh_settings(self) -> None:
         self.settings = await self.hass.async_add_executor_job(self.client.get_settings)

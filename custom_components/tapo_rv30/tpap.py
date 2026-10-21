@@ -262,6 +262,12 @@ class _PinnedCAAdapter(HTTPAdapter):
         return
 
 
+def _is_device_error(exc: BaseException) -> bool:
+    """True when the robot itself answered with an error code (it understood the call
+    and said no), as opposed to a transport or session problem."""
+    return "Device error" in str(exc)
+
+
 class AuthError(Exception):
     """Raised when SPAKE2+ auth fails (wrong credentials, bad attestation)."""
 
@@ -806,15 +812,19 @@ class TapoVacuumClient:
         "sweep_walk":          ("getSweepWalk", "setSweepWalk", "sweepWalk"),
     }
 
-    def probe_bool_settings(self) -> dict[str, bool]:
-        """Which BOOL_SETTINGS this model answers, with their current values."""
-        out = {}
+    def probe_bool_settings(self) -> tuple[dict[str, bool], bool]:
+        """Which BOOL_SETTINGS this model answers, with their current values, and
+        whether every probe got a definite answer. A device error (-1002 and friends)
+        is a definite "no"; a transport hiccup is not, and the caller probes again."""
+        out, complete = {}, True
         for key, (getter, _, field) in self.BOOL_SETTINGS.items():
             try:
                 out[key] = bool(self.send(getter)["result"].get(field))
             except Exception as exc:
+                if not _is_device_error(exc):
+                    complete = False
                 _LOGGER.debug("%s not supported: %s", getter, exc)
-        return out
+        return out, complete
 
     def get_bool_settings(self, keys) -> dict[str, bool]:
         out = {}
@@ -875,10 +885,13 @@ class TapoVacuumClient:
         })
 
     def set_global_levels(self, **levels) -> None:
-        """suction / cistern / clean_number for the next runs (what the app's clean page sets)."""
-        cur = self.send("getCleanAttr", {"type": "global"})["result"]
-        cur.update(levels); cur["type"] = "global"
-        self.send("setCleanAttr", cur)
+        """suction / cistern / clean_number for the next runs (what the app's clean page sets).
+        Read and write under the session lock so two entity writes running in parallel
+        executor threads cannot put a stale copy of each other's field back."""
+        with self._lock:
+            cur = self.send("getCleanAttr", {"type": "global"})["result"]
+            cur.update(levels); cur["type"] = "global"
+            self.send("setCleanAttr", cur)
 
     def clean_rooms(self, room_ids: list[int], map_id: int, clean_order: bool = True,
                     levels: dict | None = None) -> None:
@@ -950,12 +963,13 @@ class TapoVacuumClient:
         if rule is None:
             raise ValueError(f"No schedule with id {schedule_id!r}")
         attr = rule.get("clean_attr") or {}
-        cur = self.send("getCleanAttr", {"type": "global"})["result"]
-        for key in ("suction", "cistern", "clean_number"):
-            if attr.get(key) is not None:
-                cur[key] = attr[key]
-        cur["type"] = "global"
-        self.send("setCleanAttr", cur)
+        with self._lock:
+            cur = self.send("getCleanAttr", {"type": "global"})["result"]
+            for key in ("suction", "cistern", "clean_number"):
+                if attr.get(key) is not None:
+                    cur[key] = attr[key]
+            cur["type"] = "global"
+            self.send("setCleanAttr", cur)
         map_id = attr.get("map_id")
         if map_id is None:
             map_id, _ = self.get_map_info()
@@ -1028,9 +1042,7 @@ class TapoVacuumClient:
         self.send("setCleanAttr", {"clean_number": value, "type": "global"})
 
     def set_water(self, value: int) -> None:
-        cur = self.send("getCleanAttr", {"type": "global"})["result"]
-        cur["cistern"] = value; cur["type"] = "global"
-        self.send("setCleanAttr", cur)
+        self.set_global_levels(cistern=value)
 
     # ---- Settings & extras (names from the decompiled Tapo app, 2026-10-13) ----
     _SETTINGS = (("dust", "getDustCollectionInfo", None), ("dnd", "getDoNotDisturb", None),
@@ -1052,9 +1064,10 @@ class TapoVacuumClient:
         return out
 
     def _merge_set(self, getter: str, setter: str, **changes) -> None:
-        cur = self.send(getter)["result"]
-        cur.update(changes)
-        self.send(setter, cur)
+        with self._lock:   # read-modify-write as one unit (see set_global_levels)
+            cur = self.send(getter)["result"]
+            cur.update(changes)
+            self.send(setter, cur)
 
     def empty_bin(self) -> None:
         self.send("setSwitchDustCollection", {"switch_dust_collection": True})
@@ -1067,15 +1080,19 @@ class TapoVacuumClient:
         "remove_hair": ("getCutHairMode", "setCutHairSwitch", "switch_cut_hair"),
     }
 
-    def probe_dock_actions(self) -> list[str]:
-        out = []
+    def probe_dock_actions(self) -> tuple[list[str], bool]:
+        """Dock actions the robot answers the getter for, and whether every probe was
+        conclusive (see probe_bool_settings)."""
+        out, complete = [], True
         for key, (getter, _, _) in self.DOCK_ACTIONS.items():
             try:
                 self.send(getter)
                 out.append(key)
             except Exception as exc:
+                if not _is_device_error(exc):
+                    complete = False
                 _LOGGER.debug("%s not supported: %s", getter, exc)
-        return out
+        return out, complete
 
     def dock_action(self, key: str) -> None:
         _, setter, field = self.DOCK_ACTIONS[key]
