@@ -1,0 +1,41 @@
+# The sidebar page
+
+The integration adds **Tapo Vacuum** to the Home Assistant sidebar: one page with
+everything it knows, so you do not have to build a dashboard to get going. The bundled
+card is still there for your own dashboards; the page is the full-size version.
+
+<p align="center"><img src="panel.png" width="760" alt="The Tapo Vacuum sidebar page"></p>
+
+*Mock-up with a made-up house and made-up runs.*
+
+## What is on it
+
+- **Map**: the bundled card, full size: tap rooms, draw zones, floors, presets, controls,
+  the status panel with the last clean map.
+- **Schedules**: the robot's own schedules, the ones it runs with or without the app. Add,
+  edit, enable or disable and delete them with a form (start time, days, rooms or a preset or
+  the whole house, suction, water, passes). Nothing is stored in Home Assistant; it all
+  goes to the robot through `add_schedule`, `set_schedule` and `remove_schedule`.
+- **History**: lifetime totals, cleans per day for the last 30 days, minutes per week for
+  the last 8 weeks, and the recent runs with how they were started.
+
+<p align="center"><img src="panel-history.png" width="760" alt="History and statistics"></p>
+- **Rooms**: each room with how recently it was cleaned and how much of it the robot
+  covered, with a one-tap clean button.
+- **Maintenance**: consumable life bars (amber under 30 percent, red under 10), Empty Bin,
+  resets, and the Omni dock actions where the dock has them.
+- **Settings**: every switch, select and number the robot exposes.
+
+With more than one robot, each gets a tab in the header.
+
+## Turning it off
+
+Settings, Devices and services, Tapo Robot Vacuum, Configure, untick "Show the Tapo
+Vacuum page in the sidebar". It disappears immediately and comes back the same way. With
+several robots the page stays while any of them has it on.
+
+## Compared with a dashboard
+
+The page is the quickest way to everything, and most people will not need a dashboard at
+all. If you want your own layout, the [dashboard strategy](https://github.com/epg-pers/tapo-rv30-ha#whole-dashboard-in-one-line)
+builds one from a single line, and the card drops into any dashboard you already have.

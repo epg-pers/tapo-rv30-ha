@@ -10,12 +10,12 @@ from typing import Any
 import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.const import CONF_HOST, CONF_PASSWORD, CONF_USERNAME
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.service_info.dhcp import DhcpServiceInfo
 
 from .aes import AesVacuumClient
-from .const import CONF_TRANSPORT, DEFAULT_PORT, DOMAIN, TRANSPORT_AES, TRANSPORT_TPAP
+from .const import CONF_TRANSPORT, DEFAULT_PORT, DOMAIN, OPT_SHOW_PANEL, TRANSPORT_AES, TRANSPORT_TPAP
 from .tpap import AuthError, TapoVacuumClient
 
 _LOGGER = logging.getLogger(__name__)
@@ -79,6 +79,11 @@ async def _tpap_port_open(host: str, port: int = 4433, timeout: float = 3.0) -> 
 
 class TapoRV30ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     VERSION = 1
+
+    @staticmethod
+    @callback
+    def async_get_options_flow(config_entry: config_entries.ConfigEntry) -> config_entries.OptionsFlow:
+        return TapoOptionsFlow()
 
     async def _validate(self, user_input: dict[str, Any]) -> tuple[dict[str, Any] | None, dict[str, str]]:
         """Return (entry data, errors)."""
@@ -171,3 +176,16 @@ class TapoRV30ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return self.async_show_form(
             step_id="reauth_confirm", data_schema=schema, errors=errors,
             description_placeholders={"host": entry.data.get(CONF_HOST, "")})
+
+
+class TapoOptionsFlow(config_entries.OptionsFlow):
+    """Integration options: the sidebar panel on or off."""
+
+    async def async_step_init(self, user_input: dict[str, Any] | None = None):
+        if user_input is not None:
+            return self.async_create_entry(title="", data=user_input)
+        current = self.config_entry.options.get(OPT_SHOW_PANEL, True)
+        return self.async_show_form(
+            step_id="init",
+            data_schema=vol.Schema({vol.Required(OPT_SHOW_PANEL, default=current): bool}),
+        )

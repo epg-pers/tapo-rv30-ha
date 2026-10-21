@@ -119,7 +119,8 @@ class TapoPresetButton(TapoEntity, ButtonEntity):
     @property
     def extra_state_attributes(self) -> dict:
         p = self._preset or {}
-        return {k: p.get(k) for k in ("map_name", "rooms", "room_settings", "clean_order")}
+        return {"preset_id": p.get("id"), "preset_name": p.get("name"),
+                **{k: p.get(k) for k in ("map_name", "rooms", "room_settings", "clean_order")}}
 
     async def async_press(self) -> None:
         p = self._preset

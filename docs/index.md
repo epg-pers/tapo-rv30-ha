@@ -17,6 +17,7 @@ consumables is on the [entities](entities.md) page.*
 
 ## What is where
 
+- [The sidebar page](panel.md): map, schedules editor, history, rooms, maintenance, settings.
 - [Entities](entities.md): everything the integration creates, by platform.
 - [Services and events](services.md): every service with its fields, the events, and the
   Xiaomi map card calibration.

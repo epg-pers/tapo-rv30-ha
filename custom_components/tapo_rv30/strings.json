@@ -319,5 +319,18 @@
       "clean_finished": "{entity_name} finished cleaning",
       "error": "{entity_name} reported an error"
     }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Tapo Robot Vacuum options",
+        "data": {
+          "show_panel": "Show the Tapo Vacuum page in the sidebar"
+        },
+        "data_description": {
+          "show_panel": "The sidebar page has the full map, a schedules editor, history and statistics, maintenance and settings. Turn it off if you only want the card and entities."
+        }
+      }
+    }
   }
 }

@@ -170,3 +170,7 @@ CONSUMABLE_WARN_FRACTION = 0.10   # "replace soon" below this fraction of life l
 ACTIVE_POLL_INTERVAL = 10   # seconds while cleaning / returning (adaptive polling)
 ISSUE_UNREACHABLE = "local_api_unreachable"
 UNREACHABLE_AFTER = 600     # seconds of failed polls (after having worked) before raising the repair
+
+# Integration options (options flow)
+OPT_SHOW_PANEL = "show_panel"     # sidebar panel on / off (default on)
+PANEL_URL_PATH = "tapo-vacuum"

@@ -22,8 +22,9 @@ domain name is historical; it is one integration for the range.
    offered, Settings, Devices and services, Add integration, **Tapo Robot Vacuum**, and type
    the robot's IP address. If the robot's IP changes later, the entry follows it. The robot must be on firmware 1.2 or
    newer (TPAP); the older AES models (RV30C) are detected automatically, best effort.
-3. Add a card to a dashboard and pick **Tapo Vacuum**. Tap rooms to select them, drag a zone,
-   long-press a room for levels, switch floors. Nothing else to install.
+3. Open **Tapo Vacuum** in the sidebar: the map, schedules, history, rooms, maintenance and
+   settings are all there. For your own dashboards, add a card and pick **Tapo Vacuum**.
+   Nothing else to install.
 
 Needs Home Assistant 2026.3 or newer (HACS enforces it). Coming from a fork of this project?
 Same domain, so your config entry and entities carry over; see
@@ -35,6 +36,7 @@ Same domain, so your config entry and entities carry over; see
   zone drawing, saved zones, floors, presets, controls, theme-aware, visual editor
 - **Live cleaning path** on the map, and a **Last Clean Map** of where the robot actually went
 - **Per-room "last cleaned"**: worked out from the robot's own run maps, shown when you hold a room, and available to automations
+- **Sidebar page**: map, a schedules editor for the robot's own schedules, history and statistics, rooms with freshness, maintenance and settings, no dashboard needed (switch it off in the integration options if you prefer)
 - **One-click dashboard**: a dashboard strategy that builds the whole thing for every robot
 - **Schedules from Home Assistant**: add, change, enable / disable and remove the robot's own
 - **Matter**: pairing state, setup code, and a button that opens the pairing window
@@ -89,6 +91,14 @@ and a local weekday schedule. [`tapo_vacuum.py`](tapo_vacuum.py) is a standalone
 needs no Home Assistant.
 
 ![Example dashboard](docs/dashboard.png)
+
+## The sidebar page
+
+<p align="center"><img src="docs/panel.png" width="760" alt="The Tapo Vacuum sidebar page"></p>
+
+*Mock-up with a made-up house.* Map, a schedules editor, history and statistics, rooms with
+freshness, maintenance and settings in one page. Details in [docs/panel.md](docs/panel.md).
+Turn it off under the integration's Configure button if you only want the card.
 
 ## The card
 
