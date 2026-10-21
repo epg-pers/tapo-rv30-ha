@@ -38,7 +38,7 @@ Needs Home Assistant 2026.3 or newer (HACS enforces it).
 - **Voice**: "vacuum the kitchen and the lounge" works in Assist with nothing to configure
 - **Discovery**: the robot is found on the network and its entry follows IP changes
 - Device triggers and blueprints for the automation editor; the vacuum wears its own
-  state-coloured picture instead of a generic icon
+  state-coloured robot picture instead of a generic icon
 - **Go to point**, per-run suction / water / passes, presets as buttons, native
   `vacuum.clean_area` with Home Assistant areas, events for start / finish / error
 - Adaptive polling, hardened TPAP login, a repair issue when the robot stops answering,

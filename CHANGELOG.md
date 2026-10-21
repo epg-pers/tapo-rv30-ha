@@ -8,7 +8,7 @@
 - **Voice**: Assist sentences registered by the integration: "vacuum the kitchen and the lounge", "clean everywhere", "send the robot home", "stop the vacuum". Rooms resolve against the current map; the reply names anything it did not recognise.
 - **Device triggers** for clean started / finished / error, so the events appear in the automation editor's device picker. Events now carry `device_id`.
 - **Blueprints**: notify with the Last Clean Map when a run finishes; clean when everyone has left. Import badges in the README.
-- **Icons**: state-dependent icons for the status, error, Matter, problem and charging entities (icons.json), and the vacuum entity wears its own state-coloured robot picture.
+- **Icons**: the vacuum entity wears its own state-coloured robot picture; problem and charging binary sensors and every service get icons through icons.json. (Per-state sensor icons are not possible without renaming the sensor states, which would break automations, so those stay as they are.)
 - **Furniture** on the map is now drawn as filled, anti-aliased illustrations (beds with pillows, sofas with cushions, tables with chairs, appliances, plants, toilet, pet items) instead of line glyphs.
 
 

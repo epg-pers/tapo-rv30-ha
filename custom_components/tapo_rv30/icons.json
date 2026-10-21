@@ -2,43 +2,13 @@
   "entity": {
     "sensor": {
       "status": {
-        "default": "mdi:robot-vacuum",
-        "state": {
-          "Standby": "mdi:robot-vacuum-variant",
-          "Cleaning": "mdi:robot-vacuum",
-          "Mapping": "mdi:map-plus",
-          "Remote Control": "mdi:gamepad-variant",
-          "Returning": "mdi:home-import-outline",
-          "Charging": "mdi:battery-charging",
-          "Charged": "mdi:battery",
-          "Paused": "mdi:pause-circle",
-          "Sleeping": "mdi:power-sleep",
-          "Emptying Dust": "mdi:delete-empty",
-          "Mapping Paused": "mdi:map-clock",
-          "Going To Point": "mdi:map-marker-right",
-          "Going To Point Paused": "mdi:map-marker-off",
-          "Exploring": "mdi:compass",
-          "Exploring Paused": "mdi:compass-off",
-          "Washing Mop": "mdi:washing-machine",
-          "Drying Mop": "mdi:hair-dryer",
-          "Attaching Mop": "mdi:water-plus",
-          "Removing Mop": "mdi:water-minus",
-          "Cutting Hair": "mdi:content-cut"
-        }
+        "default": "mdi:robot-vacuum"
       },
       "error": {
-        "default": "mdi:alert-circle",
-        "state": {
-          "Ok": "mdi:check-circle"
-        }
+        "default": "mdi:alert-circle"
       },
       "matter": {
-        "default": "mdi:link-variant",
-        "state": {
-          "Not paired": "mdi:link-off",
-          "Pairing window open": "mdi:link-plus",
-          "Paired": "mdi:link"
-        }
+        "default": "mdi:link-variant"
       },
       "matter_setup_code": {
         "default": "mdi:qrcode"
