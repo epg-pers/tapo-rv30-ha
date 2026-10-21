@@ -38,7 +38,7 @@ through python-kasa.
 - Error state sensor (e.g. "Ok", "Dust Bin Removed", "Trapped")
 - Consumable wear sensors (main brush, side brush, filter, sensor, charge contacts)
 - Zone cleaning via `tapo_rv30.clean_zone` and per-room suction / water / passes via `tapo_rv30.set_room_settings`
-- Empty Bin button and consumable reset buttons
+- Empty Bin button (self-empty docks), Wash Mop / Dry Mop / Remove Hair buttons (Omni docks, created only when the dock answers) and consumable reset buttons
 - Auto Empty, Do Not Disturb (with start / end times), Child Lock and Carpet Boost switches
 - Voice volume control
 - Last Clean sensor with run totals
@@ -120,7 +120,7 @@ entity: vacuum.robot
   problem.
 - Preset chips (one per preset saved in the Tapo app), start/pause, stop, dock, locate and
   empty-bin controls, greyed out when they don't apply.
-- Follows your theme (light and dark). Options: `name`, `show_presets`, `show_controls`.
+- Follows your theme (light and dark). Options: `name`, `show_presets`, `show_controls`, `rotate` (0 / 90 / 180 / 270, for maps the robot scanned sideways).
 
 No separate HACS frontend install, no resources to add.
 
@@ -167,7 +167,7 @@ python3 tapo_vacuum.py clean kitchen lounge
 
 Entities are created from what the robot reports it can do (`getComponentList` and a
 settings probe), so other Tapo RobovAC models should work with the features they have;
-the RV50 Pro Omni has been reported working on a fork. AES-transport models (RV30C) are
+the RV50 Pro Omni has been reported working on a fork (its dock buttons here are untested). AES-transport models (RV30C) are
 supported on a best-effort basis with no test hardware; please report results on #25.
 
 ## Protocol notes — room cleaning

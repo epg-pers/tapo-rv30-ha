@@ -8,6 +8,8 @@
 - **Card**: floor switcher when the robot has several maps; in zone mode, tap a saved zone to clean it; long-press a room for its suction / water / passes.
 - **Firmware** update entity (read-only, from the robot's own update check; installing is left to the app on purpose) and a **Wi-Fi Signal** diagnostic sensor (disabled by default).
 - **Repair issue** when a robot that used to answer has failed every poll for 10 minutes, pointing at the known firmware regression and the fix (power-cycle).
+- **Card** `rotate` option (0 / 90 / 180 / 270) for maps the robot scanned sideways; taps and zone drags still land where you point.
+- **Wash Mop / Dry Mop / Remove Hair** buttons for Omni docks, created only when the dock answers the matching command (method names from the cavefire and jan-tdy forks; untested here, the author's RV30 has no Omni dock).
 
 ### Changed
 
