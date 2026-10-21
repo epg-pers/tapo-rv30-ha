@@ -17,6 +17,7 @@ _LOGGER = logging.getLogger(__name__)
 
 STATIC_URL = f"/{DOMAIN}_static"
 CARD_FILE = "tapo-rv30-card.js"
+STRATEGY_FILE = "tapo-rv30-strategy.js"
 DATA_FRONTEND = f"{DOMAIN}_frontend_ready"
 
 
@@ -34,7 +35,9 @@ async def async_setup_frontend(hass: HomeAssistant, version: str) -> None:
         StaticPathConfig(STATIC_URL, str(Path(__file__).parent / "frontend"), cache_headers=False)
     ])
     hass.http.register_view(RoomMaskView())
+    hass.http.register_view(LastCleanView())
     await _register_resource(hass, card_url(version))
+    await _register_resource(hass, f"{STATIC_URL}/{STRATEGY_FILE}?v={version}")
 
 
 async def _register_resource(hass: HomeAssistant, url: str) -> None:
@@ -74,4 +77,18 @@ class RoomMaskView(HomeAssistantView):
         if coordinator is None or coordinator.room_mask is None:
             return web.Response(status=404, text="no map")
         return web.Response(body=coordinator.room_mask, content_type="image/png",
+                            headers={"Cache-Control": "no-cache"})
+
+
+class LastCleanView(HomeAssistantView):
+    """GET /api/tapo_rv30/<entry_id>/last_clean.png -> the newest run's map (for the card)."""
+    url = f"/api/{DOMAIN}/{{entry_id}}/last_clean.png"
+    name = f"api:{DOMAIN}:last_clean"
+    requires_auth = True
+
+    async def get(self, request: web.Request, entry_id: str) -> web.Response:
+        coordinator = request.app["hass"].data.get(DOMAIN, {}).get(entry_id)
+        if coordinator is None or not coordinator.last_clean_image_bytes:
+            return web.Response(status=404, text="no record")
+        return web.Response(body=coordinator.last_clean_image_bytes, content_type="image/png",
                             headers={"Cache-Control": "no-cache"})

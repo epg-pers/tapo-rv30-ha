@@ -133,6 +133,7 @@ class TapoVacuumEntity(CoordinatorEntity[TapoCoordinator], StateVacuumEntity):
             "clean_time_min":d.get("clean_time", 0),
             "clean_percent": d.get("clean_percent", 0),
             "rooms":         rooms,
+            "consumables":   self.coordinator.consumables_percent(),
             "position_mm":   (self.coordinator.vac_pos or [None, None])[:2],
             "current_room":  self.coordinator.current_room,
             "integration":   DOMAIN,

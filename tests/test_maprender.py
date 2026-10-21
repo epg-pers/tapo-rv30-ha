@@ -131,3 +131,26 @@ def test_furniture_glyphs_every_type_renders():
     img, _, geom = render_map(md)
     assert len(geom["furniture"]) == len(FURNITURE_TYPES)
     assert geom["furniture"][0]["angle"] == 0 and geom["furniture"][1]["angle"] == 30
+
+
+def test_room_coverage_maps_record_cells_onto_live_rooms():
+    from custom_components.tapo_rv30.mapdata import grid_pixels, room_coverage
+    live = _map()
+    live_px = grid_pixels(live)
+    rec = _map()
+    width = rec["width"]
+    px = bytearray(live_px)
+    for row in range(1, 4):          # all of room 1 cleaned, room 2 untouched
+        for col in range(1, 5):
+            px[row * width + col] = 255
+    rec["map_data"] = base64.b64encode(_lz4_literal(bytes(px))).decode()
+    cov = room_coverage(rec, live, live_px)
+    assert cov[1] == (12, 12) and cov[2] == (0, 12)
+    # a record with a shifted origin still lands on the same rooms
+    rec["real_origin_coor"] = [live["real_origin_coor"][0] - 50, live["real_origin_coor"][1], 0]
+    px2 = bytearray(live_px)
+    for row in range(1, 4):
+        for col in range(2, 6):      # one cell to the right in the record grid = same mm as cols 1-4
+            px2[row * width + col] = 255
+    rec["map_data"] = base64.b64encode(_lz4_literal(bytes(px2))).decode()
+    assert room_coverage(rec, live, live_px)[1] == (12, 12)

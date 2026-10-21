@@ -422,3 +422,39 @@ def split_room_phrase(text: str) -> list[str]:
         if p:
             out.append(p)
     return out
+
+
+def grid_pixels(map_data: dict) -> bytes:
+    """The decoded cell grid of a map or record (one byte per cell)."""
+    validate_map(map_data)
+    return lz4_block_decompress(base64.b64decode(map_data["map_data"]), int(map_data["pix_len"]))
+
+
+def room_coverage(record: dict, live: dict, live_pixels: bytes) -> dict[int, tuple[int, int]]:
+    """How much of each room a finished run covered: {room_id: (cleaned cells, room cells)}.
+    Cleaned cells (255 in the record grid) are mapped through mm coordinates onto the live
+    map's grid, so it works even if the two grids have different origins or sizes."""
+    rec_px = grid_pixels(record)
+    rw, rh = int(record["width"]), int(record["height"])
+    lw, lh = int(live["width"]), int(live["height"])
+    rox, roy = record["real_origin_coor"][:2]
+    rres = record.get("resolution") or 50
+    totals: dict[int, int] = {}
+    for p in live_pixels:
+        if 0 < p < 127 or 127 < p < 255:
+            totals[p] = totals.get(p, 0) + 1
+    cleaned: dict[int, int] = {}
+    for i, p in enumerate(rec_px):
+        if p != 255:
+            continue
+        gx, gy = i % rw, i // rw
+        if gy >= rh:
+            break
+        x_mm, y_mm = rox + (gx + 0.5) * rres, roy + (gy + 0.5) * rres
+        lx, ly = mm_to_grid(live, x_mm, y_mm)
+        lx, ly = int(lx), int(ly)
+        if 0 <= lx < lw and 0 <= ly < lh:
+            rid = live_pixels[ly * lw + lx]
+            if rid in totals:
+                cleaned[rid] = cleaned.get(rid, 0) + 1
+    return {rid: (cleaned.get(rid, 0), total) for rid, total in totals.items()}

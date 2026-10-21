@@ -22,7 +22,7 @@ for name in ("homeassistant", "homeassistant.components", "homeassistant.compone
              "homeassistant.config_entries", "homeassistant.core", "homeassistant.helpers",
              "homeassistant.helpers.device_registry", "homeassistant.helpers.entity_platform",
              "homeassistant.helpers.update_coordinator", "homeassistant.exceptions",
-             "homeassistant.helpers.issue_registry"):
+             "homeassistant.helpers.issue_registry", "homeassistant.helpers.storage"):
     if name not in sys.modules:
         sys.modules[name] = types.ModuleType(name)
 _stub = sys.modules
@@ -31,6 +31,7 @@ _stub["homeassistant.config_entries"].ConfigEntry = object
 _stub["homeassistant.core"].HomeAssistant = object
 _stub["homeassistant.core"].callback = lambda f: f
 _stub["homeassistant.helpers.device_registry"].DeviceInfo = dict
+_stub["homeassistant.helpers.storage"].Store = type("Store", (), {"__init__": lambda self, *a, **k: None})
 _stub["homeassistant.helpers.entity_platform"].AddEntitiesCallback = object
 
 

@@ -13,15 +13,18 @@ from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.device_registry import DeviceInfo
+from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from PIL import Image, ImageDraw
 
 from .const import (
+    CONSUMABLE_LABELS, CONSUMABLE_LIMITS_H,
     ACTIVE_POLL_INTERVAL, CLEANING_CODES, CONF_POLL_INTERVAL, DOMAIN, ERROR_CODES,
     EVENT_CLEAN_FINISHED, EVENT_CLEAN_STARTED, EVENT_ERROR, FAST_INTERVAL, ISSUE_UNREACHABLE,
     MAP_INTERVAL, MAX_POLL_INTERVAL, MIN_POLL_INTERVAL, PAUSED_CODES, UNREACHABLE_AFTER,
 )
 from .mapdata import (
+    grid_pixels, room_coverage,
     b64name, clean_transition, decode_clean_record, decode_path, decode_preset, decode_schedule,
     fold, resolve_rooms, room_at_vac,
 )
@@ -52,6 +55,13 @@ class TapoCoordinator(DataUpdateCoordinator):
         self._map_tick = 0
         self.map_image_bytes: bytes | None = None
         self.last_clean_image_bytes: bytes | None = None   # render of the newest clean record
+        self.last_clean_hash: str = "0"
+        self._live_map: dict | None = None                 # current map (header + pixels) for coverage maths
+        self._live_pixels: bytes | None = None
+        self.rooms_last_cleaned: dict[str, dict] = {}      # "map_id:room_id" -> {last_cleaned, coverage, name}
+        self._freshness_store = Store(hass, 1, f"{DOMAIN}.{entry.entry_id}.rooms") if entry else None
+        self._freshness_loaded = False
+        self._processed_records: set[int] = set()          # record timestamps already folded in
         self.last_clean_info: dict = {}
         self._record_rendered_ts: int | None = None
         self._map_base: Image.Image | None = None     # rendered map without the vacuum marker
@@ -219,28 +229,92 @@ class TapoCoordinator(DataUpdateCoordinator):
                                                    "error": ERROR_CODES.get(new_err, f"Code({new_err})"),
                                                    "current_room": self.current_room})
 
+    async def _load_freshness(self) -> None:
+        if self._freshness_loaded or self._freshness_store is None:
+            return
+        self._freshness_loaded = True
+        try:
+            data = await self._freshness_store.async_load() or {}
+            self.rooms_last_cleaned = dict(data.get("rooms") or {})
+            self._processed_records = set(int(t) for t in data.get("processed") or [])
+        except Exception as exc:
+            _LOGGER.debug("Room freshness store unreadable: %s", exc)
+
+    def _fold_coverage(self, record: dict, detail: dict) -> None:
+        """Per-room coverage of one finished run into rooms_last_cleaned."""
+        if self._live_map is None or self._live_pixels is None or detail.get("map_id") != self.map_id:
+            return
+        names = {r["id"]: b64name(r.get("name", "")) for r in self.rooms}
+        ts = int(record.get("timestamp") or 0)
+        for rid, (done, total) in room_coverage(detail, self._live_map, self._live_pixels).items():
+            if total == 0 or done == 0:
+                continue
+            pct = round(100 * done / total)
+            if pct < 20:            # the robot only crossed the room; not a clean
+                continue
+            key = f"{self.map_id}:{rid}"
+            cur = self.rooms_last_cleaned.get(key)
+            if cur is None or ts >= int(cur.get("last_cleaned") or 0):
+                self.rooms_last_cleaned[key] = {"last_cleaned": ts, "coverage": pct, "name": names.get(rid, f"Room {rid}")}
+
     async def _maybe_render_last_clean(self, status_code) -> None:
-        """Render the newest clean record's map once it exists and the robot is
-        not working (the detail read is left alone while a run is in progress)."""
+        """Render the newest clean record's map once it exists and the robot is not
+        working, and fold every unseen record into the per-room freshness table
+        (a few records per poll, so a long history is backfilled gently)."""
+        await self._load_freshness()
         recs = (self.settings.get("records") or {}).get("record_list") or []
         if not recs or status_code in CLEANING_CODES or status_code in PAUSED_CODES or status_code == 4:
             return
         newest = max(recs, key=lambda r: r.get("timestamp", 0))
         ts = newest.get("timestamp", 0)
-        if ts == self._record_rendered_ts:
+        pending = sorted((r for r in recs if int(r.get("timestamp") or 0) not in self._processed_records),
+                         key=lambda r: r.get("timestamp", 0))
+        if ts == self._record_rendered_ts and not pending:
             return
-        try:
-            detail = await self.hass.async_add_executor_job(
-                self.client.get_clean_record_detail, newest.get("record_index", 0))
-            img = await self.hass.async_add_executor_job(render_record, detail)
-            self.last_clean_image_bytes = _png(img)
-            self.last_clean_info = {**decode_clean_record(newest),
-                                    "map_name": b64name(detail.get("map_name", "")),
-                                    "map_id": detail.get("map_id")}
-            self._record_rendered_ts = ts
-        except Exception as exc:
-            _LOGGER.debug("Last clean render failed: %s", exc)
-            self._record_rendered_ts = ts     # do not retry every poll on a bad record
+        changed = False
+        for rec in pending[:3]:
+            rts = int(rec.get("timestamp") or 0)
+            try:
+                detail = await self.hass.async_add_executor_job(
+                    self.client.get_clean_record_detail, rec.get("record_index", 0))
+                await self.hass.async_add_executor_job(self._fold_coverage, rec, detail)
+                if rts == ts:
+                    img = await self.hass.async_add_executor_job(render_record, detail)
+                    self.last_clean_image_bytes = _png(img)
+                    self.last_clean_hash = str(rts)
+                    self.last_clean_info = {**decode_clean_record(rec),
+                                            "map_name": b64name(detail.get("map_name", "")),
+                                            "map_id": detail.get("map_id")}
+                    self._record_rendered_ts = ts
+            except Exception as exc:
+                _LOGGER.debug("Clean record %s failed: %s", rec.get("record_index"), exc)
+                if rts == ts:
+                    self._record_rendered_ts = ts     # do not retry every poll on a bad record
+            self._processed_records.add(rts)
+            changed = True
+        if changed and self._freshness_store is not None:
+            keep = sorted(self._processed_records)[-200:]
+            self._processed_records = set(keep)
+            await self._freshness_store.async_save({"rooms": self.rooms_last_cleaned, "processed": keep})
+
+    def room_freshness(self) -> dict[str, dict]:
+        """{room name: {last_cleaned, coverage}} for the current map."""
+        out = {}
+        for key, v in self.rooms_last_cleaned.items():
+            if key.startswith(f"{self.map_id}:"):
+                out[v.get("name") or key] = {"last_cleaned": v.get("last_cleaned"), "coverage": v.get("coverage")}
+        return out
+
+    def consumables_percent(self) -> dict[str, int]:
+        """Remaining life per consumable as a percentage, by label."""
+        raw = (self.data or {}).get("consumables") or {}
+        out = {}
+        for key, limit_h in CONSUMABLE_LIMITS_H.items():
+            mins = raw.get(key)
+            if mins is None:
+                continue
+            out[CONSUMABLE_LABELS[key]] = max(0, min(100, round(100 * (1 - mins / 60 / limit_h))))
+        return out
 
     def _note_latest_record(self) -> None:
         recs = (self.settings.get("records") or {}).get("record_list") or []
@@ -490,6 +564,11 @@ class TapoCoordinator(DataUpdateCoordinator):
         self.map_name = b64name(map_data.get("map_name", ""))
         self.rooms = [a for a in map_data.get("area_list", []) if a.get("type") == "room"]
         self._map_base, self.room_geometry, self.map_geometry = render_map(map_data)
+        self._live_map = {k: map_data.get(k) for k in ("width", "height", "pix_len", "map_data", "resolution", "real_origin_coor", "area_list", "map_id")}
+        try:
+            self._live_pixels = grid_pixels(map_data)
+        except Exception:
+            self._live_pixels = None
         self.room_mask = room_mask_png(map_data)
         self.map_hash = str(map_data.get("map_hash") or len(self.room_mask))
         self._apply_position(map_data)

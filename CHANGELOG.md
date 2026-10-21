@@ -1,6 +1,14 @@
 # Changelog
 
-## v0.16.0
+## v0.17.0
+
+### New
+
+- **Per-room "last cleaned"**: every finished run's map is folded onto the current map's rooms, so each room knows when it was last cleaned and what share of it the robot covered (runs that only crossed a room do not count). Kept across restarts; old records are backfilled a few per poll while the robot is docked. Exposed as `rooms_last_cleaned` and on each `room_geometry` entry of the map camera.
+- **Card status panel**: the history button opens the last clean map, the recent runs (when, area, minutes, how started, preset) and consumable life bars. Holding a room shows its last-cleaned line.
+- **Dashboard strategy** `custom:tapo-rv30`: one line of dashboard config builds a complete view per robot.
+- The map camera carries `last_clean` (record details) and `last_clean_url`; the vacuum entity carries `consumables` (percent life left per part).
+
 
 ### New
 

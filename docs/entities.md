@@ -9,7 +9,7 @@ plus a settings probe), so a feature the robot lacks simply has no entity.
 (Quiet / Standard / Turbo / Max / Ultra), and the native `vacuum.clean_area` action (map rooms
 to Home Assistant areas in the entity's settings). Attributes: `fan_speed`, `water_level`,
 `clean_passes`, `mop_attached`, `clean_area`, `clean_time_min`, `clean_percent`,
-`position_mm`, `current_room`.
+`position_mm`, `current_room`, `consumables` (percent life left per part).
 
 ## Map
 
@@ -17,7 +17,8 @@ to Home Assistant areas in the entity's settings). Attributes: `fan_speed`, `wat
   rooms, no-go zones, virtual walls, carpets, saved zones, furniture glyphs, the dock, the
   robot and its cleaning path. Attributes on the camera: `map_id`, `map_name`, `maps`,
   `rooms`, `room_geometry`, `map_geometry` (grid, mm to px transform, saved zones, furniture),
-  `calibration_points`, `rooms_mask_url`, `path_points`.
+  `calibration_points`, `rooms_mask_url`, `path_points`, `rooms_last_cleaned` (per room: last cleaned
+  timestamp and coverage percent, from the robot's own run maps), `last_clean`, `last_clean_url`.
 - `image.<name>_last_clean_map`: the newest clean record rendered from the robot's own copy:
   cleaned cells, skipped rooms, path, start, end and dock. Attributes: area, minutes, start
   type, map name.

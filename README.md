@@ -32,6 +32,8 @@ Needs Home Assistant 2026.3 or newer (HACS enforces it).
 - **Bundled map card**: tap-to-clean rooms through a lossless room mask (no calibration),
   zone drawing, saved zones, floors, presets, controls, theme-aware, visual editor
 - **Live cleaning path** on the map, and a **Last Clean Map** of where the robot actually went
+- **Per-room "last cleaned"**: worked out from the robot's own run maps, shown when you hold a room, and available to automations
+- **One-click dashboard**: a dashboard strategy that builds the whole thing for every robot
 - **Schedules from Home Assistant**: add, change, enable / disable and remove the robot's own
 - **Matter**: pairing state, setup code, and a button that opens the pairing window
 - **Furniture** drawn as little illustrations on the map, from the app's own type table
@@ -92,7 +94,27 @@ entity: vacuum.robot
 ```
 
 Options: `name`, `show_presets`, `show_controls`, `rotate` (0 / 90 / 180 / 270 for maps the
-robot scanned sideways). Taps resolve through a room mask the integration serves, so
+robot scanned sideways). The history button on the map opens the status panel: the last clean
+map, the recent runs and consumable life bars. Hold a room to see when it was last cleaned and
+how much of it the robot covered, and to start it with chosen levels.
+
+<p align="center"><img src="docs/card-status.png" width="340" alt="The card's status panel"> <img src="docs/card-room.png" width="340" alt="Room sheet with last cleaned"></p>
+
+*Mock-ups with a made-up house.*
+
+### Whole dashboard in one line
+
+Create a dashboard (Settings, Dashboards, Add dashboard, New dashboard from scratch), open
+its raw configuration editor and replace the contents with:
+
+```yaml
+strategy:
+  type: custom:tapo-rv30
+```
+
+It builds a view per robot: the card, one-tap room buttons, presets, the last clean map,
+status, maintenance, settings, schedules and totals, all from the entities the integration
+created, so it follows renames and models. Taps resolve through a room mask the integration serves, so
 odd-shaped rooms work; a floor switcher appears when the robot has several maps; the header
 shows status, current room, battery and progress, with a banner when the robot reports a
 problem.

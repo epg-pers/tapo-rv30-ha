@@ -10,7 +10,7 @@
  * the vacuum's device automatically.
  */
 
-const CARD_VERSION = "0.16.0";
+const CARD_VERSION = "0.17.0";
 const ROOM_COLORS = ["#ffb3ba", "#bae1ff", "#baffc9", "#ffffba", "#dcbaff", "#ffdcba", "#baffff"];
 
 const ICONS = {
@@ -18,7 +18,14 @@ const ICONS = {
   locate: "mdi:map-marker-radius", bin: "mdi:delete-empty", rooms: "mdi:floor-plan",
   zone: "mdi:vector-square", clear: "mdi:close", preset: "mdi:play-box-multiple",
   battery: "mdi:battery", charging: "mdi:battery-charging", robot: "mdi:robot-vacuum",
-  alert: "mdi:alert-circle", room: "mdi:map-marker",
+  alert: "mdi:alert-circle", room: "mdi:map-marker", history: "mdi:history", bin: "mdi:delete-variant",
+};
+
+const FRESH = (ts) => {
+  if (!ts) return null;
+  const d = (Date.now() / 1000 - ts) / 86400;
+  if (d < 1) return "today"; if (d < 2) return "yesterday"; if (d < 30) return `${Math.floor(d)} days ago`;
+  return `${Math.floor(d / 30)} months ago`;
 };
 
 const STYLE = `
@@ -96,6 +103,25 @@ canvas { display: block; width: 100%; height: auto; touch-action: none; cursor: 
 .seg button.on { background: var(--primary-color); color: var(--text-primary-color, #fff); }
 .sheet .save { width: 100%; margin-top: 10px; padding: 11px; border: none; border-radius: 10px; cursor: pointer; font-size: .95em; font-weight: 500;
   background: var(--primary-color); color: var(--text-primary-color, #fff); }
+.fresh { font-size: .82em; color: var(--secondary-text-color); margin: -4px 0 8px; display: flex; gap: 6px; align-items: center; }
+.fresh ha-icon { --mdc-icon-size: 16px; }
+.status { margin: 6px 12px; }
+.status h5 { margin: 10px 4px 6px; font-size: .78em; font-weight: 500; letter-spacing: .04em; text-transform: uppercase; color: var(--secondary-text-color); }
+.status img { display: block; width: 100%; border-radius: 14px; background: color-mix(in srgb, var(--primary-text-color) 5%, transparent); }
+.runs { display: flex; flex-direction: column; gap: 4px; }
+.run { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 10px; font-size: .86em;
+  background: color-mix(in srgb, var(--primary-text-color) 5%, transparent); color: var(--primary-text-color); }
+.run ha-icon { --mdc-icon-size: 18px; color: var(--primary-color); flex: none; }
+.run .when { flex: 1; }
+.run .meta { color: var(--secondary-text-color); white-space: nowrap; }
+.run.err ha-icon { color: var(--error-color, #db4437); }
+.cons { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 14px; padding: 0 4px; }
+.con { font-size: .8em; color: var(--secondary-text-color); }
+.con .row { display: flex; justify-content: space-between; margin-bottom: 3px; }
+.con .bar { height: 6px; border-radius: 3px; background: color-mix(in srgb, var(--primary-text-color) 10%, transparent); overflow: hidden; }
+.con .bar > div { height: 100%; border-radius: 3px; background: var(--primary-color); }
+.con.low .bar > div { background: var(--error-color, #db4437); }
+.con.mid .bar > div { background: var(--warning-color, #ffa600); }
 `;
 
 class TapoRV30Card extends HTMLElement {
@@ -196,11 +222,13 @@ class TapoRV30Card extends HTMLElement {
         <div class="tools">
           <button class="t-rooms" title="Select rooms"><ha-icon icon="${ICONS.rooms}"></ha-icon></button>
           <button class="t-zone" title="Draw a zone"><ha-icon icon="${ICONS.zone}"></ha-icon></button>
+          <button class="t-status" title="Last clean and status"><ha-icon icon="${ICONS.history}"></ha-icon></button>
           <button class="t-clear" title="Clear" hidden><ha-icon icon="${ICONS.clear}"></ha-icon></button>
         </div>
         <button class="go" hidden><ha-icon icon="${ICONS.start}"></ha-icon><span></span></button>
         <div class="floors" hidden></div>
       </div>
+      <div class="status" hidden></div>
       <div class="chips"></div>
       <div class="controls"></div>
     </ha-card>`;
@@ -209,11 +237,13 @@ class TapoRV30Card extends HTMLElement {
       battery: root.querySelector(".battery"), progress: root.querySelector(".progress"),
       banner: root.querySelector(".banner"), canvas: root.querySelector("canvas"), hint: root.querySelector(".hint"),
       tRooms: root.querySelector(".t-rooms"), tZone: root.querySelector(".t-zone"), tClear: root.querySelector(".t-clear"),
+      tStatus: root.querySelector(".t-status"), status: root.querySelector(".status"),
       go: root.querySelector(".go"), chips: root.querySelector(".chips"), controls: root.querySelector(".controls"),
       mapwrap: root.querySelector(".mapwrap"), floors: root.querySelector(".floors"), stage: root.querySelector(".stage"),
     };
     this._el.tRooms.onclick = () => this._setMode("rooms");
     this._el.tZone.onclick = () => this._setMode("zone");
+    this._el.tStatus.onclick = () => this._toggleStatus();
     this._el.tClear.onclick = () => this._clearSelection();
     this._el.go.onclick = () => this._go();
     const c = this._el.canvas;
@@ -258,6 +288,46 @@ class TapoRV30Card extends HTMLElement {
     this._renderControls(state);
     this._renderFloors();
     this._draw();
+    if (this._statusOpen) this._renderStatus(false);
+  }
+
+  _toggleStatus() {
+    this._statusOpen = !this._statusOpen;
+    this._el.tStatus.classList.toggle("on", this._statusOpen);
+    this._el.status.hidden = !this._statusOpen;
+    if (this._statusOpen) this._renderStatus(true);
+  }
+
+  async _renderStatus(fetchRuns) {
+    const a = this._mapAttrs(), vac = this._st(this._config.entity) || { attributes: {} };
+    const last = a.last_clean || {};
+    const cons = vac.attributes.consumables || {};
+    const url = a.last_clean_url ? `${a.last_clean_url}&t=${this._lastCleanHash === a.last_clean_url ? "" : Date.now()}` : null;
+    this._lastCleanHash = a.last_clean_url;
+    const lastLine = last.started ? `${FRESH(last.started)}${last.area != null ? `, ${last.area} m²` : ""}${last.minutes != null ? `, ${last.minutes} min` : ""}` : "no run recorded yet";
+    const consHtml = Object.entries(cons).map(([k, v]) =>
+      `<div class="con ${v <= 10 ? "low" : v <= 30 ? "mid" : ""}"><div class="row"><span>${k}</span><span>${v}%</span></div><div class="bar"><div style="width:${v}%"></div></div></div>`).join("");
+    this._el.status.innerHTML =
+      `<h5>Last clean, ${lastLine}</h5>` + (url ? `<img src="${url}" alt="Last clean map">` : "") +
+      `<h5>Recent runs</h5><div class="runs"><div class="run"><ha-icon icon="${ICONS.history}"></ha-icon><span class="when">Loading</span></div></div>` +
+      (consHtml ? `<h5>Consumables</h5><div class="cons">${consHtml}</div>` : "");
+    if (!fetchRuns && this._runsHtml) { this._el.status.querySelector(".runs").innerHTML = this._runsHtml; return; }
+    try {
+      const resp = await this._hass.connection.sendMessagePromise({
+        type: "call_service", domain: "tapo_rv30", service: "get_clean_records",
+        service_data: { entity_id: this._config.entity, limit: 8 }, return_response: true });
+      const recs = (resp && resp.response && (resp.response.records || resp.response[this._config.entity]?.records)) || [];
+      const start = { 1: "app", 4: "schedule", 5: "automation", 2: "Alexa", 3: "Google", 0: "button", 6: "IFTTT" };
+      this._runsHtml = recs.length ? recs.map((r) => {
+        const d = r.started ? new Date(r.started * 1000) : null;
+        const when = d ? d.toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" }) + " " + d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" }) : "";
+        const meta = [r.area != null ? `${r.area} m²` : null, r.minutes != null ? `${r.minutes} min` : null, start[r.start_type] || null, r.rule_name || null].filter(Boolean).join(" · ");
+        return `<div class="run ${r.error ? "err" : ""}"><ha-icon icon="${r.error ? ICONS.alert : ICONS.history}"></ha-icon><span class="when">${when}</span><span class="meta">${meta}</span></div>`;
+      }).join("") : `<div class="run"><span class="when">No runs recorded</span></div>`;
+    } catch (e) {
+      this._runsHtml = `<div class="run"><span class="when">Could not load history</span></div>`;
+    }
+    const el = this._el.status.querySelector(".runs"); if (el) el.innerHTML = this._runsHtml;
   }
 
   _renderFloors() {
@@ -474,7 +544,8 @@ class TapoRV30Card extends HTMLElement {
     const sheet = document.createElement("div"); sheet.className = "sheet";
     const seg = (key, opts) => `<div class="opt"><span>${{ suction: "Suction", water_level: "Water", passes: "Passes" }[key]}</span><div class="seg" data-key="${key}">` +
       opts.map(([v, l]) => `<button data-v="${v}" class="${cur[key] === v ? "on" : ""}">${l}</button>`).join("") + `</div></div>`;
-    sheet.innerHTML = `<div class="panel"><h4><span>${g.name}</span><button class="x"><ha-icon icon="${ICONS.clear}"></ha-icon></button></h4>` +
+    const fresh = g.last_cleaned ? `<div class="fresh"><ha-icon icon="${ICONS.history}"></ha-icon><span>Last cleaned ${FRESH(g.last_cleaned)}${g.coverage != null ? `, ${g.coverage}% covered` : ""}</span></div>` : "";
+    sheet.innerHTML = `<div class="panel"><h4><span>${g.name}</span><button class="x"><ha-icon icon="${ICONS.clear}"></ha-icon></button></h4>` + fresh +
       seg("suction", [[1, "Quiet"], [2, "Standard"], [3, "Turbo"], [4, "Max"], [5, "Ultra"]]) +
       seg("water_level", [[0, "Off"], [1, "Low"], [2, "Medium"], [3, "High"]]) +
       seg("passes", [[1, "1"], [2, "2"], [3, "3"]]) +
