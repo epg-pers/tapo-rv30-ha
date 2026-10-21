@@ -47,7 +47,7 @@ through python-kasa.
 
 ## Requirements
 
-- Home Assistant 2025.1+ (2026.8+ needs v0.4.0 or later; the integration icon needs 2026.3+)
+- Home Assistant 2026.3 or newer (the native clean-area feature the integration uses arrived in 2026.3; HACS enforces this)
 - [HACS](https://hacs.xyz) installed
 - Tapo RV20 / RV30 on firmware **1.2.x+** (TPAP protocol). Models that use the
   older AES scheme (RV30C, RV30C Mop) are detected automatically but untested, see #25.
