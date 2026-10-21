@@ -1008,7 +1008,8 @@ class TapoVacuumClient:
         self.send("gotoPoint", {"switch": False, "point": [0, 0]})
 
     # ---- Remote control (component "direction_control"; call, codes and timing from the
-    # app's RobotRemoteControlViewModel / RobotRemoteControlActivity). Entering sends
+    # app's RobotRemoteControlViewModel / RobotRemoteControlActivity, verified on an RV30
+    # Max Plus). Entering sends
     # direction 0 with control=true and answers away_sta_ms, how long the robot takes to
     # leave the dock (the app counts it down, 4000 ms when absent). Leaving sends
     # direction 4 (stop) with control=false. While driving the app re-sends the held

@@ -61,7 +61,7 @@ litter box, 703 pet bowl. The glyphs are the integration's own drawings, not the
 ## Remote control
 
 From the app's `RobotRemoteControlViewModel` and its control view (component
-`direction_control`). Not yet verified on a robot.
+`direction_control`). Verified on an RV30 Max Plus firmware 1.3.3.
 
 - `directionControl {"direction": 0, "control": true}` enters remote control; the answer
   carries `away_sta_ms`, how long the robot takes to leave the dock (the app counts it

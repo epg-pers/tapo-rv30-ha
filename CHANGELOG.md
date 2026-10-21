@@ -1,12 +1,10 @@
 # Changelog
 
-## v0.19.0b2
-
-Beta. Install it from HACS with "Show beta versions" on.
+## v0.19.0
 
 ### New
 
-- **Remote drive.** The Tapo app's remote control, from Home Assistant. The sidebar page gets a **Drive** tab: take control (the robot leaves the dock), hold the arrows or the keyboard arrow keys to drive, stop, vacuum while driving, spot clean where it stands, locate, send it home. `tapo_rv30.remote_drive` is the service underneath (`enter`, `forward`, `backward`, `left`, `right`, `stop`, `exit`); the page repeats a held direction every 300 ms like the app does. Method, codes and timing from the app (`directionControl`, see protocol.md). **Untested on a real robot at the time of this beta**; please report how it behaves.
+- **Remote drive.** The Tapo app's remote control, from Home Assistant. The sidebar page gets a **Drive** tab: take control (the robot leaves the dock), hold the arrows or the keyboard arrow keys to drive, stop, vacuum while driving, spot clean where it stands, locate, send it home. `tapo_rv30.remote_drive` is the service underneath (`enter`, `forward`, `backward`, `left`, `right`, `stop`, `exit`); the page repeats a held direction every 300 ms like the app does. Method, codes and timing from the app (`directionControl`, see protocol.md), verified on an RV30 Max Plus.
 - **Go to a point from the card.** A new map tool: tap where the robot should go and press "Go here" (`tapo_rv30.go_to`, verified earlier). Hidden on robots without go-to-point.
 - The vacuum entity carries `goto_point` and `remote_control` attributes so cards can hide what a robot cannot do.
 

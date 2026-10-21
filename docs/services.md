@@ -15,7 +15,7 @@ vacuum set up the target is optional.
 | `tapo_rv30.set_schedule` | Change a schedule (enable / disable, time, days, rooms, levels). Same Do Not Disturb check when the time changes or the schedule is enabled. |
 | `tapo_rv30.remove_schedule` | Delete one schedule or all. |
 | `tapo_rv30.remove_matter_fabric` | Unpair the robot from one Matter ecosystem (fabric index from the Matter sensor). Untested. |
-| `tapo_rv30.remote_drive` | The app's remote control, one step per call: `enter` (the robot leaves the dock; the response carries `leaving_dock_ms`), `forward` / `backward` / `left` / `right` (a short nudge; repeat while held), `stop`, `exit`. Refused while a clean is running. Untested on a real robot so far. |
+| `tapo_rv30.remote_drive` | The app's remote control, one step per call: `enter` (the robot leaves the dock; the response carries `leaving_dock_ms`), `forward` / `backward` / `left` / `right` (a short nudge; repeat while held), `stop`, `exit`. Refused while a clean is running. |
 | `tapo_rv30.go_to` | Drive to a point (x, y in map mm) on robots with go-to-point; `vacuum.stop` cancels it. |
 | `tapo_rv30.get_clean_records` | Cleaning history and lifetime totals as a service response. |
 | `tapo_rv30.send_raw` | Send any device method with params and get the response back (use with "Return response" in Developer Tools). Refused while the robot is working unless `force: true`; see [protocol.md](protocol.md) for why. |
