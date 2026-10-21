@@ -1,11 +1,10 @@
 """Sensor entities for Tapo RV30."""
 from __future__ import annotations
 
-import time
-
 import logging
+import time
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any, Callable
 
 from homeassistant.components.sensor import (
@@ -73,7 +72,7 @@ def _last_record(d: dict) -> dict:
 _LAST_CLEAN_SENSOR = TapoSensorDescription(
     key="last_clean", name="Last Clean", icon="mdi:history",
     device_class=SensorDeviceClass.TIMESTAMP,
-    value_fn=lambda d: (datetime.fromtimestamp(_last_record(d)["timestamp"], tz=timezone.utc)
+    value_fn=lambda d: (datetime.fromtimestamp(_last_record(d)["timestamp"], tz=UTC)
                         if _last_record(d).get("timestamp") else None),
     attrs_fn=lambda d: {
         "area_m2": _last_record(d).get("clean_area"),

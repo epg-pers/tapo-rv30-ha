@@ -1,5 +1,8 @@
 blank_issues_enabled: true
 contact_links:
-  - name: Protocol notes and known issues
-    url: https://github.com/epg-pers/tapo-rv30-ha#readme
-    about: The README covers the local protocol, what each model answers, and the known firmware issue.
+  - name: Troubleshooting guide
+    url: https://github.com/epg-pers/tapo-rv30-ha/blob/main/docs/troubleshooting.md
+    about: Firmware updates closing local access, invalid credentials, -1001 and -1002 errors, rooms after a remap, the missing card.
+  - name: Protocol notes
+    url: https://github.com/epg-pers/tapo-rv30-ha/blob/main/docs/protocol.md
+    about: What the robot answers locally and the warning about probing a working robot.

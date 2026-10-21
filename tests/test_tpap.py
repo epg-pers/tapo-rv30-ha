@@ -3,7 +3,13 @@ import os
 import pytest
 
 from custom_components.tapo_rv30.tpap import (
-    _CIPHER_LABELS, _decrypt, _derive_cipher, _encode_w, _encrypt, _nonce, _build_cred,
+    _CIPHER_LABELS,
+    _build_cred,
+    _decrypt,
+    _derive_cipher,
+    _encode_w,
+    _encrypt,
+    _nonce,
 )
 
 

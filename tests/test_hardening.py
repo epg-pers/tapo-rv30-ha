@@ -3,7 +3,10 @@ import base64
 import pytest
 
 from custom_components.tapo_rv30.mapdata import (
-    MapValidationError, decode_preset, lz4_block_decompress, validate_map,
+    MapValidationError,
+    decode_preset,
+    lz4_block_decompress,
+    validate_map,
 )
 
 

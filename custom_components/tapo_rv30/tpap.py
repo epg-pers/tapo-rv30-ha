@@ -19,11 +19,10 @@ import struct
 import tempfile
 import threading
 import warnings
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import requests
-from requests.adapters import HTTPAdapter
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec, padding, rsa
@@ -32,6 +31,7 @@ from cryptography.hazmat.primitives.ciphers.aead import AESCCM, ChaCha20Poly1305
 from cryptography.hazmat.primitives.cmac import CMAC
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from ecdsa import NIST256p, NIST384p, NIST521p, ellipticcurve
+from requests.adapters import HTTPAdapter
 from urllib3.exceptions import InsecureRequestWarning
 
 from .const import DOCKED_CODES
@@ -303,7 +303,7 @@ def _load_cert(value: str) -> x509.Certificate:
 def _verify_cert_chain(ca: x509.Certificate, ica: x509.Certificate | None) -> None:
     """Verify the device attestation chain up to the pinned TP-Link root."""
     root = x509.load_pem_x509_certificate(_ROOT_CA_PEM.encode())
-    now  = datetime.now(timezone.utc)
+    now  = datetime.now(UTC)
     chain = [ca] + ([ica] if ica else []) + [root]
     for cert in chain:
         if not (cert.not_valid_before_utc <= now <= cert.not_valid_after_utc):

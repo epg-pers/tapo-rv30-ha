@@ -2,9 +2,8 @@
 they can be unit-tested without a running HA."""
 from __future__ import annotations
 
-import re
-
 import base64
+import re
 import unicodedata
 from typing import Any, Callable
 
@@ -238,7 +237,7 @@ def encode_weekdays(days) -> int:
         try:
             mask |= 1 << [w.lower() for w in _WEEKDAYS].index(key[:3])
         except ValueError:
-            raise ValueError(f"unknown day {d!r}; use Mon..Sun, daily, weekdays or weekend")
+            raise ValueError(f"unknown day {d!r}; use Mon..Sun, daily, weekdays or weekend") from None
     return mask
 
 
@@ -250,7 +249,7 @@ def parse_hhmm(value) -> int:
         h, m = str(value).strip().split(":")[:2]
         h, m = int(h), int(m)
     except (ValueError, AttributeError):
-        raise ValueError(f"time {value!r} is not HH:MM")
+        raise ValueError(f"time {value!r} is not HH:MM") from None
     if not (0 <= h < 24 and 0 <= m < 60):
         raise ValueError(f"time {value!r} is out of range")
     return h * 60 + m

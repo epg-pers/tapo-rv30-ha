@@ -2,33 +2,54 @@
 from __future__ import annotations
 
 import asyncio
-import time
 import logging
+import time
 from datetime import timedelta
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryAuthFailed
-from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from PIL import Image, ImageDraw
 
 from .const import (
-    CONSUMABLE_LABELS, CONSUMABLE_LIMITS_H,
-    ACTIVE_POLL_INTERVAL, CLEANING_CODES, CONF_POLL_INTERVAL, DOMAIN, ERROR_CODES,
-    EVENT_CLEAN_FINISHED, EVENT_CLEAN_STARTED, EVENT_ERROR, FAST_INTERVAL, ISSUE_UNREACHABLE,
-    MAP_INTERVAL, MAX_POLL_INTERVAL, MIN_POLL_INTERVAL, PAUSED_CODES, UNREACHABLE_AFTER,
+    ACTIVE_POLL_INTERVAL,
+    CLEANING_CODES,
+    CONF_POLL_INTERVAL,
+    CONSUMABLE_LABELS,
+    CONSUMABLE_LIMITS_H,
+    DOMAIN,
+    ERROR_CODES,
+    EVENT_CLEAN_FINISHED,
+    EVENT_CLEAN_STARTED,
+    EVENT_ERROR,
+    FAST_INTERVAL,
+    ISSUE_UNREACHABLE,
+    MAP_INTERVAL,
+    MAX_POLL_INTERVAL,
+    MIN_POLL_INTERVAL,
+    PAUSED_CODES,
+    UNREACHABLE_AFTER,
 )
 from .mapdata import (
-    grid_pixels, room_coverage,
-    b64name, clean_transition, decode_clean_record, decode_path, decode_preset, decode_schedule,
-    fold, resolve_rooms, room_at_vac,
+    b64name,
+    clean_transition,
+    decode_clean_record,
+    decode_path,
+    decode_preset,
+    decode_schedule,
+    fold,
+    grid_pixels,
+    resolve_rooms,
+    room_at_vac,
+    room_coverage,
 )
-from .maprender import render_record, _dot, _grid_px, _png, _px_transform, render_map, room_mask_png
+from .maprender import _dot, _grid_px, _png, _px_transform, render_map, render_record, room_mask_png
 from .tpap import AuthError, TapoVacuumClient
 
 _LOGGER = logging.getLogger(__name__)

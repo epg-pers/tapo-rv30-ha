@@ -3,8 +3,15 @@ import base64
 import pytest
 
 from custom_components.tapo_rv30.mapdata import (
-    MapNotFound, RoomNotFound, b64name, decode_schedule, decode_weekdays,
-    lz4_block_decompress, norm, resolve_rooms, room_at_vac,
+    MapNotFound,
+    RoomNotFound,
+    b64name,
+    decode_schedule,
+    decode_weekdays,
+    lz4_block_decompress,
+    norm,
+    resolve_rooms,
+    room_at_vac,
 )
 
 

@@ -1,11 +1,16 @@
 name: Release
 
 # Publishes a GitHub release (and creates the tag) whenever the version in
-# manifest.json changes on main. Notes come from the matching "## vX.Y.Z"
-# section of CHANGELOG.md.
+# manifest.json changes. Notes come from the matching "## vX.Y.Z" section of
+# CHANGELOG.md.
+#
+# Stable releases come from main only (version "0.18.0" -> release v0.18.0).
+# Beta releases can come from any branch (version "0.18.0b1" -> pre-release
+# v0.18.0b1). HACS only shows pre-releases to people who tick "Show beta
+# versions", which is how changes get hardware testing without test branches
+# or separate installs. Bump to the plain version on main when the beta is good.
 on:
   push:
-    branches: [main]
     paths:
       - custom_components/tapo_rv30/manifest.json
       - CHANGELOG.md
@@ -21,13 +26,21 @@ jobs:
       - uses: actions/checkout@v5
 
       - id: version
-        run: echo "tag=v$(python3 -c 'import json; print(json.load(open("custom_components/tapo_rv30/manifest.json"))["version"])')" >> "$GITHUB_OUTPUT"
+        run: |
+          v=$(python3 -c 'import json; print(json.load(open("custom_components/tapo_rv30/manifest.json"))["version"])')
+          echo "tag=v$v" >> "$GITHUB_OUTPUT"
+          if echo "$v" | grep -Eq '(a|b|rc)[0-9]+$'; then echo "prerelease=true" >> "$GITHUB_OUTPUT"; else echo "prerelease=false" >> "$GITHUB_OUTPUT"; fi
 
       - name: Create release if it does not exist
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.version.outputs.tag }}
+          PRERELEASE: ${{ steps.version.outputs.prerelease }}
         run: |
+          if [ "$PRERELEASE" != "true" ] && [ "$GITHUB_REF_NAME" != "main" ]; then
+            echo "Stable version on branch $GITHUB_REF_NAME: releases only come from main."
+            exit 0
+          fi
           if gh release view "$TAG" >/dev/null 2>&1; then
             echo "Release $TAG already exists, nothing to do."
             exit 0
@@ -37,4 +50,5 @@ jobs:
             echo "No CHANGELOG.md section for $TAG" >&2
             exit 1
           fi
-          gh release create "$TAG" --target "$GITHUB_SHA" --title "$TAG" --notes-file notes.md
+          flag=""; [ "$PRERELEASE" = "true" ] && flag="--prerelease"
+          gh release create "$TAG" --target "$GITHUB_SHA" --title "$TAG" --notes-file notes.md $flag

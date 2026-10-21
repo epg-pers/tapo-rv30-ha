@@ -13,8 +13,6 @@ from homeassistant.components.vacuum import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
-
-from .tpap import AuthError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -29,6 +27,7 @@ from .const import (
 from .coordinator import TapoCoordinator
 from .frontend import STATIC_URL
 from .mapdata import b64name
+from .tpap import AuthError
 
 _LOGGER = logging.getLogger(__name__)
 

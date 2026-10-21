@@ -4,7 +4,7 @@
 
 ## Checklist
 
-- [ ] `pyflakes custom_components tests` and `pytest -q tests` pass
+- [ ] `ruff check custom_components tests`, `pyflakes custom_components tests` and `pytest -q tests` pass
 - [ ] `CHANGELOG.md` has a line for this change
 - [ ] `strings.json` and `translations/en.json` still match (if either changed)
 - [ ] Tested on hardware: model, firmware and what was exercised (or say "not tested on hardware")

@@ -10,7 +10,7 @@ from homeassistant.helpers import entity_registry as er
 
 from .const import DOMAIN, FAN_NAME_TO_INT, WATER_NAME_TO_INT
 from .coordinator import TapoCoordinator
-from .mapdata import build_schedule_rule, encode_weekdays, parse_hhmm, decode_clean_record
+from .mapdata import build_schedule_rule, decode_clean_record, encode_weekdays, parse_hhmm
 
 _LOGGER = logging.getLogger(__name__)
 SERVICES = ("clean_rooms", "set_room_settings", "clean_zone", "run_schedule", "send_raw",
@@ -136,7 +136,7 @@ def async_setup_services(hass: HomeAssistant) -> None:
             room_ids, map_id = await _resolve(hass, call, coord)
             lv = _levels(call)
             try:
-                await hass.async_add_executor_job(coord.client.set_room_settings, map_id, {rid: lv for rid in room_ids})
+                await hass.async_add_executor_job(coord.client.set_room_settings, map_id, dict.fromkeys(room_ids, lv))
             except Exception as exc:
                 if "-1001" in str(exc):
                     raise ServiceValidationError(
@@ -170,7 +170,7 @@ def async_setup_services(hass: HomeAssistant) -> None:
         try:
             x, y = int(call.data["x"]), int(call.data["y"])
         except (KeyError, TypeError, ValueError):
-            raise ServiceValidationError(f"{call.service}: 'x' and 'y' (integers, mm) are required")
+            raise ServiceValidationError(f"{call.service}: 'x' and 'y' (integers, mm) are required") from None
         await _send(hass, call, coord.client.goto_point, x, y)
         await coord.async_refresh_soon()
 
@@ -268,7 +268,7 @@ def async_setup_services(hass: HomeAssistant) -> None:
         try:
             idx = int(call.data["fabric_index"])
         except (KeyError, TypeError, ValueError):
-            raise ServiceValidationError(f"{call.service}: 'fabric_index' (integer, see the Matter sensor) is required")
+            raise ServiceValidationError(f"{call.service}: 'fabric_index' (integer, see the Matter sensor) is required") from None
         known = [f.get("fabric_index") for f in ((coord.settings.get("matter_status") or {}).get("bind_fabrics") or [])]
         if known and idx not in known:
             raise ServiceValidationError(f"{call.service}: fabric {idx} is not paired; known fabrics: {known}")

@@ -4,3 +4,4 @@ cryptography
 ecdsa
 pyflakes
 pillow
+ruff>=0.5

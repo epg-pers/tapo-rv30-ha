@@ -3,16 +3,25 @@ needs to place its own overlays. No Home Assistant imports."""
 from __future__ import annotations
 
 import base64
-import math
 import io
+import math
 
 from PIL import Image, ImageDraw, ImageFont
 
 from .const import (
-    CARPET_COLOR, FLOOR_COLOR, FORBID_COLOR, FORBID_OUTLINE, FURNITURE_OUTLINE, FURNITURE_TYPES, ROOM_PALETTE,
-    UNKNOWN_COLOR, VIRTUAL_WALL_COLOR, WALL_COLOR, ZONE_OUTLINE,
+    CARPET_COLOR,
+    FLOOR_COLOR,
+    FORBID_COLOR,
+    FORBID_OUTLINE,
+    FURNITURE_OUTLINE,
+    FURNITURE_TYPES,
+    ROOM_PALETTE,
+    UNKNOWN_COLOR,
+    VIRTUAL_WALL_COLOR,
+    WALL_COLOR,
+    ZONE_OUTLINE,
 )
-from .mapdata import decode_path, b64name, lz4_block_decompress, mm_to_grid, validate_map
+from .mapdata import b64name, decode_path, lz4_block_decompress, mm_to_grid, validate_map
 
 MAP_SCALE = 4   # px per vacuum grid cell -> ~700x700 output image
 FONT_SIZE = 14

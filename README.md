@@ -74,8 +74,10 @@ ready-made blueprints:
 
 Sensors, switches, selects, numbers, buttons and the update entity adapt to what your model
 reports. The full list is in [docs/entities.md](docs/entities.md), the services and events
-in [docs/services.md](docs/services.md), Matter in [docs/matter.md](docs/matter.md), and the
-local protocol, with what each call answers, in [docs/protocol.md](docs/protocol.md).
+in [docs/services.md](docs/services.md), Matter in [docs/matter.md](docs/matter.md), the
+local protocol in [docs/protocol.md](docs/protocol.md), and the usual problems with their
+fixes in [docs/troubleshooting.md](docs/troubleshooting.md). The same pages are published at
+[epg-pers.github.io/tapo-rv30-ha](https://epg-pers.github.io/tapo-rv30-ha/).
 
 [`examples/dashboard.yaml`](examples/dashboard.yaml) is a ready-made view (controls, status
 chips, the live map, presets, one-tap rooms, settings, maintenance; the chip rows use

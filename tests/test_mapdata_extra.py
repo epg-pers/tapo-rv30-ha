@@ -3,7 +3,11 @@ import base64
 import pytest
 
 from custom_components.tapo_rv30.mapdata import (
-    decode_clean_record, dnd_active, fold, mm_to_grid, resolve_rooms,
+    decode_clean_record,
+    dnd_active,
+    fold,
+    mm_to_grid,
+    resolve_rooms,
 )
 
 
@@ -72,8 +76,9 @@ def test_clean_transition():
 
 
 def test_schedule_helpers():
-    from custom_components.tapo_rv30.mapdata import build_schedule_rule, encode_weekdays, parse_hhmm
     import pytest
+
+    from custom_components.tapo_rv30.mapdata import build_schedule_rule, encode_weekdays, parse_hhmm
     assert encode_weekdays(["Mon", "wed", "FRI"]) == 42          # matches the app's documented 2+8+32
     assert encode_weekdays("daily") == 127 and encode_weekdays("weekdays") == 62 and encode_weekdays("weekend") == 65
     assert encode_weekdays(None) == 0 and encode_weekdays(10) == 10

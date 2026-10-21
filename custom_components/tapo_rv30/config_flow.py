@@ -3,7 +3,6 @@ and reauth (the robot started rejecting the stored credentials)."""
 from __future__ import annotations
 
 import asyncio
-
 import logging
 from collections.abc import Mapping
 from typing import Any
@@ -11,9 +10,9 @@ from typing import Any
 import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.const import CONF_HOST, CONF_PASSWORD, CONF_USERNAME
+from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.service_info.dhcp import DhcpServiceInfo
-from homeassistant.core import HomeAssistant
 
 from .aes import AesVacuumClient
 from .const import CONF_TRANSPORT, DEFAULT_PORT, DOMAIN, TRANSPORT_AES, TRANSPORT_TPAP
@@ -72,7 +71,7 @@ async def _tpap_port_open(host: str, port: int = 4433, timeout: float = 3.0) -> 
     listen on 4433; plugs, bulbs and cameras on the same MAC prefix do not."""
     try:
         _, writer = await asyncio.wait_for(asyncio.open_connection(host, port), timeout)
-    except (OSError, asyncio.TimeoutError):
+    except (TimeoutError, OSError):
         return False
     writer.close()
     return True

@@ -1,0 +1,20 @@
+# Lint rules for CI (ruff check custom_components tests). Formatting is not enforced.
+line-length = 130
+target-version = "py313"
+
+[lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "C4", "RUF"]
+ignore = [
+  "E501",   # long lines: the map and protocol code reads better unwrapped
+  "B023",   # closures over loop variables that are only called inside the same iteration
+  "RUF012", # mutable class attributes on entity classes are the Home Assistant style
+  "SIM108", # ternaries are not always clearer
+  "RUF001", "RUF002", "RUF003",  # unicode in strings and comments (m², degree signs)
+  "UP035",  # typing imports kept compatible with the HA stubs in tests
+  "E701", "E702", "E731",  # compact one-liners are used deliberately in the map code
+  "E402",   # __init__ sets constants before importing submodules that need them
+  "RUF005", "RUF007", "B905", "C401", "C408", "C416", "SIM105",  # style only
+]
+
+[lint.per-file-ignores]
+"tests/*" = ["B017", "RUF059"]
