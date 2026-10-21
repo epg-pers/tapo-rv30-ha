@@ -1,8 +1,6 @@
 # Changelog
 
-## v0.18.0b2
-
-Beta. Install it from HACS with "Show beta versions" on.
+## v0.18.0
 
 ### New
 
