@@ -3,7 +3,7 @@ Installing is deliberately not offered here: some firmware builds have broken
 local access (see README), so update from the Tapo app on purpose."""
 from __future__ import annotations
 
-from homeassistant.components.update import UpdateDeviceClass, UpdateEntity
+from homeassistant.components.update import UpdateDeviceClass, UpdateEntity, UpdateEntityFeature
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
@@ -23,7 +23,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry,
 class TapoFirmware(TapoEntity, UpdateEntity):
     _attr_device_class = UpdateDeviceClass.FIRMWARE
     _attr_entity_category = EntityCategory.DIAGNOSTIC
-    _attr_supported_features = 0        # no install from HA, on purpose
+    _attr_supported_features = UpdateEntityFeature(0)   # no install from HA, on purpose
 
     @property
     def installed_version(self) -> str | None:
