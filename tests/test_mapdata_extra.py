@@ -85,3 +85,15 @@ def test_schedule_helpers():
     rule = build_schedule_rule(480, 42, {"clean_mode": 0}, enabled=False, rule_id="S1")
     assert rule == {"enable": False, "mode": "repeat", "week_day": 42, "s_min": 480, "start_remind": False,
                     "alarm_min": 0, "clean_attr": {"clean_mode": 0}, "id": "S1"}
+
+
+def test_matter_state():
+    from custom_components.tapo_rv30.mapdata import matter_state
+    assert matter_state(None, None, 0)["state"] is None
+    assert matter_state({"status": 0, "bind_fabrics": [], "expired_time": 0}, 100, 100)["state"] == "Not paired"
+    s = matter_state({"status": 1, "bind_fabrics": [], "expired_time": 180}, 100, 160)
+    assert s["state"] == "Pairing window open" and s["window_seconds_left"] == 120
+    s = matter_state({"status": 1, "bind_fabrics": [], "expired_time": 180}, 100, 400)
+    assert s["state"] == "Not paired" and s["window_seconds_left"] == 0        # window ran out before the next read
+    s = matter_state({"status": 2, "bind_fabrics": [{"label": "Home Assistant", "vendor_id": 4939, "fabric_index": 1, "fabric_id": "x"}]}, 0, 0)
+    assert s["state"] == "Paired" and s["fabrics"][0]["fabric_index"] == 1

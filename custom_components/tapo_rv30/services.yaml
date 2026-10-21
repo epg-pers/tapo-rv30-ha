@@ -332,3 +332,18 @@ remove_schedule:
       default: false
       selector:
         boolean: {}
+
+remove_matter_fabric:
+  target:
+    entity:
+      domain: vacuum
+      integration: tapo_rv30
+  fields:
+    fabric_index:
+      required: true
+      example: 1
+      selector:
+        number:
+          min: 1
+          max: 255
+          mode: box

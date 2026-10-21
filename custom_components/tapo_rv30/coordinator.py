@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 import logging
 from datetime import timedelta
 from typing import Any
@@ -65,6 +66,7 @@ class TapoCoordinator(DataUpdateCoordinator):
         self.fw_version: str | None = None
         self._info_fetched = False
         self.settings: dict = {}           # get_settings(), refreshed with the map
+        self.settings_read_at: float | None = None
         self.schedules: list[dict] = []
         self.components: dict[str, int] = {}       # getComponentList, read once
         self.bool_settings_supported: list[str] = []   # probed once
@@ -167,6 +169,7 @@ class TapoCoordinator(DataUpdateCoordinator):
                 _LOGGER.debug("Position refresh failed: %s", exc)
 
         data["settings"] = self.settings
+        data["settings_read_at"] = self.settings_read_at
         data["schedules"] = self.schedules
         await self._maybe_render_last_clean(data.get("status_code"))
         data["bool_settings"] = self.bool_settings
@@ -275,6 +278,7 @@ class TapoCoordinator(DataUpdateCoordinator):
 
     async def _refresh_settings(self) -> None:
         self.settings = await self.hass.async_add_executor_job(self.client.get_settings)
+        self.settings_read_at = time.time()
         self._decode_schedules()
         if self._last_record_ts is None:
             self._note_latest_record()

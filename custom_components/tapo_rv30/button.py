@@ -25,6 +25,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry,
         entities.append(TapoEmptyBinButton(c, entry, "empty_bin", "Empty Bin"))
     entities += [TapoResetButton(c, entry, part, label) for part, label in RESETTABLE.items()]
     entities += [TapoDockActionButton(c, entry, key) for key in c.dock_actions if key in DOCK_LABELS]
+    if c.has("matter") and "matter_status" in c.settings:
+        entities.append(TapoMatterPairingButton(c, entry, "matter_pairing", "Open Matter Pairing Window"))
     async_add_entities(entities)
 
     # One button per preset; presets added in the app later appear on the next refresh.
@@ -57,6 +59,19 @@ class TapoDockActionButton(TapoEntity, ButtonEntity):
     async def async_press(self) -> None:
         await self._call(self.coordinator.client.dock_action, self._key)
         await self.coordinator.async_refresh_soon()
+
+
+class TapoMatterPairingButton(TapoEntity, ButtonEntity):
+    """startCommission: opens the robot's Matter pairing window for a few minutes so
+    another ecosystem (Home Assistant's Matter integration, Apple Home, Google Home)
+    can add it with the setup code from the Matter sensor."""
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_icon = "mdi:link-plus"
+
+    async def async_press(self) -> None:
+        await self._call(self.coordinator.client.start_matter_commissioning)
+        await self.coordinator.async_settings_changed()
+        await self.coordinator.async_settings_changed_later(5)
 
 
 class TapoEmptyBinButton(TapoEntity, ButtonEntity):

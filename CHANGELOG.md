@@ -1,6 +1,11 @@
 # Changelog
 
-## v0.13.0
+## v0.14.0
+
+### New
+
+- **Matter**: a diagnostic sensor (off by default) with the robot's pairing state (`Not paired` / `Pairing window open` / `Paired`), paired ecosystems, time left in the pairing window, and the robot's fixed setup code and QR payload; an **Open Matter Pairing Window** button (`startCommission`); and `tapo_rv30.remove_matter_fabric`. Only created on robots that report the `matter` component. Status and setup-info reads verified on an RV30 Max Plus; the button and the remove service follow the app's code and are untested on hardware. See the README's Matter section, including why the code does not change but the window does.
+
 
 ### New
 

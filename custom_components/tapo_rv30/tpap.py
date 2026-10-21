@@ -923,6 +923,17 @@ class TapoVacuumClient:
     def remove_schedules(self, ids: list[str] | None = None, remove_all: bool = False) -> None:
         self.send("removeScheduleRules", {"remove_all": bool(remove_all), "rule_list": list(ids or [])})
 
+    # Matter (component "matter"; calls and fields from the app's RobotMatterRepository).
+    # getMatterSetupInfo: the robot's fixed setup code and QR payload, the same ones
+    # printed on it. getCommissionedStatus: status 0 unbound / 1 window open / 2 bound,
+    # bind_fabrics, expired_time (seconds left in the window). startCommission opens
+    # a pairing window and answers {"expired_time": seconds}.
+    def start_matter_commissioning(self) -> dict:
+        return self.send("startCommission")["result"] or {}
+
+    def remove_matter_fabric(self, fabric_index: int) -> None:
+        self.send("removeBindFabric", {"fabric_index": int(fabric_index)})
+
     def get_clean_record_detail(self, record_index: int) -> dict:
         """A finished run with its own map grid, overlays and driven path."""
         return self.send("getCleanRecordExtraInfo", {"record_index": int(record_index)})["result"]
@@ -1012,7 +1023,8 @@ class TapoVacuumClient:
                  ("carpet_boost", "getCarpetAutoBoost", None), ("records", "getCleanRecords", None),
                  ("schedules", "get_schedule_rules", {"start_index": 0}),
                  ("firmware", "get_latest_fw", None), ("device", "get_device_info", None),
-                 ("auto_update", "getAutoUpdateInfo", None))
+                 ("auto_update", "getAutoUpdateInfo", None),
+                 ("matter_status", "getCommissionedStatus", None), ("matter_setup", "getMatterSetupInfo", None))
 
     def get_settings(self) -> dict:
         """Slow-changing settings; a getter the model doesn't support is just left out."""

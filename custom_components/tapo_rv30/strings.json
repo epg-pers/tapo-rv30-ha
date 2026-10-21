@@ -285,6 +285,16 @@
           "description": "Remove every schedule instead of one."
         }
       }
+    },
+    "remove_matter_fabric": {
+      "name": "Remove Matter fabric",
+      "description": "Unpair the robot from one Matter ecosystem. The fabric index and label are attributes of the Matter sensor. Untested on hardware (the author's robot is not paired to anything); it sends the app's removeBindFabric call.",
+      "fields": {
+        "fabric_index": {
+          "name": "Fabric index",
+          "description": "fabric_index of the ecosystem to remove, from the Matter sensor."
+        }
+      }
     }
   },
   "issues": {

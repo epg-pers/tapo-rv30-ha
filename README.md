@@ -18,6 +18,7 @@ through python-kasa.
   entity's settings)
 - **Current Room** sensor, inferred from the vacuum's position on the map
 - **Last Clean Map** image: where the robot actually went on its last run (cleaned area, path, start and end)
+- **Matter**: a diagnostic sensor (off by default) with the robot's pairing state, the ecosystems it is paired to, its setup code and QR payload, plus a button that opens the pairing window. See the Matter section.
 - **Schedules** managed from Home Assistant: add, change, enable / disable and remove the robot's own schedules
 - **Schedules** sensor listing the Tapo-app schedules, and `tapo_rv30.run_schedule`
   to start one now
@@ -81,6 +82,7 @@ Click the button above, or manually:
 | `tapo_rv30.add_schedule` | Create a schedule on the robot: time, days, rooms / preset / whole house, levels. Returns the id. |
 | `tapo_rv30.set_schedule` | Change a schedule (enable / disable, time, days, rooms, levels). |
 | `tapo_rv30.remove_schedule` | Delete one schedule or all. |
+| `tapo_rv30.remove_matter_fabric` | Unpair the robot from one Matter ecosystem (fabric index from the Matter sensor). Untested. |
 | `tapo_rv30.go_to` | Drive to a point (x, y in map mm) on robots with go-to-point; `vacuum.stop` cancels it. |
 | `tapo_rv30.get_clean_records` | Cleaning history and lifetime totals as a service response. |
 | `tapo_rv30.send_raw` | Send any device method with params and get the response back (use with "Return response" in Developer Tools). Refused while the robot is working unless `force: true`; see the protocol notes for why. |
@@ -175,6 +177,35 @@ Entities are created from what the robot reports it can do (`getComponentList` a
 settings probe), so other Tapo RobovAC models should work with the features they have;
 the RV50 Pro Omni has been reported working on a fork (its dock buttons here are untested). AES-transport models (RV30C) are
 supported on a best-effort basis with no test hardware; please report results on #25.
+
+## Matter
+
+The RV30 Max Plus reports a `matter` component and the app has a "Bind to Matter" page.
+What the integration exposes (calls and fields taken from the app's code, read-only parts
+verified on an RV30 Max Plus, firmware 1.3.3):
+
+- **Matter sensor** (diagnostic, disabled by default): `Not paired`, `Pairing window open`
+  or `Paired`, with attributes `fabrics` (label, vendor id, fabric index of every
+  ecosystem the robot is paired to), `window_seconds_left`, `setup_code` and
+  `setup_payload`.
+- **Open Matter Pairing Window** button (diagnostic): the app's `startCommission`. The
+  robot then accepts a new pairing for a few minutes (`expired_time` counts down); the
+  sensor shows the window and the time left, projected from the last read so it does not
+  poll the robot for it.
+- `tapo_rv30.remove_matter_fabric`: the app's `removeBindFabric`.
+
+**About the code changing.** The setup code and QR payload are the robot's fixed ones
+(`getMatterSetupInfo` returned the same values every time it was read over several hours;
+they are what is printed on the robot). What is time-limited is the pairing *window*: the
+app opens one when you view the page and shows a countdown, and the robot only accepts a
+new ecosystem while it is open. So the flow is: enable the Matter sensor, press the button,
+then add the robot in Home Assistant's Matter integration (or any other ecosystem) with
+the setup code or QR payload before the window closes.
+
+The sensor is off by default because the setup code lets anyone on your network pair the
+robot while a window is open. Enable it when you need it. The button and the remove
+service are built from the app's code but have not been exercised on hardware here; the
+status and setup-info reads have.
 
 ## Protocol notes — room cleaning
 

@@ -15,7 +15,7 @@ from .mapdata import build_schedule_rule, encode_weekdays, parse_hhmm, decode_cl
 _LOGGER = logging.getLogger(__name__)
 SERVICES = ("clean_rooms", "set_room_settings", "clean_zone", "run_schedule", "send_raw",
             "get_clean_records", "run_preset", "set_map", "go_to",
-            "add_schedule", "set_schedule", "remove_schedule")
+            "add_schedule", "set_schedule", "remove_schedule", "remove_matter_fabric")
 
 
 # Methods the integration itself calls while the robot is working.
@@ -260,6 +260,21 @@ def async_setup_services(hass: HomeAssistant) -> None:
             raise HomeAssistantError(f"{call.service}: vacuum rejected the removal: {exc}") from exc
         await coord.async_settings_changed()
 
+    async def handle_remove_matter_fabric(call: ServiceCall) -> None:
+        """Unpair the robot from one Matter ecosystem (fabric_index from the Matter sensor)."""
+        coord = _one(hass, call)
+        if not coord.has("matter"):
+            raise ServiceValidationError(f"{call.service}: {coord.device_name} has no Matter support")
+        try:
+            idx = int(call.data["fabric_index"])
+        except (KeyError, TypeError, ValueError):
+            raise ServiceValidationError(f"{call.service}: 'fabric_index' (integer, see the Matter sensor) is required")
+        known = [f.get("fabric_index") for f in ((coord.settings.get("matter_status") or {}).get("bind_fabrics") or [])]
+        if known and idx not in known:
+            raise ServiceValidationError(f"{call.service}: fabric {idx} is not paired; known fabrics: {known}")
+        await _send(hass, call, coord.client.remove_matter_fabric, idx)
+        await coord.async_settings_changed()
+
     async def handle_run_schedule(call: ServiceCall) -> None:
         """Replays a saved schedule's settings; see services.yaml."""
         coord = _one(hass, call)
@@ -361,6 +376,7 @@ def async_setup_services(hass: HomeAssistant) -> None:
                                  supports_response=SupportsResponse.OPTIONAL)
     hass.services.async_register(DOMAIN, "set_schedule", handle_set_schedule)
     hass.services.async_register(DOMAIN, "remove_schedule", handle_remove_schedule)
+    hass.services.async_register(DOMAIN, "remove_matter_fabric", handle_remove_matter_fabric)
     hass.services.async_register(DOMAIN, "get_clean_records", handle_get_clean_records,
                                  supports_response=SupportsResponse.ONLY)
     hass.services.async_register(DOMAIN, "set_room_settings", handle_set_room_settings)

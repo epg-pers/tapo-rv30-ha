@@ -382,3 +382,30 @@ def resolve_rooms(
                 seen.add(r["id"]); matched.append(r["id"])
 
     return matched, target_id
+
+
+MATTER_UNBOUND, MATTER_COMMISSIONING, MATTER_BOUND = 0, 1, 2   # getCommissionedStatus.status (app constants)
+
+
+def matter_state(status: dict | None, read_at: float | None, now: float) -> dict:
+    """Readable Matter state from getCommissionedStatus. expired_time is the
+    seconds the pairing window had left when the robot answered, so the
+    remaining time is projected from the read time instead of polling."""
+    if not status:
+        return {"state": None, "fabrics": [], "window_seconds_left": None}
+    fabrics = [{"label": f.get("label") or "", "vendor_id": f.get("vendor_id"),
+                "fabric_index": f.get("fabric_index"), "fabric_id": f.get("fabric_id")}
+               for f in status.get("bind_fabrics") or [] if isinstance(f, dict)]
+    code = status.get("status", MATTER_UNBOUND)
+    left = None
+    if code == MATTER_COMMISSIONING:
+        left = int(status.get("expired_time") or 0)
+        if read_at is not None:
+            left = max(0, left - int(now - read_at))
+    if code == MATTER_COMMISSIONING and left:
+        state = "Pairing window open"
+    elif code == MATTER_BOUND or fabrics:
+        state = "Paired"
+    else:
+        state = "Not paired"
+    return {"state": state, "fabrics": fabrics, "window_seconds_left": left}

@@ -1,6 +1,8 @@
 """Sensor entities for Tapo RV30."""
 from __future__ import annotations
 
+import time
+
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -26,6 +28,7 @@ from .const import (
     STATUS_LABELS,
 )
 from .coordinator import TapoCoordinator
+from .mapdata import matter_state
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -113,6 +116,22 @@ _TOTAL_TIME = TapoSensorDescription(
     native_unit_of_measurement=UnitOfTime.HOURS, device_class=SensorDeviceClass.DURATION,
     state_class=SensorStateClass.TOTAL_INCREASING,
     value_fn=lambda d: (None if _records(d).get("total_time") is None else round(_records(d)["total_time"] / 60, 2)),
+)
+
+
+def _matter(d: dict) -> dict:
+    return matter_state((d.get("settings") or {}).get("matter_status"), d.get("settings_read_at"), time.time())
+
+
+_MATTER_SENSOR = TapoSensorDescription(
+    key="matter", name="Matter", icon="mdi:link-variant",
+    entity_category=EntityCategory.DIAGNOSTIC, entity_registry_enabled_default=False,
+    # Not paired / Pairing window open / Paired. The setup code and QR payload are the
+    # robot's fixed ones (printed on it); they are attributes here so you can pair from
+    # another ecosystem, which is also why the sensor is off by default.
+    value_fn=lambda d: _matter(d)["state"],
+    attrs_fn=lambda d: {**_matter(d), **{k: v for k, v in ((d.get("settings") or {}).get("matter_setup") or {}).items()
+                                        if k in ("setup_code", "setup_payload")}},
 )
 
 
@@ -204,6 +223,8 @@ async def async_setup_entry(
         TapoStatusSensor(coordinator, entry, _used_h("main_brush_lid_time")),
         TapoStatusSensor(coordinator, entry, _used_h("rag_time")),
     ]
+    if coordinator.has("matter") and "matter_status" in coordinator.settings:
+        entities.append(TapoStatusSensor(coordinator, entry, _MATTER_SENSOR))
 
     for ckey, clabel in CONSUMABLE_LABELS.items():
         entities.append(
