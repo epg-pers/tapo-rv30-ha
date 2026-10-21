@@ -13,7 +13,7 @@ to Home Assistant areas in the entity's settings). Attributes: `fan_speed`, `wat
 
 ## Map
 
-<p align="center"><img src="card-status.png" width="320" alt="The card's status panel"></p>
+![The card's status panel](card-status.png){ width="320" }
 
 *The card's status panel (mock-up): last clean map, recent runs, consumable life.*
 

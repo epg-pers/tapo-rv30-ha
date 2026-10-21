@@ -4,7 +4,7 @@ The integration adds **Tapo Vacuum** to the Home Assistant sidebar: one page wit
 everything it knows, so you do not have to build a dashboard to get going. The bundled
 card is still there for your own dashboards; the page is the full-size version.
 
-<p align="center"><img src="panel.png" width="760" alt="The Tapo Vacuum sidebar page"></p>
+![The Tapo Vacuum sidebar page](panel.png){ width="760" }
 
 *Mock-up with a made-up house and made-up runs.*
 
@@ -21,11 +21,11 @@ card is still there for your own dashboards; the page is the full-size version.
   (verified on an RV30 Max Plus; the Tapo app shows the same warning). Saving or enabling
   one asks first. The Do Not Disturb times are editable on the Settings tab.
 
-<p align="center"><img src="panel-dnd.png" width="640" alt="Schedule editor warning about Do Not Disturb"></p>
+![Schedule editor warning about Do Not Disturb](panel-dnd.png){ width="640" }
 - **History**: lifetime totals, cleans per day for the last 30 days, minutes per week for
   the last 8 weeks, and the recent runs with how they were started.
 
-<p align="center"><img src="panel-history.png" width="760" alt="History and statistics"></p>
+![History and statistics](panel-history.png){ width="760" }
 - **Rooms**: each room with how recently it was cleaned and how much of it the robot
   covered, with a one-tap clean button.
 - **Maintenance**: consumable life bars (amber under 30 percent, red under 10), Empty Bin,
