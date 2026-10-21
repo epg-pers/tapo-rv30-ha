@@ -119,6 +119,10 @@ send_raw:
       example: '{"type": "global"}'
       selector:
         object: {}
+    force:
+      default: false
+      selector:
+        boolean: {}
 get_clean_records:
   target:
     entity:

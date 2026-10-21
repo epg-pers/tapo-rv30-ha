@@ -112,7 +112,7 @@
     },
     "send_raw": {
       "name": "Send raw command",
-      "description": "Send any device method (e.g. getCleanAttr) with optional params and return the response. For diagnostics and experimenting; writes can change settings.",
+      "description": "Send any device method (with params) and get the response back. While the robot is working only the methods the integration itself uses are allowed, unless Force is on.",
       "fields": {
         "method": {
           "name": "Method",
@@ -121,6 +121,10 @@
         "params": {
           "name": "Params",
           "description": "Params"
+        },
+        "force": {
+          "name": "Force",
+          "description": "Send even while the robot is cleaning, returning or paused. Off by default: probing a working robot with unknown or setup-related methods has wiped a map set and clean history on an RV30."
         }
       }
     },

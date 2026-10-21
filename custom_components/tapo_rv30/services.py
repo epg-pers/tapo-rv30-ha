@@ -17,6 +17,15 @@ SERVICES = ("clean_rooms", "set_room_settings", "clean_zone", "run_schedule", "s
             "get_clean_records", "run_preset", "set_map", "go_to")
 
 
+# Methods the integration itself calls while the robot is working.
+SAFE_WHILE_BUSY = frozenset({
+    "getVacStatus", "getCleanStatus", "getCleanInfo", "getCleanAttr", "getBatteryInfo",
+    "getMopState", "getConsumablesInfo", "getAreaUnit", "getMapInfo", "getMapData",
+    "getPathData", "get_device_info", "getDeviceInfo", "getCleanRecords", "getComponentList",
+    "setSwitchClean", "setRobotPause", "setSwitchCharge", "playSelectAudio",
+})
+
+
 def _coordinators(hass: HomeAssistant, call: ServiceCall) -> list[TapoCoordinator]:
     """The coordinator(s) a call targets. With no target, the only vacuum set up."""
     loaded: dict[str, TapoCoordinator] = hass.data.get(DOMAIN, {})
@@ -182,6 +191,13 @@ def async_setup_services(hass: HomeAssistant) -> None:
         params = call.data.get("params") or {}
         if not isinstance(params, dict):
             raise ServiceValidationError(f"{call.service}: 'params' must be a mapping")
+        # Probing a robot mid-run is how the author lost a map set and the robot's
+        # clean history (see README, "Protocol notes"). Known-safe status reads are
+        # allowed; anything else waits for the robot to be idle unless forced.
+        if coord.busy and method not in SAFE_WHILE_BUSY and not call.data.get("force"):
+            raise ServiceValidationError(
+                f"{call.service}: {coord.device_name} is {coord.busy}; '{method}' is not on the "
+                f"known-safe list, so it is refused until the robot is idle (pass force: true to override)")
         try:
             resp = await hass.async_add_executor_job(coord.client.send, method, params)
         except Exception as exc:

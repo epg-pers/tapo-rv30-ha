@@ -78,7 +78,7 @@ Click the button above, or manually:
 | `tapo_rv30.set_map` | Switch the active map (multi-floor). |
 | `tapo_rv30.go_to` | Drive to a point (x, y in map mm) on robots with go-to-point; `vacuum.stop` cancels it. |
 | `tapo_rv30.get_clean_records` | Cleaning history and lifetime totals as a service response. |
-| `tapo_rv30.send_raw` | Send any device method with params and get the response back (use with "Return response" in Developer Tools). Handy for diagnostics; writes change settings. |
+| `tapo_rv30.send_raw` | Send any device method with params and get the response back (use with "Return response" in Developer Tools). Refused while the robot is working unless `force: true`; see the protocol notes for why. |
 
 Bad input (unknown room, map, option) raises an error with the available
 names in it, so it shows in the UI and in automation traces.
@@ -197,6 +197,17 @@ The payload is:
 what the app uses for spot clean), `5` a saved preset (`custom_rule_id`, listed by
 `getCustomizationRulesInfo`). `room_list` holds the room ids, which are the pixel values
 in the LZ4 map. `tapo_rv30.send_raw` lets you try any method against your own robot.
+
+**Do not probe a robot while it is working.** On 2026-10-21 an RV30 Max Plus was sent a
+batch of read-only setup and backup queries lifted from the app (`getQsComponentList`,
+`getInheritInfo`, `getCommissionedStatus`, `getMatterSetupInfo`, `getMapBRProcess`,
+`getOflMapSwitch`) about 38 minutes into a scheduled clean. Within seconds it aborted the
+run with an error, its saved maps and clean history were gone, and the map backups in the
+Tapo app with them. None of those methods is documented as destructive and the cause is
+not proven, but the timing is hard to ignore. `send_raw` therefore refuses anything but the
+methods the integration itself uses while the robot is cleaning, returning or paused,
+unless you pass `force: true`. Probe docked, and leave setup, inherit, commissioning and
+map backup / recovery methods alone unless you can afford to remap.
 
 Furniture placed in the app comes back from `getFurnitureInfo {"map_id": <int>}` (and inside
 the map blob) as `{id, type, angle, vertexs}`; the map camera lists it in

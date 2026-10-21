@@ -4,6 +4,11 @@
 
 Method names and value tables in this release were read from the Tapo Android app (3.22.105) and then verified on an RV30 Max Plus.
 
+### Changed
+
+- `tapo_rv30.send_raw` now refuses methods the integration does not itself use while the robot is cleaning, returning or paused, unless `force: true`. See the README protocol notes for the map loss that prompted this.
+- Settings entities re-read the robot again 2.5 s after a write, as it can answer with the old value for a moment.
+
 ### New
 
 - **Go to point**: `tapo_rv30.go_to` (x, y in map mm) on robots that report `goto_point`; `vacuum.stop` now cancels a go-to in progress.
