@@ -161,4 +161,4 @@
       "description": "Home Assistant could reach {name} at {host} before, but every poll has failed for the last 10 minutes. If nothing changed on your network, this is most likely the known Tapo firmware regression that breaks local access until the robot is power-cycled. Reboot the vacuum (hold the power button), and consider turning off automatic firmware updates in the Tapo app. This issue clears itself when polling works again."
     }
   }
-}\n
+}
