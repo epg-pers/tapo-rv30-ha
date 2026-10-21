@@ -153,6 +153,20 @@
           "description": "Map name (partial, accent-insensitive) or id."
         }
       }
+    },
+    "go_to": {
+      "name": "Go to point",
+      "description": "Drive the robot to a point given in the map's real coordinates (mm, same frame as the vacuum's position_mm attribute and tapo_rv30.clean_zone). Stop it with vacuum.stop; vacuum.return_to_base sends it home.",
+      "fields": {
+        "x": {
+          "name": "X",
+          "description": "X in mm."
+        },
+        "y": {
+          "name": "Y",
+          "description": "Y in mm."
+        }
+      }
     }
   },
   "issues": {

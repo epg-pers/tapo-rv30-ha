@@ -14,7 +14,7 @@ from .mapdata import decode_clean_record
 
 _LOGGER = logging.getLogger(__name__)
 SERVICES = ("clean_rooms", "set_room_settings", "clean_zone", "run_schedule", "send_raw",
-            "get_clean_records", "run_preset", "set_map")
+            "get_clean_records", "run_preset", "set_map", "go_to")
 
 
 def _coordinators(hass: HomeAssistant, call: ServiceCall) -> list[TapoCoordinator]:
@@ -142,6 +142,19 @@ def async_setup_services(hass: HomeAssistant) -> None:
                     lv["suction"], lv["cistern"], lv["clean_number"])
         await coord.async_refresh_soon()
 
+    async def handle_go_to(call: ServiceCall) -> None:
+        """Drive to a point given in map mm (same frame as position_mm / clean_zone)."""
+        coord = _one(hass, call)
+        if not coord.has("goto_point"):
+            raise ServiceValidationError(f"{call.service}: {coord.device_name} does not support go-to-point")
+        _require_idle(call, coord)
+        try:
+            x, y = int(call.data["x"]), int(call.data["y"])
+        except (KeyError, TypeError, ValueError):
+            raise ServiceValidationError(f"{call.service}: 'x' and 'y' (integers, mm) are required")
+        await _send(hass, call, coord.client.goto_point, x, y)
+        await coord.async_refresh_soon()
+
     async def handle_run_schedule(call: ServiceCall) -> None:
         """Replays a saved schedule's settings; see services.yaml."""
         coord = _one(hass, call)
@@ -231,6 +244,7 @@ def async_setup_services(hass: HomeAssistant) -> None:
     hass.services.async_register(DOMAIN, "clean_rooms", handle_clean_rooms)
     hass.services.async_register(DOMAIN, "run_preset", handle_run_preset)
     hass.services.async_register(DOMAIN, "set_map", handle_set_map)
+    hass.services.async_register(DOMAIN, "go_to", handle_go_to)
     hass.services.async_register(DOMAIN, "get_clean_records", handle_get_clean_records,
                                  supports_response=SupportsResponse.ONLY)
     hass.services.async_register(DOMAIN, "set_room_settings", handle_set_room_settings)

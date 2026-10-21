@@ -153,3 +153,30 @@ set_map:
       example: Upstairs
       selector:
         text: {}
+
+go_to:
+  target:
+    entity:
+      domain: vacuum
+      integration: tapo_rv30
+  fields:
+    x:
+      required: true
+      example: -800
+      selector:
+        number:
+          min: -20000
+          max: 20000
+          step: 10
+          unit_of_measurement: mm
+          mode: box
+    y:
+      required: true
+      example: 1500
+      selector:
+        number:
+          min: -20000
+          max: 20000
+          step: 10
+          unit_of_measurement: mm
+          mode: box

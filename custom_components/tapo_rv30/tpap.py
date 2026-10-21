@@ -951,10 +951,21 @@ class TapoVacuumClient:
         if status == 4:  # returning: cancel the trip home
             self.send("setSwitchCharge", {"switch_charge": False})
             return
+        if status in (11, 12):  # going to a point: setSwitchClean does not end that
+            self.stop_goto()
+            return
         try:
             self.send("setSwitchClean", {"clean_on": False})
         except RuntimeError:
             self.send("setRobotPause", {"pause": True})  # at least halt it
+
+    # ---- Go to point (component "goto_point"; method and params from the Tapo app,
+    # verified on an RV30 Max Plus: status becomes 11 "Going To Point") ----
+    def goto_point(self, x_mm: int, y_mm: int) -> None:
+        self.send("gotoPoint", {"switch": True, "point": [int(x_mm), int(y_mm)]})
+
+    def stop_goto(self) -> None:
+        self.send("gotoPoint", {"switch": False, "point": [0, 0]})
 
     def set_fan_speed(self, value: int) -> None:
         self.send("setCleanAttr", {"suction": value, "type": "global"})
@@ -972,7 +983,8 @@ class TapoVacuumClient:
                  ("volume", "getVolume", None), ("child_lock", "getChildLockInfo", None),
                  ("carpet_boost", "getCarpetAutoBoost", None), ("records", "getCleanRecords", None),
                  ("schedules", "get_schedule_rules", {"start_index": 0}),
-                 ("firmware", "get_latest_fw", None), ("device", "get_device_info", None))
+                 ("firmware", "get_latest_fw", None), ("device", "get_device_info", None),
+                 ("auto_update", "getAutoUpdateInfo", None))
 
     def get_settings(self) -> dict:
         """Slow-changing settings; a getter the model doesn't support is just left out."""
@@ -1016,6 +1028,15 @@ class TapoVacuumClient:
 
     def set_auto_empty(self, on: bool) -> None:
         self._merge_set("getDustCollectionInfo", "setDustCollectionInfo", auto_dust_collection=on)
+
+    # dust_collection_mode values from the app's EmptyingSettings: 0 smart, 1 light,
+    # 2 balanced, 3 max. Verified on an RV30 Max Plus (readback follows the write).
+    def set_auto_update(self, on: bool) -> None:
+        """Automatic firmware updates (enable / time / random_range bean, merged)."""
+        self._merge_set("getAutoUpdateInfo", "setAutoUpdateInfo", enable=bool(on))
+
+    def set_auto_empty_mode(self, mode: int) -> None:
+        self._merge_set("getDustCollectionInfo", "setDustCollectionInfo", dust_collection_mode=mode)
 
     def set_dnd(self, **changes) -> None:  # do_not_disturb / s_min / e_min (minutes after midnight)
         self._merge_set("getDoNotDisturb", "setDoNotDisturb", **changes)

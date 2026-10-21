@@ -95,5 +95,5 @@ def test_saved_zones_and_room_settings_in_geometry():
 def test_furniture_in_geometry():
     _, _, geom = render_map(_map())
     assert geom["furniture"][0]["type"] == 201
-    assert geom["furniture"][0]["type_name"] == "Dining table"
+    assert geom["furniture"][0]["type_name"] == "Table and chairs"
     assert len(geom["furniture"][0]["px"]) == 4

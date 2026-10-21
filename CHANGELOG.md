@@ -1,8 +1,15 @@
 # Changelog
 
-## Unreleased
+## v0.12.0
 
-- Furniture is listed in `map_geometry.furniture` (px and mm outlines, type code and, where known, its name: `201` is a dining table).
+Method names and value tables in this release were read from the Tapo Android app (3.22.105) and then verified on an RV30 Max Plus.
+
+### New
+
+- **Go to point**: `tapo_rv30.go_to` (x, y in map mm) on robots that report `goto_point`; `vacuum.stop` now cancels a go-to in progress.
+- **Auto Firmware Update** switch (the robot's own scheduled update, `get/setAutoUpdateInfo`).
+- **Auto Empty Mode** select (Smart / Light / Balanced / Max) for self-empty docks, via `setDustCollectionInfo` `dust_collection_mode`.
+- Furniture is listed in `map_geometry.furniture` (px and mm outlines, type code and name; the full code table was read from the Tapo app, see README).
 
 ## v0.11.0
 

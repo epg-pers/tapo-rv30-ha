@@ -39,7 +39,7 @@ through python-kasa.
 - Consumable wear sensors (main brush, side brush, filter, sensor, charge contacts)
 - Zone cleaning via `tapo_rv30.clean_zone` and per-room suction / water / passes via `tapo_rv30.set_room_settings`
 - Empty Bin button (self-empty docks), Wash Mop / Dry Mop / Remove Hair buttons (Omni docks, created only when the dock answers) and consumable reset buttons
-- Auto Empty, Do Not Disturb (with start / end times), Child Lock and Carpet Boost switches
+- Auto Firmware Update switch, Auto Empty switch and Auto Empty Mode select (Smart / Light / Balanced / Max, self-empty docks), Do Not Disturb (with start / end times), Child Lock and Carpet Boost switches
 - Voice volume control
 - Last Clean sensor with run totals
 - Config flow UI with reconfigure and reauth; diagnostics download for bug reports
@@ -76,6 +76,7 @@ Click the button above, or manually:
 | `tapo_rv30.run_schedule` | Replay a saved schedule's rooms and settings now. The vacuum has no "run schedule by id" call, so the settings are re-sent and the clean started. |
 | `tapo_rv30.run_preset` | Start a preset saved in the Tapo app, by name or id. |
 | `tapo_rv30.set_map` | Switch the active map (multi-floor). |
+| `tapo_rv30.go_to` | Drive to a point (x, y in map mm) on robots with go-to-point; `vacuum.stop` cancels it. |
 | `tapo_rv30.get_clean_records` | Cleaning history and lifetime totals as a service response. |
 | `tapo_rv30.send_raw` | Send any device method with params and get the response back (use with "Return response" in Developer Tools). Handy for diagnostics; writes change settings. |
 

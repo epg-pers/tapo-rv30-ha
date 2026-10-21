@@ -19,6 +19,8 @@ SETTING_GROUP_SWITCHES = [
      lambda c, v: c.set_auto_empty(v)),
     ("dnd", "Do Not Disturb", "mdi:bell-sleep", "dnd", "do_not_disturb",
      lambda c, v: c.set_dnd(do_not_disturb=v)),
+    ("auto_update", "Auto Firmware Update", "mdi:update", "auto_update", "enable",
+     lambda c, v: c.set_auto_update(v)),
 ]
 
 # Labels/icons for TapoVacuumClient.BOOL_SETTINGS; only the ones the robot answered get an entity.

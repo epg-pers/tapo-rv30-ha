@@ -147,9 +147,20 @@ VIRTUAL_WALL_COLOR = (200, 30, 30)
 CARPET_COLOR       = (205, 205, 205)
 ZONE_OUTLINE       = (40, 110, 220)       # saved clean zone
 FURNITURE_OUTLINE  = (120, 120, 120)
-# Furniture type codes as placed in the Tapo app. Only codes confirmed on a real
-# robot are named; everything else is reported as its number.
-FURNITURE_TYPES = {201: "Dining table"}
+# Auto-empty frequency (dust_collection_mode in get/setDustCollectionInfo).
+AUTO_EMPTY_MODES = {0: "smart", 1: "light", 2: "balanced", 3: "max"}
+
+# Furniture type codes as placed in the Tapo app (RobotFurnitureType in the app;
+# 201 also confirmed on a real robot). Unknown codes are reported as their number.
+FURNITURE_TYPES = {
+    1: "Single bed", 2: "Double bed",
+    101: "Single sofa", 102: "Double sofa", 103: "Sectional sofa",
+    201: "Table and chairs", 202: "Square table", 203: "End table",
+    301: "TV cabinet", 302: "Wardrobe", 303: "Bedside table",
+    401: "Refrigerator", 402: "Front-load washer", 403: "Vertical air conditioner",
+    503: "Green plants", 601: "Toilet",
+    701: "Pet house", 702: "Cat litter box", 703: "Pet bowl",
+}
 
 EVENT_CLEAN_STARTED  = "tapo_rv30_clean_started"
 EVENT_CLEAN_FINISHED = "tapo_rv30_clean_finished"
