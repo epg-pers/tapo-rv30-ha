@@ -40,7 +40,7 @@
   "services": {
     "clean_rooms": {
       "name": "Clean specific rooms",
-      "description": "Send the vacuum to clean one or more named rooms.",
+      "description": "Send the vacuum to clean one or more named rooms. Optional suction / water / passes apply to this run (they set the robot's current clean settings first).",
       "fields": {
         "rooms": {
           "name": "Rooms",
@@ -49,12 +49,24 @@
         "map": {
           "name": "Map",
           "description": "Optional map name to search in (e.g. \"Downstairs\"). Defaults to current map."
+        },
+        "suction": {
+          "name": "Suction",
+          "description": "Suction for this run (optional)."
+        },
+        "water": {
+          "name": "Water",
+          "description": "Water level for this run (optional)."
+        },
+        "passes": {
+          "name": "Passes",
+          "description": "Passes for this run, 1 to 3 (optional)."
         }
       }
     },
     "set_room_settings": {
       "name": "Set room settings",
-      "description": "Per-room suction / water / passes (what the app calls custom cleaning settings).",
+      "description": "Per-room suction / water / passes stored on the robot (the app's custom cleaning settings). RV30 Max Plus firmware 1.3.3 rejects this; there, use clean_rooms with suction / water / passes, or a preset.",
       "fields": {
         "rooms": {
           "name": "Rooms",

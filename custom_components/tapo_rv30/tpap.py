@@ -873,7 +873,16 @@ class TapoVacuumClient:
             "clean_order": True, "force_clean": False,
         })
 
-    def clean_rooms(self, room_ids: list[int], map_id: int, clean_order: bool = True) -> None:
+    def set_global_levels(self, **levels) -> None:
+        """suction / cistern / clean_number for the next runs (what the app's clean page sets)."""
+        cur = self.send("getCleanAttr", {"type": "global"})["result"]
+        cur.update(levels); cur["type"] = "global"
+        self.send("setCleanAttr", cur)
+
+    def clean_rooms(self, room_ids: list[int], map_id: int, clean_order: bool = True,
+                    levels: dict | None = None) -> None:
+        if levels:
+            self.set_global_levels(**levels)
         self.send("setSwitchClean", {
             "clean_mode":  3,
             "clean_on":    True,
@@ -1054,7 +1063,10 @@ class TapoVacuumClient:
         self.send("resetConsumablesTime", {"reset_list": [part]})
 
     def set_room_settings(self, map_id: int, changes: dict[int, dict]) -> None:
-        """The app sends every room with type 'custom'; unchanged rooms keep their values."""
+        """The app sends every room with type 'custom'; unchanged rooms keep their values.
+        RV30 Max Plus firmware 1.3.3 answers -1001 to every shape of this (and -1008 to
+        getCleanAttr type custom): on that firmware per-room settings only exist inside
+        presets made in the Tapo app. services.py turns the -1001 into a clear message."""
         rooms = [a for a in self.get_map_data(map_id).get("area_list", []) if a.get("type") == "room"]
         self.send("setCleanAttr", {"type": "custom", "area_list": [
             {"id": r["id"], "type": "room", "suction": r.get("suction"),

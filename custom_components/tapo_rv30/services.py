@@ -127,14 +127,23 @@ def async_setup_services(hass: HomeAssistant) -> None:
         for coord in _coordinators(hass, call):
             _require_idle(call, coord)
             room_ids, map_id = await _resolve(hass, call, coord)
-            await _send(hass, call, coord.client.clean_rooms, room_ids, map_id)
+            await _send(hass, call, coord.client.clean_rooms, room_ids, map_id, True, _levels(call) or None)
             await coord.async_refresh_soon()
 
     async def handle_set_room_settings(call: ServiceCall) -> None:
         for coord in _coordinators(hass, call):
             room_ids, map_id = await _resolve(hass, call, coord)
             lv = _levels(call)
-            await _send(hass, call, coord.client.set_room_settings, map_id, {rid: lv for rid in room_ids})
+            try:
+                await hass.async_add_executor_job(coord.client.set_room_settings, map_id, {rid: lv for rid in room_ids})
+            except Exception as exc:
+                if "-1001" in str(exc):
+                    raise ServiceValidationError(
+                        f"{call.service}: {coord.device_name}'s firmware does not store per-room settings "
+                        "(it rejects setCleanAttr type custom). Give suction / water / passes to "
+                        "tapo_rv30.clean_rooms for a single run, or save a preset in the Tapo app and use "
+                        "tapo_rv30.run_preset.") from exc
+                raise HomeAssistantError(f"{call.service}: vacuum rejected the command: {exc}") from exc
             await coord.async_request_refresh()
 
     async def handle_clean_zone(call: ServiceCall) -> None:

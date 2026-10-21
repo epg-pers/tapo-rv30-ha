@@ -37,7 +37,7 @@ through python-kasa.
   reauth from the integration page, a repair issue when the robot stops answering locally
 - Error state sensor (e.g. "Ok", "Dust Bin Removed", "Trapped")
 - Consumable wear sensors (main brush, side brush, filter, sensor, charge contacts)
-- Zone cleaning via `tapo_rv30.clean_zone` and per-room suction / water / passes via `tapo_rv30.set_room_settings`
+- Zone cleaning via `tapo_rv30.clean_zone`; suction / water / passes per run via `tapo_rv30.clean_rooms`, and per-room stored settings via `tapo_rv30.set_room_settings` where the firmware allows it
 - Empty Bin button (self-empty docks), Wash Mop / Dry Mop / Remove Hair buttons (Omni docks, created only when the dock answers) and consumable reset buttons
 - Auto Firmware Update switch, Auto Empty switch and Auto Empty Mode select (Smart / Light / Balanced / Max, self-empty docks), Do Not Disturb (with start / end times), Child Lock and Carpet Boost switches
 - Voice volume control
@@ -70,9 +70,9 @@ Click the button above, or manually:
 
 | Service | What it does |
 |---|---|
-| `tapo_rv30.clean_rooms` | Clean named rooms (partial match). Optional `map`. |
+| `tapo_rv30.clean_rooms` | Clean named rooms (partial match). Optional `map`, `suction`, `water`, `passes` for this run. |
 | `tapo_rv30.clean_zone` | Clean rectangles given in map mm, same frame as the `position_mm` attribute. |
-| `tapo_rv30.set_room_settings` | Per-room suction / water / passes. |
+| `tapo_rv30.set_room_settings` | Per-room suction / water / passes stored on the robot. Rejected by RV30 Max Plus firmware 1.3.3 (see below); use `clean_rooms` with levels or a preset there. |
 | `tapo_rv30.run_schedule` | Replay a saved schedule's rooms and settings now. The vacuum has no "run schedule by id" call, so the settings are re-sent and the clean started. |
 | `tapo_rv30.run_preset` | Start a preset saved in the Tapo app, by name or id. |
 | `tapo_rv30.set_map` | Switch the active map (multi-floor). |
@@ -197,6 +197,13 @@ The payload is:
 what the app uses for spot clean), `5` a saved preset (`custom_rule_id`, listed by
 `getCustomizationRulesInfo`). `room_list` holds the room ids, which are the pixel values
 in the LZ4 map. `tapo_rv30.send_raw` lets you try any method against your own robot.
+
+**Per-room settings.** The app writes them with `setCleanAttr {"type": "custom", "area_list":
+[...]}` (`RobotRepoClean.X2` in the app). RV30 Max Plus firmware 1.3.3 answers -1001 to every
+shape of that call, and -1008 to `getCleanAttr {"type": "custom"}`, so on that firmware the
+only per-room settings that stick are the ones inside a preset. `set_room_settings` stays for
+firmware that accepts it and explains itself when it is refused; the card's long-press sheet
+starts a clean of that room with the chosen levels instead.
 
 **Do not probe a robot while it is working.** On 2026-10-21 an RV30 Max Plus was sent a
 batch of read-only setup and backup queries lifted from the app (`getQsComponentList`,

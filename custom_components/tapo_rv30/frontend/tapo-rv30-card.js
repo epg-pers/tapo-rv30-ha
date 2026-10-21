@@ -10,7 +10,7 @@
  * the vacuum's device automatically.
  */
 
-const CARD_VERSION = "0.12.0";
+const CARD_VERSION = "0.12.1";
 const ROOM_COLORS = ["#ffb3ba", "#bae1ff", "#baffc9", "#ffffba", "#dcbaff", "#ffdcba", "#baffff"];
 
 const ICONS = {
@@ -478,7 +478,7 @@ class TapoRV30Card extends HTMLElement {
       seg("suction", [[1, "Quiet"], [2, "Standard"], [3, "Turbo"], [4, "Max"], [5, "Ultra"]]) +
       seg("water_level", [[0, "Off"], [1, "Low"], [2, "Medium"], [3, "High"]]) +
       seg("passes", [[1, "1"], [2, "2"], [3, "3"]]) +
-      `<button class="save">Save for ${g.name}</button></div>`;
+      `<button class="save">Clean ${g.name} now</button></div>`;
     sheet.onclick = (e) => { if (e.target === sheet) sheet.remove(); };
     sheet.querySelector(".x").onclick = () => sheet.remove();
     sheet.querySelectorAll(".seg button").forEach((b) => b.onclick = () => {
@@ -487,7 +487,7 @@ class TapoRV30Card extends HTMLElement {
     });
     const fan = ["", "quiet", "standard", "turbo", "max", "ultra"], water = ["off", "low", "medium", "high"];
     sheet.querySelector(".save").onclick = () => {
-      this._call("tapo_rv30", "set_room_settings", { rooms: [g.name], suction: fan[cur.suction], water: water[cur.water_level], passes: cur.passes }, { entity_id: this._config.entity });
+      this._call("tapo_rv30", "clean_rooms", { rooms: [g.name], suction: fan[cur.suction], water: water[cur.water_level], passes: cur.passes }, { entity_id: this._config.entity });
       sheet.remove();
     };
     this._el.mapwrap.appendChild(sheet);

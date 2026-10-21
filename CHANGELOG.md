@@ -1,6 +1,12 @@
 # Changelog
 
-## v0.12.0
+## v0.12.1
+
+### Fixed
+
+- `set_room_settings` on RV30 Max Plus firmware 1.3.3 failed with "Device error -1001": that firmware rejects the app's own per-room write, so it never worked there (it was listed as untested since 0.4). It now explains that and points at the alternatives.
+- `clean_rooms` takes optional `suction`, `water` and `passes` for the run. The card's long-press room sheet now starts a clean of that room with the chosen levels instead of trying to save them.
+
 
 Method names and value tables in this release were read from the Tapo Android app (3.22.105) and then verified on an RV30 Max Plus.
 
