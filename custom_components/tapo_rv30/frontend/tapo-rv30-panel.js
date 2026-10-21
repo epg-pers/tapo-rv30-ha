@@ -30,6 +30,7 @@ const STYLE = `
 .robots button.on { background: rgba(255,255,255,.35); }
 .wrap { display: grid; grid-template-columns: minmax(320px, 440px) 1fr; gap: 16px; padding: 16px; max-width: 1400px; margin: 0 auto; }
 .wrap.narrow { grid-template-columns: 1fr; padding: 8px; }
+.left, .right { min-width: 0; }
 .tabs { display: flex; gap: 4px; overflow-x: auto; scrollbar-width: none; margin-bottom: 12px; }
 .tabs button { flex: none; border: none; cursor: pointer; padding: 9px 14px; border-radius: 999px; font-size: .9em; display: flex; gap: 6px; align-items: center;
   background: color-mix(in srgb, var(--primary-text-color) 7%, transparent); color: var(--primary-text-color); }
@@ -103,7 +104,7 @@ class TapoRV30Panel extends HTMLElement {
     const first = !this._hass;
     this._hass = hass;
     if (first) this._boot();
-    else this._update();
+    else if (this._booted) this._update();
   }
 
   async _boot() {
@@ -121,6 +122,7 @@ class TapoRV30Panel extends HTMLElement {
     this.shadowRoot.querySelector(".menu").onclick = () =>
       this.dispatchEvent(new CustomEvent("hass-toggle-menu", { bubbles: true, composed: true }));
     this._layout();
+    this._booted = true;
     this._update(true);
   }
 
