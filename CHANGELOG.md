@@ -1,6 +1,15 @@
 # Changelog
 
-## v0.14.1
+## v0.15.0
+
+### New
+
+- **Furniture drawn on the map**: every item the app knows (beds, sofas, tables, TV cabinet, wardrobe, bedside table, fridge, washer, air conditioner, plants, toilet, pet house, litter box, pet bowl) gets its own glyph and label, rotated with the item. The glyphs are the integration's own drawings. Full type code table in the README.
+
+### Changed
+
+- Carpet Boost documented as the app's carpet cleaning preference (`setCarpetClean` boost / normal and `setCarpetAutoBoost` are the same setting on the RV30 Max Plus), so no separate select was added.
+
 
 ### Changed
 

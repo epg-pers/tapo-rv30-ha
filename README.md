@@ -26,7 +26,7 @@ through python-kasa.
 - Entities adapt to the model: optional settings (AI avoidance, re-mopping, pet deep clean, ...)
   appear only when the robot supports them
 - Live **map image** (transparent PNG, theme-friendly) with rooms, no-go zones, virtual walls,
-  carpets, saved zones, furniture, the robot and its cleaning path. `room_geometry` /
+  carpets, saved zones, furniture (drawn with the integration's own glyphs and labels: beds, sofas, tables, fridge, plants and the rest), the robot and its cleaning path. `room_geometry` /
   `map_geometry` attributes for custom cards
 - Fan speed selection (Quiet / Standard / Turbo / Max / Ultra)
 - Water level select (Off / Low / Medium / High)
@@ -42,7 +42,7 @@ through python-kasa.
 - Consumable wear sensors (main brush, side brush, filter, sensor, charge contacts)
 - Zone cleaning via `tapo_rv30.clean_zone`; suction / water / passes per run via `tapo_rv30.clean_rooms`, and per-room stored settings via `tapo_rv30.set_room_settings` where the firmware allows it
 - Empty Bin button (self-empty docks), Wash Mop / Dry Mop / Remove Hair buttons (Omni docks, created only when the dock answers) and consumable reset buttons
-- Auto Firmware Update switch, Auto Empty switch and Auto Empty Mode select (Smart / Light / Balanced / Max, self-empty docks), Do Not Disturb (with start / end times), Child Lock and Carpet Boost switches
+- Auto Firmware Update switch, Auto Empty switch and Auto Empty Mode select (Smart / Light / Balanced / Max, self-empty docks), Do Not Disturb (with start / end times), Child Lock and Carpet Boost switches (Carpet Boost is the app's carpet cleaning preference: boost / normal, the same setting under two device calls)
 - Voice volume control
 - Last Clean sensor with run totals
 - Config flow UI with reconfigure and reauth; diagnostics download for bug reports
@@ -256,8 +256,12 @@ map backup / recovery methods alone unless you can afford to remap.
 
 Furniture placed in the app comes back from `getFurnitureInfo {"map_id": <int>}` (and inside
 the map blob) as `{id, type, angle, vertexs}`; the map camera lists it in
-`map_geometry.furniture`. Type codes confirmed so far: `201` dining table. If you have other
-furniture on your map, open an issue with the code and what it is and it will be added.
+`map_geometry.furniture` with the type name, and the map draws each item with its own glyph.
+Type codes (from the app's `RobotFurnitureType`): 1 single bed, 2 double bed, 101 single
+sofa, 102 double sofa, 103 sectional sofa, 201 table and chairs, 202 square table, 203 end
+table, 301 TV cabinet, 302 wardrobe, 303 bedside table, 401 refrigerator, 402 front-load
+washer, 403 vertical air conditioner, 503 green plants, 601 toilet, 701 pet house, 702 cat
+litter box, 703 pet bowl. The glyphs are the integration's own drawings, not the app's icons.
 
 ## Credits
 

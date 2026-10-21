@@ -118,3 +118,16 @@ def test_render_record_marks_cleaned_cells_and_path():
     cleaned = img.getpixel((2 * MAP_SCALE + 1, (rec["height"] - 1 - 2) * MAP_SCALE + 1))[:3]
     skipped = img.getpixel((6 * MAP_SCALE + 1, (rec["height"] - 1 - 5) * MAP_SCALE + 1))[:3]
     assert cleaned == CLEANED_COLOR and skipped == RECORD_FLOOR
+
+
+def test_furniture_glyphs_every_type_renders():
+    from custom_components.tapo_rv30.const import FURNITURE_TYPES
+    from custom_components.tapo_rv30.maprender import FURNITURE_GLYPHS
+    assert set(FURNITURE_GLYPHS) == set(FURNITURE_TYPES)        # every named type has a glyph
+    md = _map()
+    md["furniture_list"] = [{"id": i, "type": t, "angle": 30 * i,
+                             "vertexs": [[-80, -80], [-20, -60], [-40, 0], [-100, -20]]}   # rotated quad
+                            for i, t in enumerate(FURNITURE_TYPES)]
+    img, _, geom = render_map(md)
+    assert len(geom["furniture"]) == len(FURNITURE_TYPES)
+    assert geom["furniture"][0]["angle"] == 0 and geom["furniture"][1]["angle"] == 30
