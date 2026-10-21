@@ -1,0 +1,57 @@
+site_name: Tapo Robot Vacuum for Home Assistant
+site_url: https://epg-pers.github.io/tapo-rv30-ha/
+site_description: Local-only Home Assistant integration for Tapo robot vacuums, with a bundled map card.
+repo_url: https://github.com/epg-pers/tapo-rv30-ha
+repo_name: epg-pers/tapo-rv30-ha
+edit_uri: edit/main/docs/
+docs_dir: docs
+# No nav block on purpose: every Markdown file in docs/ becomes a page, index.md first,
+# the rest alphabetically. Drop a file in, it is on the site after the next push.
+
+theme:
+  name: material
+  logo: assets/icon.png
+  favicon: assets/icon.png
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.top
+    - navigation.footer
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.action.edit
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: blue
+      accent: light blue
+      toggle:
+        icon: material/weather-night
+        name: Dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: blue
+      accent: light blue
+      toggle:
+        icon: material/weather-sunny
+        name: Light mode
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.superfences
+  - pymdownx.details
+  - pymdownx.tabbed:
+      alternate_style: true
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/epg-pers/tapo-rv30-ha
+    - icon: fontawesome/brands/home-assistant
+      link: https://my.home-assistant.io/redirect/hacs_repository/?owner=epg-pers&repository=tapo-rv30-ha&category=integration

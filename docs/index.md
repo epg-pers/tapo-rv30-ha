@@ -3,15 +3,15 @@
 Local-only control of TP-Link Tapo robot vacuums (RV20, RV30 Max Plus, RV30C, RV50 and
 relatives), with a live map card bundled in. No cloud, no extra downloads.
 
-[Install with HACS](https://my.home-assistant.io/redirect/hacs_repository/?owner=epg-pers&repository=tapo-rv30-ha&category=integration)
-or read the [project README](https://github.com/epg-pers/tapo-rv30-ha#readme) for the quick start.
+[Install with HACS](https://my.home-assistant.io/redirect/hacs_repository/?owner=epg-pers&repository=tapo-rv30-ha&category=integration){ .md-button .md-button--primary }
+[Project README](https://github.com/epg-pers/tapo-rv30-ha#readme){ .md-button }
 
 <p align="center">
   <img src="card.png" width="340" alt="The bundled card, rooms mode">
   <img src="card-status.png" width="340" alt="The card's status panel">
 </p>
 
-## Pages
+## What is where
 
 - [Entities](entities.md): everything the integration creates, by platform.
 - [Services and events](services.md): every service with its fields, the events, and the

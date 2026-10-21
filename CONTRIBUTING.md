@@ -49,6 +49,8 @@ to `main` once CI is green and the hardware checks pass.
 
 ## Docs
 
-The `docs/` folder is published as a site by GitHub Pages (Jekyll, no build step): any
-Markdown file added there appears on the site, and links between `.md` files turn into
-page links. `docs/index.md` is the landing page; add new pages to its list.
+The `docs/` folder is published at https://epg-pers.github.io/tapo-rv30-ha/ by the Docs
+workflow (Material for MkDocs, `mkdocs.yml` at the repo root). Any Markdown file added to
+`docs/` becomes a page on the next push to `main`; there is no nav list to maintain, pages
+are ordered alphabetically after the index. Links between `.md` files work as-is. To
+preview locally: `pip install mkdocs-material && mkdocs serve`.

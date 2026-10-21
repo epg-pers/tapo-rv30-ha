@@ -1,9 +1,0 @@
-title: Tapo Robot Vacuum for Home Assistant
-description: Local-only Home Assistant integration for Tapo robot vacuums, with a bundled map card.
-theme: jekyll-theme-cayman
-show_downloads: false
-plugins:
-  - jekyll-relative-links
-relative_links:
-  enabled: true
-  collections: true
