@@ -24,6 +24,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry,
     if c.has("dust_bucket") and "dust" in c.settings:
         entities.append(TapoEmptyBinButton(c, entry, "empty_bin", "Empty Bin"))
     entities += [TapoResetButton(c, entry, part, label) for part, label in RESETTABLE.items()]
+    entities += [TapoDockActionButton(c, entry, key) for key in c.dock_actions if key in DOCK_LABELS]
     async_add_entities(entities)
 
     # One button per preset; presets added in the app later appear on the next refresh.
@@ -38,6 +39,24 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry,
 
     _sync_presets()
     entry.async_on_unload(c.async_add_listener(_sync_presets))
+
+
+DOCK_LABELS = {"wash_mop": ("Wash Mop", "mdi:washing-machine"), "dry_mop": ("Dry Mop", "mdi:hair-dryer"),
+               "remove_hair": ("Remove Hair", "mdi:content-cut")}
+
+
+class TapoDockActionButton(TapoEntity, ButtonEntity):
+    """Omni-dock actions; only created when the robot answers the matching getter."""
+
+    def __init__(self, coordinator, entry, key: str) -> None:
+        name, icon = DOCK_LABELS[key]
+        super().__init__(coordinator, entry, f"dock_{key}", name)
+        self._attr_icon = icon
+        self._key = key
+
+    async def async_press(self) -> None:
+        await self._call(self.coordinator.client.dock_action, self._key)
+        await self.coordinator.async_refresh_soon()
 
 
 class TapoEmptyBinButton(TapoEntity, ButtonEntity):

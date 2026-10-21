@@ -65,6 +65,7 @@ class TapoCoordinator(DataUpdateCoordinator):
         self.schedules: list[dict] = []
         self.components: dict[str, int] = {}       # getComponentList, read once
         self.bool_settings_supported: list[str] = []   # probed once
+        self.dock_actions: list[str] = []              # probed once (Omni docks)
         self.bool_settings: dict[str, bool] = {}
         self.presets: list[dict] = []
         self._caps_fetched = False
@@ -239,6 +240,10 @@ class TapoCoordinator(DataUpdateCoordinator):
             self.bool_settings = probed
         except Exception as exc:
             _LOGGER.debug("Settings probe failed: %s", exc)
+        try:
+            self.dock_actions = await self.hass.async_add_executor_job(self.client.probe_dock_actions)
+        except Exception as exc:
+            _LOGGER.debug("Dock probe failed: %s", exc)
         self._caps_fetched = True
 
     async def _refresh_settings(self) -> None:

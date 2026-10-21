@@ -992,6 +992,28 @@ class TapoVacuumClient:
     def empty_bin(self) -> None:
         self.send("setSwitchDustCollection", {"switch_dust_collection": True})
 
+    # Omni-dock actions (getter used to detect support, setter to trigger). From
+    # cavefire/tapo-vacuum-ha and jan-tdy/TapoVac-ADV, confirmed on an RV50 Pro Omni there.
+    DOCK_ACTIONS = {
+        "wash_mop":    ("getBackWashMode", "setWashMopSwitch", "switch_wash_mop"),
+        "dry_mop":     ("getDryMopMode", "setDryMopSwitch", "switch_dry_mop"),
+        "remove_hair": ("getCutHairMode", "setCutHairSwitch", "switch_cut_hair"),
+    }
+
+    def probe_dock_actions(self) -> list[str]:
+        out = []
+        for key, (getter, _, _) in self.DOCK_ACTIONS.items():
+            try:
+                self.send(getter)
+                out.append(key)
+            except Exception as exc:
+                _LOGGER.debug("%s not supported: %s", getter, exc)
+        return out
+
+    def dock_action(self, key: str) -> None:
+        _, setter, field = self.DOCK_ACTIONS[key]
+        self.send(setter, {field: True})
+
     def set_auto_empty(self, on: bool) -> None:
         self._merge_set("getDustCollectionInfo", "setDustCollectionInfo", auto_dust_collection=on)
 

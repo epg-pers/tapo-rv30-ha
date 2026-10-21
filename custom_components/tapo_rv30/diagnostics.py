@@ -46,6 +46,7 @@ async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: ConfigE
     }
     out["schedules"] = coord.schedules
     out["components"] = coord.components
+    out["dock_actions"] = coord.dock_actions
     out["bool_settings"] = coord.bool_settings
     out["presets"] = coord.presets
     return out

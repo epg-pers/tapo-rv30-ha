@@ -46,6 +46,12 @@ ha-card { overflow: hidden; }
   background: color-mix(in srgb, var(--error-color, #db4437) 14%, transparent); color: var(--error-color, #db4437); }
 .mapwrap { position: relative; margin: 6px 12px; border-radius: 14px; overflow: hidden;
   background: color-mix(in srgb, var(--primary-text-color) 5%, transparent); }
+.stage { position: relative; }
+.stage.r90, .stage.r270 { aspect-ratio: var(--map-h) / var(--map-w); }
+.stage.r90 canvas, .stage.r270 canvas { position: absolute; left: 50%; top: 50%; width: auto; height: 100%; max-width: none; transform-origin: center; }
+.stage.r90 canvas { transform: translate(-50%, -50%) rotate(90deg); }
+.stage.r270 canvas { transform: translate(-50%, -50%) rotate(270deg); }
+.stage.r180 canvas { transform: rotate(180deg); }
 canvas { display: block; width: 100%; height: auto; touch-action: none; cursor: crosshair; }
 .hint { position: absolute; left: 10px; top: 10px; font-size: .78em; padding: 4px 9px; border-radius: 999px;
   background: color-mix(in srgb, var(--card-background-color) 75%, transparent); color: var(--secondary-text-color);
@@ -114,7 +120,7 @@ class TapoRV30Card extends HTMLElement {
 
   setConfig(config) {
     if (!config || !config.entity) throw new Error("Set 'entity' to your vacuum (vacuum.xxx)");
-    this._config = { show_presets: true, show_controls: true, ...config };
+    this._config = { show_presets: true, show_controls: true, rotate: 0, ...config };
     this._related = null;
     this._build();
   }
@@ -185,7 +191,7 @@ class TapoRV30Card extends HTMLElement {
       <div class="progress" hidden><div></div></div>
       <div class="banner" hidden><ha-icon icon="${ICONS.alert}"></ha-icon><span></span></div>
       <div class="mapwrap">
-        <canvas></canvas>
+        <div class="stage"><canvas></canvas></div>
         <div class="hint"></div>
         <div class="tools">
           <button class="t-rooms" title="Select rooms"><ha-icon icon="${ICONS.rooms}"></ha-icon></button>
@@ -204,7 +210,7 @@ class TapoRV30Card extends HTMLElement {
       banner: root.querySelector(".banner"), canvas: root.querySelector("canvas"), hint: root.querySelector(".hint"),
       tRooms: root.querySelector(".t-rooms"), tZone: root.querySelector(".t-zone"), tClear: root.querySelector(".t-clear"),
       go: root.querySelector(".go"), chips: root.querySelector(".chips"), controls: root.querySelector(".controls"),
-      mapwrap: root.querySelector(".mapwrap"), floors: root.querySelector(".floors"),
+      mapwrap: root.querySelector(".mapwrap"), floors: root.querySelector(".floors"), stage: root.querySelector(".stage"),
     };
     this._el.tRooms.onclick = () => this._setMode("rooms");
     this._el.tZone.onclick = () => this._setMode("zone");
@@ -215,6 +221,9 @@ class TapoRV30Card extends HTMLElement {
     c.addEventListener("pointermove", (e) => this._move(e));
     c.addEventListener("pointerup", (e) => this._up(e));
     c.addEventListener("pointercancel", () => { this._drag = null; });
+    const rot = [90, 180, 270].includes(Number(this._config.rotate)) ? Number(this._config.rotate) : 0;
+    this._rot = rot;
+    if (rot) this._el.stage.classList.add(`r${rot}`);
     this._setMode("rooms");
   }
 
@@ -367,7 +376,10 @@ class TapoRV30Card extends HTMLElement {
   _draw() {
     const c = this._el.canvas, img = this._img;
     if (!img) return;
-    if (c.width !== img.naturalWidth || c.height !== img.naturalHeight) { c.width = img.naturalWidth; c.height = img.naturalHeight; }
+    if (c.width !== img.naturalWidth || c.height !== img.naturalHeight) {
+      c.width = img.naturalWidth; c.height = img.naturalHeight;
+      this._el.stage.style.setProperty("--map-w", c.width); this._el.stage.style.setProperty("--map-h", c.height);
+    }
     const ctx = c.getContext("2d");
     ctx.clearRect(0, 0, c.width, c.height);
     ctx.drawImage(img, 0, 0);
@@ -435,7 +447,13 @@ class TapoRV30Card extends HTMLElement {
   // ---- interaction -----------------------------------------------------------------------
   _canvasPoint(e) {
     const c = this._el.canvas, b = c.getBoundingClientRect();
-    return [(e.clientX - b.left) * c.width / b.width, (e.clientY - b.top) * c.height / b.height];
+    // b is the rotated element's box; map the pointer back into canvas space.
+    const nx = (e.clientX - b.left) / b.width, ny = (e.clientY - b.top) / b.height;
+    let u = nx, v = ny;
+    if (this._rot === 90) { u = ny; v = 1 - nx; }
+    else if (this._rot === 180) { u = 1 - nx; v = 1 - ny; }
+    else if (this._rot === 270) { u = 1 - ny; v = nx; }
+    return [u * c.width, v * c.height];
   }
 
   _down(e) {
@@ -572,8 +590,10 @@ class TapoRV30CardEditor extends HTMLElement {
         { name: "name", selector: { text: {} } },
         { name: "show_presets", selector: { boolean: {} } },
         { name: "show_controls", selector: { boolean: {} } },
+        { name: "rotate", selector: { select: { mode: "dropdown", options: [
+          { value: 0, label: "0°" }, { value: 90, label: "90°" }, { value: 180, label: "180°" }, { value: 270, label: "270°" }] } } },
       ];
-      this._form.computeLabel = (s) => ({ entity: "Vacuum", name: "Name (optional)", show_presets: "Show presets", show_controls: "Show controls" }[s.name] || s.name);
+      this._form.computeLabel = (s) => ({ entity: "Vacuum", name: "Name (optional)", show_presets: "Show presets", show_controls: "Show controls", rotate: "Rotate map" }[s.name] || s.name);
       this._form.addEventListener("value-changed", (e) => {
         this._config = { ...this._config, ...e.detail.value };
         this.dispatchEvent(new CustomEvent("config-changed", { detail: { config: this._config }, bubbles: true, composed: true }));
@@ -581,7 +601,7 @@ class TapoRV30CardEditor extends HTMLElement {
       this.appendChild(this._form);
     }
     this._form.hass = this._hass;
-    this._form.data = { show_presets: true, show_controls: true, ...this._config };
+    this._form.data = { show_presets: true, show_controls: true, rotate: 0, ...this._config };
   }
 }
 
