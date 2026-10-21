@@ -1,6 +1,6 @@
 site_name: Tapo Robot Vacuum for Home Assistant
 site_url: https://epg-pers.github.io/tapo-rv30-ha/
-site_description: Local-only Home Assistant integration for Tapo robot vacuums, with a bundled map card.
+site_description: Local-only Home Assistant integration for TP-Link Tapo robot vacuums (RV20, RV30, RV30C, RV50) with a live map card, a sidebar page, schedules editor and remote drive. No cloud.
 repo_url: https://github.com/epg-pers/tapo-rv30-ha
 repo_name: epg-pers/tapo-rv30-ha
 edit_uri: edit/main/docs/
