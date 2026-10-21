@@ -9,7 +9,7 @@ model, firmware, Home Assistant version, integration version, the diagnostics do
 (Settings, Devices and services, Tapo Robot Vacuum, the three-dot menu, Download
 diagnostics; credentials are redacted) and the relevant lines from Settings, System, Logs.
 
-If a method on your robot answers differently from what the README's protocol notes say,
+If a method on your robot answers differently from what `docs/protocol.md` says,
 include the raw response from `tapo_rv30.send_raw` with "Return response" ticked in
 Developer Tools. That is how most model differences get found.
 
@@ -29,7 +29,7 @@ Push your branch and point HACS at it: in HACS open the integration, choose Redo
 pick the branch name as the version, then restart Home Assistant. The map, services and
 entities can then be checked against hardware.
 
-Two rules learned the hard way, see the README's protocol notes:
+Two rules learned the hard way, see `docs/protocol.md`:
 
 1. Never send unknown, setup, inherit, commissioning or map backup / recovery methods to a
    robot while it is cleaning, returning or paused. A batch of such reads during a run
