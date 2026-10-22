@@ -66,7 +66,7 @@ between March and August 2026. Checked on 2026-10-22 against TapoVac-ADV 3.0.3 b
 |---|:---:|:---:|
 | Local TPAP control, rooms, zones, spot, presets, `run_schedule`, native `vacuum.clean_area`, dock buttons, raw send | buggy (has regression) | yes |
 | Bundled map card (tap rooms, draw zones, floors) | yes | separate card project (H.A. Design) |
-| Live cleaning path and last clean map | yes | yes |
+| Live cleaning path and last clean map | yes | yes (nicer) |
 | Per-room "last cleaned" and coverage | yes | yes |
 | Sidebar page (schedules editor, history, drive, maintenance, settings) | yes | no (and not planned) |
 | Add / edit / remove the robot's own schedules | yes | yes |
