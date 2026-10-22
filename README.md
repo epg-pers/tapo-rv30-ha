@@ -80,7 +80,7 @@ its code, so this is what shipped on that day, not a promise about tomorrow.
 | Network discovery, follows IP changes | yes | yes |
 | Dashboard strategy (whole dashboard in one line) | yes | yes |
 | Tests and CI (hassfest, HACS, lint, unit tests) | yes | yes |
-| Documentation site | yes | README |
+| Documentation site | yes (incomplete) | README |
 
 Moving over keeps your entities and dashboards; see
 [switching from a fork](https://epg-pers.github.io/tapo-rv30-ha/troubleshooting/#switching-from-a-fork).
