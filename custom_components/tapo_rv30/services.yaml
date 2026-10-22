@@ -160,6 +160,16 @@ get_clean_records:
         number:
           min: 1
           max: 100
+cloud_firmware_info:
+  target:
+    entity:
+      domain: vacuum
+      integration: tapo_rv30
+  fields:
+    current_version:
+      example: 1.3.2 Build 250101 Rel.000000
+      selector:
+        text: {}
 fetch_cloud_map_backups:
   target:
     entity:

@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.21.0b11
+
+### New
+
+- `tapo_rv30.cloud_firmware_info` (diagnostic, read-only): what TP-Link's firmware service offers this robot.
+
+### Fixed
+
+- The beta map actions are removed cleanly when the integration unloads.
+
 ## v0.21.0b10
 
 ### Changed

@@ -367,6 +367,16 @@
           "description": "Try even if the robot no longer lists this map (for recovering a deleted or lost map; experimental)."
         }
       }
+    },
+    "cloud_firmware_info": {
+      "name": "Cloud firmware info (diagnostic)",
+      "description": "Read-only. Ask TP-Link's firmware service what it offers this robot's hardware, as if it ran the given version.",
+      "fields": {
+        "current_version": {
+          "name": "Current version",
+          "description": "Version to report (default: a very old one)."
+        }
+      }
     }
   },
   "issues": {

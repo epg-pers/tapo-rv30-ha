@@ -17,7 +17,7 @@ _LOGGER = logging.getLogger(__name__)
 SERVICES = ("clean_rooms", "set_room_settings", "clean_zone", "run_schedule", "send_raw",
             "get_clean_records", "run_preset", "set_map", "go_to",
             "add_schedule", "set_schedule", "remove_schedule", "remove_matter_fabric",
-            "fetch_cloud_map_backups")
+            "fetch_cloud_map_backups", "restore_map_backup", "cloud_firmware_info")
 
 
 # Methods the integration itself calls while the robot is working.
@@ -539,6 +539,25 @@ def async_setup_services(hass: HomeAssistant) -> None:
         await coord.async_request_map_refresh()
         return out
 
+    async def handle_cloud_firmware_info(call: ServiceCall) -> ServiceResponse:
+        import uuid
+
+        from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
+
+        from .cloud import CloudError, firmware_info
+        coord = _one(hass, call)
+        if coord.entry is None:
+            raise ServiceValidationError(f"{call.service}: no config entry")
+        terminal = str(uuid.uuid5(uuid.NAMESPACE_URL, f"{DOMAIN}:{coord.entry.entry_id}"))
+        try:
+            return await hass.async_add_executor_job(
+                firmware_info, coord.client, coord.entry.data[CONF_USERNAME], coord.entry.data[CONF_PASSWORD],
+                terminal, call.data.get("current_version") or "1.0.0 Build 000000 Rel.000000")
+        except CloudError as exc:
+            raise HomeAssistantError(f"{call.service}: {exc}") from exc
+
+    hass.services.async_register(DOMAIN, "cloud_firmware_info", handle_cloud_firmware_info,
+                                 supports_response=SupportsResponse.ONLY)
     hass.services.async_register(DOMAIN, "fetch_cloud_map_backups", handle_fetch_cloud_map_backups,
                                  supports_response=SupportsResponse.ONLY)
     hass.services.async_register(DOMAIN, "restore_map_backup", handle_restore_map_backup,
