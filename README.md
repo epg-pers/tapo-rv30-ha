@@ -60,10 +60,9 @@ Same domain, so your config entry and entities carry over; see
 
 Several forks of this project exist. The only one still maintained is
 [jan-tdy/TapoVac-ADV](https://github.com/jan-tdy/TapoVac-ADV); the others last changed
-between March and August 2026. Checked on 2026-10-22 against TapoVac-ADV 3.0.0 by reading
-its code, so this is what shipped on that day, not a promise about tomorrow.
+between March and August 2026. Checked on 2026-10-22 against TapoVac-ADV 3.0.3 by its author, so this is what shipped on that day, not a promise about tomorrow.
 
-| | This project | TapoVac-ADV 3.0.0 |
+| | This project | TapoVac-ADV 3.0.3 |
 |---|:---:|:---:|
 | Local TPAP control, rooms, zones, spot, presets, `run_schedule`, native `vacuum.clean_area`, dock buttons, raw send | buggy (has regression) | yes |
 | Bundled map card (tap rooms, draw zones, floors) | yes | separate card project (H.A. Design) |
