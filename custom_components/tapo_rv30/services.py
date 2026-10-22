@@ -480,6 +480,20 @@ def async_setup_services(hass: HomeAssistant) -> None:
                 url = base.rstrip("/") + url_path
                 out.update(file=os.path.basename(path), url=base.rstrip("/") + "/api/tapo_rv30/map_backup/...")
             out["md5"] = md5
+            if call.data.get("dry_run"):
+                # Serve the file but leave the robot alone, to check what a download returns.
+                if source == "local":
+                    out["url"] = url
+                else:
+                    import hashlib
+
+                    import requests
+                    resp = await hass.async_add_executor_job(
+                        lambda: requests.get(url, timeout=30, headers={"User-Agent": "SHIP/2.0"}))
+                    out["cloud_headers"] = {k: v for k, v in resp.headers.items() if not k.lower().startswith("x-amz-id")}
+                    out["cloud_status"] = resp.status_code
+                    out["cloud_body_md5"] = hashlib.md5(resp.content).hexdigest()
+                return out
             resp = await hass.async_add_executor_job(
                 coord.client.send, "mapRecovery", {"map_id": map_id, "map_md5": md5, "url": url})
             out["mapRecovery"] = resp

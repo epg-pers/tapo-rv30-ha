@@ -202,6 +202,10 @@ restore_map_backup:
           min: 0
           max: 600
           unit_of_measurement: s
+    dry_run:
+      default: false
+      selector:
+        boolean: {}
     confirm:
       required: true
       default: false

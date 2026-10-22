@@ -39,7 +39,11 @@ class MapBackupView(HomeAssistantView):
         link["hits"].append({"from": request.remote, "at": time.time(),
                              "range": request.headers.get("Range"), "agent": request.headers.get("User-Agent")})
         _LOGGER.info("Map backup %s fetched by %s", link["name"], request.remote)
-        return web.Response(body=link["data"], content_type="application/octet-stream")
+        # Headers as TP-Link's storage sends them; no-transform keeps proxies from
+        # re-encoding the body.
+        return web.Response(body=link["data"], content_type="application/octet-stream", headers={
+            "ETag": f'"{link["md5"]}"', "Accept-Ranges": "bytes", "Cache-Control": "no-transform",
+            "Content-Disposition": f'attachment; filename="{link["name"]}"'})
 
 
 def serve_data(hass: HomeAssistant, name: str, data: bytes) -> tuple[str, str, dict]:
@@ -51,6 +55,7 @@ def serve_data(hass: HomeAssistant, name: str, data: bytes) -> tuple[str, str, d
     for tok in [t for t, v in links.items() if v["expires"] < time.monotonic()]:
         links.pop(tok)
     token = secrets.token_urlsafe(24)
-    link = {"data": data, "name": name, "expires": time.monotonic() + LINK_SECONDS, "hits": []}
+    md5 = hashlib.md5(data).hexdigest()
+    link = {"data": data, "name": name, "md5": md5, "expires": time.monotonic() + LINK_SECONDS, "hits": []}
     links[token] = link
-    return f"/api/tapo_rv30/map_backup/{token}", hashlib.md5(data).hexdigest(), link
+    return f"/api/tapo_rv30/map_backup/{token}", md5, link

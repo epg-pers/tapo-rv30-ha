@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.21.0b6
+
+### Changed
+
+- Restore map backup: serves the file with the same kind of headers as TP-Link's storage, and has a `dry_run` option for checking the download without touching the robot. Testing so far: restoring from TP-Link's copy works; the robot downloads Home Assistant's copy only over HTTPS with a valid certificate, and only restores the active map.
+
 ## v0.21.0b5
 
 ### New

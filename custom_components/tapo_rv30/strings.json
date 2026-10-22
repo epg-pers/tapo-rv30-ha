@@ -357,6 +357,10 @@
         "confirm": {
           "name": "Confirm",
           "description": "Required: this overwrites the map on the robot."
+        },
+        "dry_run": {
+          "name": "Dry run",
+          "description": "Prepare the download but do not send anything to the robot (for checking what it would receive)."
         }
       }
     }
