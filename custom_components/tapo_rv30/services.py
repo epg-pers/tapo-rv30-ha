@@ -493,6 +493,9 @@ def async_setup_services(hass: HomeAssistant) -> None:
                     out["cloud_headers"] = {k: v for k, v in resp.headers.items() if not k.lower().startswith("x-amz-id")}
                     out["cloud_status"] = resp.status_code
                     out["cloud_body_md5"] = hashlib.md5(resp.content).hexdigest()
+                    from urllib.parse import urlparse
+                    parsed = urlparse(url)
+                    out["cloud_host"], out["cloud_path"] = parsed.hostname, parsed.path
                 return out
             resp = await hass.async_add_executor_job(
                 coord.client.send, "mapRecovery", {"map_id": map_id, "map_md5": md5, "url": url})

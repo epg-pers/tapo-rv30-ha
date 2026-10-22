@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.21.0b7
+
+### Changed
+
+- Restore map backup: the download link answers HEAD and byte-range requests like a storage bucket, ends in the backup's file name, and logs every request the robot makes.
+
 ## v0.21.0b6
 
 ### Changed
