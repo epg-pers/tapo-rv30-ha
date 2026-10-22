@@ -326,7 +326,13 @@
     },
     "fetch_cloud_map_backups": {
       "name": "Fetch cloud map backups",
-      "description": "Read-only. Logs in to your TP-Link account, downloads the map backups made with the Tapo app's backup feature, and saves them in config/tapo_rv30/map_backups (with the robot's current local map data for comparison when it is idle). Nothing is sent to the robot except routine reads."
+      "description": "Read-only. Logs in to your TP-Link account, downloads the map backups made with the Tapo app's backup feature, and saves them in config/tapo_rv30/map_backups (with the robot's current local map data for comparison when it is idle). Nothing is sent to the robot except routine reads.",
+      "fields": {
+        "verification_code": {
+          "name": "Verification code",
+          "description": "Only when the first run says TP-Link emailed you a code: enter it here and run again."
+        }
+      }
     }
   },
   "issues": {

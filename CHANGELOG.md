@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.21.0b3
+
+### New
+
+- Fetch cloud map backups: supports TP-Link two-step login. The first run emails you a code; run it again with `verification_code` and Home Assistant becomes a trusted device, so later runs need no code.
+
 ## v0.21.0b2
 
 ### Fixed

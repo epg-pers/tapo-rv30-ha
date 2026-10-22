@@ -427,7 +427,7 @@ def async_setup_services(hass: HomeAssistant) -> None:
         try:
             return await hass.async_add_executor_job(
                 fetch_backups, coord.client, coord.entry.data[CONF_USERNAME], coord.entry.data[CONF_PASSWORD],
-                terminal, folder, not coord.busy)
+                terminal, folder, not coord.busy, call.data.get("verification_code"))
         except CloudError as exc:
             raise HomeAssistantError(f"{call.service}: {exc}") from exc
         except Exception as exc:

@@ -36,8 +36,21 @@ ACCOUNT_HOSTS = ("https://n-wap.i.tplinkcloud.com", "https://n-wap-gw.tplinkclou
 TIMEOUT = 30
 
 
+MFA_EMAIL = 2
+
+# Two-step logins waiting for their emailed code: terminal UUID -> (process id, app server).
+_PENDING: dict[str, tuple[str, str]] = {}
+
+
 class CloudError(Exception):
     """A TP-Link cloud request failed (message is safe to show)."""
+
+
+class MfaRequired(CloudError):
+    def __init__(self, process_id: str, types: list[int]) -> None:
+        super().__init__("TP-Link wants a two-step verification code")
+        self.process_id = process_id
+        self.types = types
 
 
 def _signed_headers(path: str, body: bytes) -> dict[str, str]:
@@ -124,15 +137,33 @@ class TapoCloud:
                 "terminalUUID": self._terminal, "terminalName": "Home Assistant",
                 "terminalMeta": "1",
             }, "login")
+            self.app_server = server
             if not result or not result.get("token"):
-                if result and (result.get("MFAProcessId") or result.get("supportedMFATypes")):
-                    raise CloudError("TP-Link asked for a verification code (two-step login); "
-                                     "this is not supported yet")
+                if result and result.get("MFAProcessId"):
+                    raise MfaRequired(result["MFAProcessId"], result.get("supportedMFATypes") or [])
                 raise CloudError(f"login: no token (fields {sorted(result or {})})")
             self.token = result["token"]
             self.app_server = result.get("appServerUrl") or server
             return
         raise CloudError("account lookup failed: " + "; ".join(errors))
+
+    def request_email_code(self) -> None:
+        """Ask TP-Link to email a two-step login code (as the app's "email me a code")."""
+        self._account_post(self.app_server, "/api/v2/account/getEmailVC4TerminalMFA", {
+            "appType": APP_TYPE, "cloudUserName": self._username, "cloudPassword": self._password,
+            "terminalUUID": self._terminal, "locale": "en_GB",
+        }, "request code")
+
+    def finish_mfa(self, process_id: str, code: str) -> None:
+        """Log in with the emailed code. Trusts this terminal, so later logins skip the code."""
+        result = self._account_post(self.app_server, "/api/v2/account/checkMFACodeAndLogin", {
+            "appType": APP_TYPE, "cloudUserName": self._username, "code": code,
+            "MFAProcessId": process_id, "MFAType": MFA_EMAIL, "terminalBindEnabled": True,
+        }, "verification code")
+        if not result or not result.get("token"):
+            raise CloudError(f"verification code: no token (fields {sorted(result or {})})")
+        self.token = result["token"]
+        self.app_server = result.get("appServerUrl") or self.app_server
 
     def _get(self, url: str, what: str, **params: Any) -> Any:
         resp = self._http.get(url, params=params or None, timeout=TIMEOUT, headers={
@@ -166,14 +197,31 @@ class TapoCloud:
 
 
 def fetch_backups(client, username: str, password: str, terminal_uuid: str, folder: str,
-                  local_reads: bool) -> dict:
+                  local_reads: bool, code: str | None = None) -> dict:
     """Blocking: save every cloud map backup of this robot (plus, when the robot is idle,
-    its current local getMapData for the same maps) into folder, and summarise."""
+    its current local getMapData for the same maps) into folder, and summarise.
+
+    If TP-Link wants a two-step code, one is emailed and {"status": "code_sent"} is
+    returned; call again with code= to finish (HA is then a trusted device)."""
     import time
 
     info = client.send("get_device_info")["result"]
     cloud = TapoCloud(username, password, terminal_uuid)
-    cloud.login()
+    if code:
+        if terminal_uuid not in _PENDING:
+            raise CloudError("no verification code was requested; run without a code first")
+        process_id, cloud.app_server = _PENDING.pop(terminal_uuid)
+        cloud.finish_mfa(process_id, code.strip())
+    else:
+        try:
+            cloud.login()
+        except MfaRequired as exc:
+            if MFA_EMAIL not in exc.types:
+                raise CloudError(f"TP-Link wants a two-step code but not by email (types {exc.types})") from exc
+            cloud.request_email_code()
+            _PENDING[terminal_uuid] = (exc.process_id, cloud.app_server)
+            return {"status": "code_sent", "message": "TP-Link emailed you a verification code. Run this "
+                    "action again with verification_code set to it."}
     things = cloud.things()
     thing = pick_thing(things, info.get("device_id"), info.get("mac"))
     if thing is None:
@@ -182,7 +230,7 @@ def fetch_backups(client, username: str, password: str, terminal_uuid: str, fold
     backups = cloud.map_backups(thing)
     os.makedirs(folder, exist_ok=True)
     stamp = time.strftime("%Y%m%d-%H%M%S")
-    out = {"folder": folder, "backups": [], "local": []}
+    out = {"status": "ok", "folder": folder, "backups": [], "local": []}
     for b in backups:
         map_id, ts = b.get("mapId"), b.get("timestamp")
         entry = {"map_id": map_id, "timestamp": ts, "cloud_md5": b.get("mapMd5")}
