@@ -60,25 +60,25 @@ Same domain, so your config entry and entities carry over; see
 
 Several forks of this project exist. The only one still maintained is
 [jan-tdy/TapoVac-ADV](https://github.com/jan-tdy/TapoVac-ADV); the others last changed
-between March and August 2026. Checked on 2026-10-21 against TapoVac-ADV 2.5.1 by reading
+between March and August 2026. Checked on 2026-10-22 against TapoVac-ADV 2.6.0 by reading
 its code, so this is what shipped on that day, not a promise about tomorrow.
 
-| | This project | TapoVac-ADV 2.5.1 |
+| | This project | TapoVac-ADV 2.6.0 |
 |---|:---:|:---:|
 | Local TPAP control, rooms, zones, spot, presets, `run_schedule`, native `vacuum.clean_area`, dock buttons, raw send | yes | yes |
 | Bundled map card (tap rooms, draw zones, floors) | yes | separate card project |
-| Live cleaning path and last clean map | yes | no |
-| Per-room "last cleaned" and coverage | yes | no |
-| Sidebar page (schedules editor, history, drive, maintenance, settings) | yes | no |
-| Add / edit / remove the robot's own schedules | yes | read only |
-| Do Not Disturb aware schedules | yes | no |
-| Remote drive (joystick) | yes | no |
-| Go to a point | yes | no |
-| Furniture on the map | yes | no |
-| Matter pairing state, code and window | yes | no |
-| Voice (Assist sentences), device triggers, blueprints | yes | no |
-| Network discovery, follows IP changes | yes | no |
-| Dashboard strategy (whole dashboard in one line) | yes | no |
+| Live cleaning path and last clean map | yes | yes |
+| Per-room "last cleaned" and coverage | yes | yes |
+| Sidebar page (schedules editor, history, drive, maintenance, settings) | yes | no (and not planned) |
+| Add / edit / remove the robot's own schedules | yes | yes |
+| Do Not Disturb aware schedules | yes | yes |
+| Remote drive (joystick) | yes | yes |
+| Go to a point | yes | yes |
+| Furniture on the map | yes |yes |
+| Matter pairing state, code and window | yes | yes |
+| Voice (Assist sentences), device triggers, blueprints | yes | yes |
+| Network discovery, follows IP changes | yes | yes |
+| Dashboard strategy (whole dashboard in one line) | yes | yes |
 | Tests and CI (hassfest, HACS, lint, unit tests) | yes | yes |
 | Documentation site | yes | README |
 
