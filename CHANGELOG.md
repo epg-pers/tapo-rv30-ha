@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.21.0b5
+
+### New
+
+- **Restore map backup** (`tapo_rv30.restore_map_backup`, beta, being tested on a spare map). Restores a map from its backup as the Tapo app does, either from TP-Link's copy or from the copy saved in Home Assistant (served to the robot from a one-time link). Needs the robot docked and idle and `confirm: true`.
+- Downloaded backups are now saved as `.bin` (they are the robot's own binary backup format, not JSON).
+
 ## v0.21.0b4
 
 ### Fixed

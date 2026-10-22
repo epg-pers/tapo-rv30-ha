@@ -208,15 +208,10 @@ class TapoCloud:
         return resp.content
 
 
-def fetch_backups(client, username: str, password: str, terminal_uuid: str, folder: str,
-                  local_reads: bool, code: str | None = None) -> dict:
-    """Blocking: save every cloud map backup of this robot (plus, when the robot is idle,
-    its current local getMapData for the same maps) into folder, and summarise.
-
-    If TP-Link wants a two-step code, one is emailed and {"status": "code_sent"} is
-    returned; call again with code= to finish (HA is then a trusted device)."""
-    import time
-
+def _connect(client, username: str, password: str, terminal_uuid: str,
+             code: str | None = None) -> tuple[TapoCloud, dict]:
+    """Logged-in cloud session plus this robot's cloud device entry. Raises MfaRequired
+    after emailing a code when TP-Link wants one (finish with code=)."""
     info = client.send("get_device_info")["result"]
     cloud = TapoCloud(username, password, terminal_uuid)
     if code:
@@ -232,14 +227,49 @@ def fetch_backups(client, username: str, password: str, terminal_uuid: str, fold
                 raise CloudError(f"TP-Link wants a two-step code but not by email (types {exc.types})") from exc
             cloud.request_email_code()
             _PENDING[terminal_uuid] = (exc.process_id, cloud.app_server)
-            return {"status": "code_sent", "message": "TP-Link emailed you a verification code. Run this "
-                    "action again with verification_code set to it."}
+            raise
     cloud.resolve_iot_server()
     things = cloud.things()
     thing = pick_thing(things, info.get("device_id"), info.get("mac"))
     if thing is None:
         raise CloudError("could not find this robot in the TP-Link account (devices seen: " + ", ".join(
             f"{t.get('deviceType')}/{t.get('deviceModel') or t.get('model')}" for t in things) + ")")
+    return cloud, thing
+
+
+def cloud_backup_link(client, username: str, password: str, terminal_uuid: str, map_id: int) -> tuple[str, str]:
+    """(download link, md5) of the TP-Link cloud backup of map_id, as the app restores from."""
+    try:
+        cloud, thing = _connect(client, username, password, terminal_uuid)
+    except MfaRequired as exc:
+        raise CloudError("TP-Link wants a verification code; run fetch_cloud_map_backups first") from exc
+    for b in cloud.map_backups(thing):
+        if b.get("mapId") == map_id and b.get("mapUrl") and b.get("mapMd5"):
+            return b["mapUrl"], b["mapMd5"]
+    raise CloudError(f"no cloud backup of map {map_id}; back it up in the Tapo app first")
+
+
+def local_backup_file(folder: str, map_id: int) -> str | None:
+    """Newest downloaded cloud backup of map_id in folder (full path)."""
+    names = sorted(n for n in (os.listdir(folder) if os.path.isdir(folder) else [])
+                   if n.startswith(f"cloud_{map_id}_") and "_snapshot" not in n)
+    return os.path.join(folder, names[-1]) if names else None
+
+
+def fetch_backups(client, username: str, password: str, terminal_uuid: str, folder: str,
+                  local_reads: bool, code: str | None = None) -> dict:
+    """Blocking: save every cloud map backup of this robot (plus, when the robot is idle,
+    its current local getMapData for the same maps) into folder, and summarise.
+
+    If TP-Link wants a two-step code, one is emailed and {"status": "code_sent"} is
+    returned; call again with code= to finish (HA is then a trusted device)."""
+    import time
+
+    try:
+        cloud, thing = _connect(client, username, password, terminal_uuid, code)
+    except MfaRequired:
+        return {"status": "code_sent", "message": "TP-Link emailed you a verification code. Run this "
+                "action again with verification_code set to it."}
     backups = cloud.map_backups(thing)
     os.makedirs(folder, exist_ok=True)
     stamp = time.strftime("%Y%m%d-%H%M%S")
@@ -249,7 +279,7 @@ def fetch_backups(client, username: str, password: str, terminal_uuid: str, fold
         entry = {"map_id": map_id, "timestamp": ts, "cloud_md5": b.get("mapMd5")}
         try:
             data = cloud.download(b["mapUrl"])
-            name = f"cloud_{map_id}_{ts}.json"
+            name = f"cloud_{map_id}_{ts}.bin"
             with open(os.path.join(folder, name), "wb") as fh:
                 fh.write(data)
             entry.update(file=name, size=len(data), md5=hashlib.md5(data).hexdigest())

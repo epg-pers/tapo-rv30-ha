@@ -333,6 +333,32 @@
           "description": "Only when the first run says TP-Link emailed you a code: enter it here and run again."
         }
       }
+    },
+    "restore_map_backup": {
+      "name": "Restore map backup (beta)",
+      "description": "Overwrite a map on the robot with its backup, as the Tapo app's restore does. Beta and only tested on a spare map: the robot must be docked and idle. Source local serves the copy saved by Fetch cloud map backups from Home Assistant; source cloud uses TP-Link's copy.",
+      "fields": {
+        "map_id": {
+          "name": "Map id",
+          "description": "The map to restore (its own backup is used)."
+        },
+        "source": {
+          "name": "Source",
+          "description": "local (the copy in Home Assistant) or cloud (TP-Link's copy)."
+        },
+        "base_url": {
+          "name": "Base URL",
+          "description": "How the robot reaches Home Assistant on your network, if not your internal URL."
+        },
+        "wait": {
+          "name": "Wait",
+          "description": "How long to follow the robot's restore progress."
+        },
+        "confirm": {
+          "name": "Confirm",
+          "description": "Required: this overwrites the map on the robot."
+        }
+      }
     }
   },
   "issues": {

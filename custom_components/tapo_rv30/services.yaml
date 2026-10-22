@@ -170,6 +170,43 @@ fetch_cloud_map_backups:
       example: "123456"
       selector:
         text: {}
+restore_map_backup:
+  target:
+    entity:
+      domain: vacuum
+      integration: tapo_rv30
+  fields:
+    map_id:
+      required: true
+      example: 1792702710
+      selector:
+        number:
+          min: 0
+          max: 4294967295
+          mode: box
+    source:
+      default: local
+      selector:
+        select:
+          options:
+          - local
+          - cloud
+    base_url:
+      example: http://192.168.1.10:8123
+      selector:
+        text: {}
+    wait:
+      default: 180
+      selector:
+        number:
+          min: 0
+          max: 600
+          unit_of_measurement: s
+    confirm:
+      required: true
+      default: false
+      selector:
+        boolean: {}
 run_preset:
   target:
     entity:
