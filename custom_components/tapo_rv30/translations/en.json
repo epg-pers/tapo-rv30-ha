@@ -323,6 +323,10 @@
           "description": "fabric_index of the ecosystem to remove, from the Matter sensor."
         }
       }
+    },
+    "fetch_cloud_map_backups": {
+      "name": "Fetch cloud map backups",
+      "description": "Read-only. Logs in to your TP-Link account, downloads the map backups made with the Tapo app's backup feature, and saves them in config/tapo_rv30/map_backups (with the robot's current local map data for comparison when it is idle). Nothing is sent to the robot except routine reads."
     }
   },
   "issues": {

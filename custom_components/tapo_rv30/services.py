@@ -16,7 +16,8 @@ from .targets import INDIRECT_TARGET_KEYS, TargetError, as_list, has_indirect_ta
 _LOGGER = logging.getLogger(__name__)
 SERVICES = ("clean_rooms", "set_room_settings", "clean_zone", "run_schedule", "send_raw",
             "get_clean_records", "run_preset", "set_map", "go_to",
-            "add_schedule", "set_schedule", "remove_schedule", "remove_matter_fabric")
+            "add_schedule", "set_schedule", "remove_schedule", "remove_matter_fabric",
+            "fetch_cloud_map_backups")
 
 
 # Methods the integration itself calls while the robot is working.
@@ -412,6 +413,28 @@ def async_setup_services(hass: HomeAssistant) -> None:
         await _send(hass, call, coord.client.set_current_map, hits[0])
         await coord.async_request_map_refresh()
 
+    async def handle_fetch_cloud_map_backups(call: ServiceCall) -> ServiceResponse:
+        import uuid
+
+        from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
+
+        from .cloud import CloudError, fetch_backups
+        coord = _one(hass, call)
+        if coord.entry is None:
+            raise ServiceValidationError(f"{call.service}: no config entry")
+        folder = hass.config.path(DOMAIN, "map_backups")
+        terminal = str(uuid.uuid5(uuid.NAMESPACE_URL, f"{DOMAIN}:{coord.entry.entry_id}"))
+        try:
+            return await hass.async_add_executor_job(
+                fetch_backups, coord.client, coord.entry.data[CONF_USERNAME], coord.entry.data[CONF_PASSWORD],
+                terminal, folder, not coord.busy)
+        except CloudError as exc:
+            raise HomeAssistantError(f"{call.service}: {exc}") from exc
+        except Exception as exc:
+            raise HomeAssistantError(f"{call.service}: {type(exc).__name__}: {exc}") from exc
+
+    hass.services.async_register(DOMAIN, "fetch_cloud_map_backups", handle_fetch_cloud_map_backups,
+                                 supports_response=SupportsResponse.ONLY)
     hass.services.async_register(DOMAIN, "clean_rooms", handle_clean_rooms)
     hass.services.async_register(DOMAIN, "run_preset", handle_run_preset)
     hass.services.async_register(DOMAIN, "set_map", handle_set_map)

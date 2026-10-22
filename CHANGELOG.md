@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.21.0b1 (beta)
+
+### New
+
+- **Fetch cloud map backups** (`tapo_rv30.fetch_cloud_map_backups`, beta, untested). Read-only: logs in to your TP-Link account, downloads the map backups you made with the Tapo app's backup feature, and saves them in `config/tapo_rv30/map_backups`, alongside the robot's current local map data when it is idle, so the two formats can be compared. It sends nothing to the robot except routine reads. First step towards local map backups.
+
 ## v0.20.0
 
 ### New

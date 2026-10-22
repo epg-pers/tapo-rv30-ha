@@ -160,6 +160,11 @@ get_clean_records:
         number:
           min: 1
           max: 100
+fetch_cloud_map_backups:
+  target:
+    entity:
+      domain: vacuum
+      integration: tapo_rv30
 run_preset:
   target:
     entity:
