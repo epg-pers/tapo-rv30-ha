@@ -74,8 +74,8 @@ about tomorrow.
 | Add, edit and remove the robot's own schedules, Do Not Disturb aware | yes | yes, adapted from here |
 | Matter, voice, network discovery, device triggers, blueprints | yes | yes, adapted from here |
 | Furniture on the map | yes, illustrated and labelled | yes, adapted from here, plain shapes |
-| Go to a point | yes, tap the map or call the service | service only |
-| Remote drive | yes, joystick on the sidebar page | service only |
+| Go to a point | yes, tap the map or call the service | yes, in the separate VacuumCard-ADV card |
+| Remote drive | yes, joystick on the sidebar page | yes, in the separate VacuumCard-ADV card |
 | Bundled map card (tap rooms, draw zones, floors) | yes | no, separate card project |
 | Sidebar page (schedules editor, history, drive, maintenance, settings) | yes | no |
 | Smart cleaning planner (room targets, people, motion sensors) | yes | no |
