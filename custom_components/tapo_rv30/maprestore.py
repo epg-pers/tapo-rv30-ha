@@ -27,7 +27,7 @@ class MapBackupView(HomeAssistantView):
     (the robot has no Home Assistant credentials). Answers like a storage bucket:
     HEAD, byte ranges, ETag and Last-Modified."""
 
-    url = "/api/tapo_rv30/map_backup/{token}/{name}"
+    url = "/api/tapo_rv30/map_backup/{token}/{name:.*}"
     extra_urls = ["/api/tapo_rv30/map_backup/{token}"]
     name = "api:tapo_rv30:map_backup"
     requires_auth = False
@@ -73,8 +73,9 @@ class MapBackupView(HomeAssistantView):
         return self._respond(request, token, head=True)
 
 
-def serve_data(hass: HomeAssistant, name: str, data: bytes) -> tuple[str, str, dict]:
-    """Offer data for download; returns (url path, md5, link record)."""
+def serve_data(hass: HomeAssistant, name: str, data: bytes, url_tail: str) -> tuple[str, str, dict]:
+    """Offer data for download; returns (url path, md5, link record). The path ends in
+    url_tail, shaped like TP-Link's own link ("robotVacMap/<map id>")."""
     links = hass.data.get(DATA_KEY)
     if links is None:
         links = hass.data[DATA_KEY] = {}
@@ -86,4 +87,4 @@ def serve_data(hass: HomeAssistant, name: str, data: bytes) -> tuple[str, str, d
     link = {"data": data, "name": name, "md5": md5, "expires": time.monotonic() + LINK_SECONDS, "hits": [],
             "modified": formatdate(usegmt=True)}
     links[token] = link
-    return f"/api/tapo_rv30/map_backup/{token}/{name}", md5, link
+    return f"/api/tapo_rv30/map_backup/{token}/{url_tail}", md5, link

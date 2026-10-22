@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.21.0b8
+
+### Changed
+
+- Restore map backup: the download link ends in `robotVacMap/<map id>`, the same shape as TP-Link's own links.
+
 ## v0.21.0b7
 
 ### Changed

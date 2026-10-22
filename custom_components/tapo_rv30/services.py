@@ -476,7 +476,7 @@ def async_setup_services(hass: HomeAssistant) -> None:
                 except NoURLAvailableError as exc:
                     raise ServiceValidationError(f"{call.service}: no internal URL for Home Assistant; "
                                                  "set one or pass base_url") from exc
-                url_path, md5, link = serve_data(hass, os.path.basename(path), data)
+                url_path, md5, link = serve_data(hass, os.path.basename(path), data, f"robotVacMap/{map_id}")
                 url = base.rstrip("/") + url_path
                 out.update(file=os.path.basename(path), url=base.rstrip("/") + "/api/tapo_rv30/map_backup/...")
             out["md5"] = md5
