@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.21.0b10
+
+### Changed
+
+- Restore map backup: S3-style response headers on the download link, and a `redirect` source (diagnostic) whose link redirects to TP-Link's copy.
+
 ## v0.21.0b9
 
 ### Changed

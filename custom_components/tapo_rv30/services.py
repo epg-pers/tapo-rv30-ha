@@ -457,12 +457,19 @@ def async_setup_services(hass: HomeAssistant) -> None:
                      "maps_before": {str(k): v for k, v in names.items()}}
         link = None
         try:
-            if source == "cloud":
+            if source in ("cloud", "redirect"):
                 terminal = str(uuid.uuid5(uuid.NAMESPACE_URL, f"{DOMAIN}:{coord.entry.entry_id}"))
                 url, md5 = await hass.async_add_executor_job(
                     cloud_backup_link, coord.client, coord.entry.data[CONF_USERNAME],
                     coord.entry.data[CONF_PASSWORD], terminal, map_id)
                 out["url"] = "TP-Link cloud link"
+                if source == "redirect":
+                    # Diagnostic: our link, answering 302 to TP-Link's.
+                    base = call.data.get("base_url") or get_url(
+                        hass, allow_external=False, allow_cloud=False, prefer_external=False)
+                    url_path, _, link = serve_data(hass, "redirect", b"", f"robotVacMap/{map_id}", redirect=url)
+                    url = base.rstrip("/") + url_path
+                    out["url"] = base.rstrip("/") + "/api/tapo_rv30/map_backup/... -> TP-Link cloud link"
             else:
                 path = await hass.async_add_executor_job(
                     local_backup_file, hass.config.path(DOMAIN, "map_backups"), map_id)

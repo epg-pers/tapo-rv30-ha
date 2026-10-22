@@ -39,9 +39,16 @@ class MapBackupView(HomeAssistantView):
         link = self._links.get(token)
         if link is None or link["expires"] < time.monotonic():
             return web.Response(status=404)
+        if link.get("redirect"):
+            link["hits"].append({"method": request.method, "from": request.remote, "at": time.time(),
+                                 "agent": request.headers.get("User-Agent"), "status": 302})
+            return web.Response(status=302, headers={"Location": link["redirect"]})
         data = link["data"]
         headers = {"ETag": f'"{link["md5"]}"', "Accept-Ranges": "bytes", "Cache-Control": "no-transform",
-                   "Last-Modified": link["modified"]}
+                   "Last-Modified": link["modified"],
+                   # As S3 answers (the proxy in front of Home Assistant may replace Server).
+                   "Server": "AmazonS3", "x-amz-server-side-encryption": "AES256",
+                   "x-amz-request-id": secrets.token_hex(8).upper()}
         status, body = 200, data
         rng = request.headers.get("Range")
         if rng and rng.startswith("bytes="):
@@ -73,9 +80,11 @@ class MapBackupView(HomeAssistantView):
         return self._respond(request, token, head=True)
 
 
-def serve_data(hass: HomeAssistant, name: str, data: bytes, url_tail: str) -> tuple[str, str, dict]:
+def serve_data(hass: HomeAssistant, name: str, data: bytes, url_tail: str,
+               redirect: str | None = None) -> tuple[str, str, dict]:
     """Offer data for download; returns (url path, md5, link record). The path ends in
-    url_tail, shaped like TP-Link's own link ("robotVacMap/<map id>")."""
+    url_tail, shaped like TP-Link's own link ("robotVacMap/<map id>"). With redirect,
+    the link answers 302 to that URL instead (a diagnostic)."""
     links = hass.data.get(DATA_KEY)
     if links is None:
         links = hass.data[DATA_KEY] = {}
@@ -85,6 +94,6 @@ def serve_data(hass: HomeAssistant, name: str, data: bytes, url_tail: str) -> tu
     token = secrets.token_urlsafe(24)
     md5 = hashlib.md5(data).hexdigest()
     link = {"data": data, "name": name, "md5": md5, "expires": time.monotonic() + LINK_SECONDS, "hits": [],
-            "modified": formatdate(usegmt=True)}
+            "modified": formatdate(usegmt=True), "redirect": redirect}
     links[token] = link
     return f"/api/tapo_rv30/map_backup/{token}/{url_tail}", md5, link

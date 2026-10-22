@@ -344,7 +344,7 @@
         },
         "source": {
           "name": "Source",
-          "description": "local (the copy in Home Assistant) or cloud (TP-Link's copy)."
+          "description": "local (the copy in Home Assistant), cloud (TP-Link's copy) or redirect (diagnostic: a Home Assistant link that redirects to TP-Link's copy)."
         },
         "base_url": {
           "name": "Base URL",
