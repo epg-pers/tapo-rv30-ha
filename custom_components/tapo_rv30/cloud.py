@@ -37,6 +37,7 @@ TIMEOUT = 30
 
 
 MFA_EMAIL = 2
+IOT_SERVICE_ID = "nbu.iot-app-server.app"
 
 # Two-step logins waiting for their emailed code: terminal UUID -> (process id, app server).
 _PENDING: dict[str, tuple[str, str]] = {}
@@ -109,11 +110,22 @@ class TapoCloud:
         self._http.mount("https://", _TapoCAAdapter())
         self.token: str | None = None
         self.app_server: str | None = None
+        self.iot_server: str | None = None
 
-    def _account_post(self, base: str, path: str, payload: dict, what: str) -> Any:
+    def _account_post(self, base: str, path: str, payload: dict, what: str, token: str | None = None) -> Any:
         body = json.dumps(payload, separators=(",", ":")).encode()
-        resp = self._http.post(base + path, data=body, headers=_signed_headers(path, body), timeout=TIMEOUT)
+        resp = self._http.post(base + path, data=body, headers=_signed_headers(path, body), timeout=TIMEOUT,
+                               params={"token": token} if token else None)
         return _unwrap(resp, what)
+
+    def resolve_iot_server(self) -> None:
+        """The device ("thing") API lives on a separate server the account server names."""
+        res = self._account_post(self.app_server, "/api/v2/common/getAppServiceUrl",
+                                 {"serviceIds": [IOT_SERVICE_ID]}, "service lookup", token=self.token)
+        url = ((res or {}).get("serviceUrls") or {}).get(IOT_SERVICE_ID)
+        if not url:
+            raise CloudError(f"service lookup: no {IOT_SERVICE_ID} in {res}")
+        self.iot_server = url.rstrip("/")
 
     def login(self) -> None:
         errors = []
@@ -175,7 +187,7 @@ class TapoCloud:
     def things(self) -> list[dict]:
         out, page = [], 0
         while True:
-            res = self._get(f"{self.app_server}/v2/things", "device list", page=page, pageSize=50)
+            res = self._get(f"{self.iot_server}/v2/things", "device list", page=page, pageSize=50)
             items = (res.get("data") or res.get("list") or []) if isinstance(res, dict) else (res or [])
             out.extend(items)
             total = res.get("total") if isinstance(res, dict) else None
@@ -184,7 +196,7 @@ class TapoCloud:
             page += 1
 
     def map_backups(self, thing: dict) -> list[dict]:
-        server = thing.get("appServerUrl") or self.app_server
+        server = (thing.get("appServerUrl") or self.iot_server).rstrip("/")
         res = self._get(f"{server}/v1/things/{thing['thingName']}/map/detail", "backup list")
         return res if isinstance(res, list) else (res or {}).get("data") or []
 
@@ -222,6 +234,7 @@ def fetch_backups(client, username: str, password: str, terminal_uuid: str, fold
             _PENDING[terminal_uuid] = (exc.process_id, cloud.app_server)
             return {"status": "code_sent", "message": "TP-Link emailed you a verification code. Run this "
                     "action again with verification_code set to it."}
+    cloud.resolve_iot_server()
     things = cloud.things()
     thing = pick_thing(things, info.get("device_id"), info.get("mac"))
     if thing is None:

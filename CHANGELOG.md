@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.21.0b4
+
+### Fixed
+
+- Fetch cloud map backups: look up TP-Link's device server before listing devices (the device list lives on a different server from the login).
+
 ## v0.21.0b3
 
 ### New
