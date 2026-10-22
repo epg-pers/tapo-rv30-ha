@@ -65,7 +65,7 @@ its code, so this is what shipped on that day, not a promise about tomorrow.
 
 | | This project | TapoVac-ADV 3.0.0 |
 |---|:---:|:---:|
-| Local TPAP control, rooms, zones, spot, presets, `run_schedule`, native `vacuum.clean_area`, dock buttons, raw send | yes | yes |
+| Local TPAP control, rooms, zones, spot, presets, `run_schedule`, native `vacuum.clean_area`, dock buttons, raw send | buggy (has regression) | yes |
 | Bundled map card (tap rooms, draw zones, floors) | yes | separate card project (H.A. Design) |
 | Live cleaning path and last clean map | yes | yes |
 | Per-room "last cleaned" and coverage | yes | yes |
