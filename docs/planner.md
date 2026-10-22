@@ -5,9 +5,11 @@ cleaning at fixed times. It cleans the rooms that are due when the house allows 
 home, inside your time window, outside Do Not Disturb, enough battery, and not in rooms that
 are in use. It lives on the **Planner** tab of the [sidebar page](panel.md).
 
-!!! note "Beta"
-    The planner arrives in 0.20.0 beta. Install a beta in HACS with **Show beta versions**
-    ticked. It starts switched off and in preview mode, so nothing moves until you say so.
+!!! note "Starts off, in preview mode"
+    The planner arrives switched off and in preview mode, so nothing moves until you say so.
+    It was verified on an RV30 Max Plus in preview against a real house. The "finish the
+    room and dock when someone comes home" step has not been tested on a robot yet; please
+    report how it behaves.
 
 ![The Planner tab](planner.png){ width="760" }
 
@@ -73,7 +75,7 @@ so the robot setting off motion sensors as it cleans does not stop it.
 | Not near the robot's own schedules | on | Holds off when one of the robot's schedules starts within the hour. |
 | Outside Do Not Disturb | always | The robot refuses to clean in Do Not Disturb anyway. |
 | Weekdays, weekends | 09:00 to 17:00, 10:00 to 16:00 | When a run may start. One planner run per day. |
-| If someone comes home mid-run | finish room, dock | Finishes the room it is in, then sends the robot home. **Keep going** lets it carry on. |
+| If someone comes home mid-run | finish room, dock | Finishes the room it is in, then sends the robot home (untested on a robot so far). **Keep going** lets it carry on. |
 | Target for new rooms | every 2 days | Used for rooms you have not set yourself, including new rooms after a remap. |
 
 ## Entities and events

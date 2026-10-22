@@ -1,12 +1,10 @@
 # Changelog
 
-## v0.20.0b1
-
-Beta. Install it from HACS with "Show beta versions" on.
+## v0.20.0
 
 ### New
 
-- **Smart cleaning planner.** Keeps each room within a target you choose ("every 2 days", "every week", or leave out) instead of fixed times, and cleans the due rooms, most overdue first, when the house allows: nobody home (choose who counts), inside weekday and weekend windows, outside Do Not Disturb, battery above a level, not right before one of the robot's own schedules, and leaving out rooms whose motion, occupancy or presence sensors say they are in use. If someone comes home mid-run it finishes the room and docks, or keeps going if you prefer. It uses the vacuum's own "map rooms to areas" setting, with **Match by name** for unlinked rooms, and per-room sensor additions, removals or "ignore". Everything is set on the new **Planner** tab of the sidebar page, with a log of every decision. It starts **off and in preview mode**: it logs what it would do and never starts the robot until you turn preview off.
+- **Smart cleaning planner.** Keeps each room within a target you choose ("every 2 days", "every week", or leave out) instead of fixed times, and cleans the due rooms, most overdue first, when the house allows: nobody home (choose who counts), inside weekday and weekend windows, outside Do Not Disturb, battery above a level, not right before one of the robot's own schedules, and leaving out rooms whose motion, occupancy or presence sensors say they are in use. If someone comes home mid-run it finishes the room and docks, or keeps going if you prefer (this docking step is untested on a robot so far). It uses the vacuum's own "map rooms to areas" setting, with **Match by name** for unlinked rooms, and per-room sensor additions, removals or "ignore". Everything is set on the new **Planner** tab of the sidebar page, with a log of every decision. It starts **off and in preview mode**: it logs what it would do and never starts the robot until you turn preview off. Verified on an RV30 Max Plus in preview mode against a real house (windows, people, a motion sensor holding a room back, the preview run); starting a run uses the same call as `tapo_rv30.clean_rooms`.
 - `switch.<name>_planner`, `sensor.<name>_planner_status` and the `tapo_rv30_planner` event.
 
 ## v0.19.3

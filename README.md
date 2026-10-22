@@ -40,6 +40,7 @@ Same domain, so your config entry and entities carry over; see
 - **Live cleaning path** on the map, and a **Last Clean Map** of where the robot actually went
 - **Per-room "last cleaned"**: worked out from the robot's own run maps, shown when you hold a room, and available to automations
 - **Sidebar page**: map, a schedules editor for the robot's own schedules, history and statistics, rooms with freshness, maintenance and settings, no dashboard needed (switch it off in the integration options if you prefer)
+- **Smart cleaning planner**: keeps each room within a target like "every 2 days" and cleans the due rooms when nobody is home, inside your time window, leaving out rooms whose motion sensors say they are in use; starts in preview mode
 - **Remote drive**: take control from the sidebar page and steer the robot with arrows or keys, like the Tapo app
 - **Go to a point** from the card: tap the map, press Go
 - **Do Not Disturb aware**: a schedule inside the robot's Do Not Disturb window never runs; the sidebar page and the services flag it before you save, instead of leaving a dead schedule on the robot
@@ -77,6 +78,7 @@ about tomorrow.
 | Remote drive | yes, joystick on the sidebar page | service only |
 | Bundled map card (tap rooms, draw zones, floors) | yes | no, separate card project |
 | Sidebar page (schedules editor, history, drive, maintenance, settings) | yes | no |
+| Smart cleaning planner (room targets, people, motion sensors) | yes | no |
 | Dashboard strategy (whole dashboard in one line) | yes | no |
 | Tests and CI (hassfest, HACS, lint, unit tests) | yes | yes |
 | Documentation site | [yes](https://epg-pers.github.io/tapo-rv30-ha/) | README |
@@ -120,6 +122,7 @@ reports. Everything is documented at
 [services and events](https://epg-pers.github.io/tapo-rv30-ha/services/),
 [Matter](https://epg-pers.github.io/tapo-rv30-ha/matter/),
 [troubleshooting](https://epg-pers.github.io/tapo-rv30-ha/troubleshooting/),
+the [planner](https://epg-pers.github.io/tapo-rv30-ha/planner/),
 the [protocol notes](https://epg-pers.github.io/tapo-rv30-ha/protocol/) and the
 [changelog](https://epg-pers.github.io/tapo-rv30-ha/changelog/).
 
