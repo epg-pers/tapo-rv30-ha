@@ -70,5 +70,5 @@ several robots the page stays while any of them has it on.
 ## Compared with a dashboard
 
 The page is the quickest way to everything, and most people will not need a dashboard at
-all. If you want your own layout, the [dashboard strategy](https://github.com/epg-pers/tapo-rv30-ha#whole-dashboard-in-one-line)
+all. If you want your own layout, the [dashboard strategy](card.md#whole-dashboard-in-one-line)
 builds one from a single line, and the card drops into any dashboard you already have.

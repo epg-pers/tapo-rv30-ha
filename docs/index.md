@@ -4,7 +4,7 @@ Local-only control of TP-Link Tapo robot vacuums (RV20, RV30 Max Plus, RV30C, RV
 relatives), with a live map card bundled in. No cloud, no extra downloads.
 
 [Install with HACS](https://my.home-assistant.io/redirect/hacs_repository/?owner=epg-pers&repository=tapo-rv30-ha&category=integration){ .md-button .md-button--primary }
-[Project README](https://github.com/epg-pers/tapo-rv30-ha#readme){ .md-button }
+[Get started](getting-started.md){ .md-button }
 
 <p align="center">
   <img src="card.png" width="300" style="vertical-align: top; margin: 4px" alt="The bundled card, rooms mode">
@@ -12,12 +12,17 @@ relatives), with a live map card bundled in. No cloud, no extra downloads.
   <img src="card-room.png" width="300" style="vertical-align: top; margin: 4px" alt="Room sheet with last cleaned">
 </p>
 
-*Mock-ups with a made-up house. The status panel with the last clean map, recent runs and
-consumables is on the [entities](entities.md) page.*
+*Mock-ups with a made-up house. More of the card, including the status panel and the go-to
+tool, on [the card and dashboards](card.md).*
 
 ## What is where
 
-- [The sidebar page](panel.md): map, schedules editor, history, rooms, maintenance, settings.
+- [Getting started](getting-started.md): what you need, install, options, updates, supported
+  models.
+- [The sidebar page](panel.md): map, schedules editor, history, rooms, drive, maintenance,
+  settings.
+- [The card and dashboards](card.md): card options, map modes, the one-line dashboard.
+- [Voice and automations](automations.md): Assist sentences, device triggers, blueprints.
 - [Entities](entities.md): everything the integration creates, by platform.
 - [Services and events](services.md): every service with its fields, the events, and the
   Xiaomi map card calibration.
@@ -29,6 +34,7 @@ consumables is on the [entities](entities.md) page.*
 
 ## Elsewhere
 
-- [Changelog](https://github.com/epg-pers/tapo-rv30-ha/blob/main/CHANGELOG.md)
-- [Contributing](https://github.com/epg-pers/tapo-rv30-ha/blob/main/CONTRIBUTING.md)
-- [Issues](https://github.com/epg-pers/tapo-rv30-ha/issues)
+- [Changelog](changelog.md): every release, newest first.
+- [Contributing](contributing.md): reporting bugs and working on the code.
+- [Issues](https://github.com/epg-pers/tapo-rv30-ha/issues) and the
+  [source](https://github.com/epg-pers/tapo-rv30-ha) on GitHub.

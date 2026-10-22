@@ -5,8 +5,8 @@ repo_url: https://github.com/epg-pers/tapo-rv30-ha
 repo_name: epg-pers/tapo-rv30-ha
 edit_uri: edit/main/docs/
 docs_dir: docs
-# No nav block on purpose: every Markdown file in docs/ becomes a page, index.md first,
-# the rest alphabetically. Drop a file in, it is on the site after the next push.
+# Pages are listed in nav below; a new page needs a line there. The changelog and
+# contributing pages include the repository's own files, so they never go stale.
 
 theme:
   name: material
@@ -48,6 +48,9 @@ markdown_extensions:
   - pymdownx.details
   - pymdownx.tabbed:
       alternate_style: true
+  - pymdownx.snippets:
+      base_path: ["."]
+      check_paths: true
 
 extra:
   social:
@@ -58,9 +61,14 @@ extra:
 
 nav:
   - Overview: index.md
+  - Getting started: getting-started.md
   - The sidebar page: panel.md
+  - The card and dashboards: card.md
+  - Voice and automations: automations.md
   - Entities: entities.md
   - Services and events: services.md
   - Matter: matter.md
   - Troubleshooting: troubleshooting.md
   - Protocol notes: protocol.md
+  - Changelog: changelog.md
+  - Contributing: contributing.md

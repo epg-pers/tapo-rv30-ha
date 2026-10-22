@@ -13,14 +13,8 @@ to Home Assistant areas in the entity's settings). Attributes: `fan_speed`, `wat
 
 ## Map
 
-![The card's status panel](card-status.png){ width="320" }
-
-*The card's status panel (mock-up): last clean map, recent runs, consumable life.*
-
-![The card's go-to tool](card-goto.png){ width="320" }
-
-*Go-to tool (mock-up): tap a point on the map and press Go; the robot drives there
-(`tapo_rv30.go_to`), hidden on robots without go-to-point.*
+The map is what [the card](card.md) draws on; its modes and the status panel are described
+there.
 
 - `camera.<name>_map` and `image.<name>_map_image`: the live map as a transparent PNG with
   rooms, no-go zones, virtual walls, carpets, saved zones, furniture glyphs, the dock, the
