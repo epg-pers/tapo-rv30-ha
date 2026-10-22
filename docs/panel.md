@@ -29,6 +29,12 @@ Do Not Disturb times are editable on the Settings tab.
 
 ![Schedule editor warning about Do Not Disturb](panel-dnd.png){ width="640" }
 
+### Planner
+
+Keeps each room within a target such as "every 2 days" and cleans the due rooms when
+nobody is home, inside your time window, with motion sensors keeping it out of rooms in use.
+It starts off and in preview mode. Everything about it is on [the planner](planner.md) page.
+
 ### History
 
 Lifetime totals, cleans per day for the last 30 days, minutes per week for the last 8

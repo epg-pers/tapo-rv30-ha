@@ -105,6 +105,49 @@ canvas.chart { width: 100%; height: 140px; display: block; }
 .drv-status.live { background: color-mix(in srgb, var(--primary-color) 16%, transparent); }
 .drv-status ha-icon { --mdc-icon-size: 20px; flex: none; }
 .note { font-size: .84em; color: var(--secondary-text-color); margin: 8px 0 0; }
+.plan-next { font-size: 1.3em; font-weight: 500; margin: 2px 0 4px; }
+.plan-sub { color: var(--secondary-text-color); font-size: .9em; }
+.chip.warn { background: color-mix(in srgb, var(--warning-color, #ffa600) 18%, transparent); color: var(--primary-text-color); cursor: default; }
+.chip.info { cursor: default; }
+.banner { display: flex; gap: 10px; align-items: center; padding: 10px 12px; border-radius: 10px; font-size: .88em; margin: 10px 0 0;
+  background: color-mix(in srgb, var(--primary-color) 12%, transparent); }
+.banner ha-icon { --mdc-icon-size: 20px; flex: none; }
+.banner .grow { flex: 1; }
+.proom { display: grid; grid-template-columns: minmax(80px, 1fr) minmax(90px, 1.4fr) 130px 92px; gap: 8px 12px; align-items: center; padding: 10px 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--primary-text-color) 10%, transparent); font-size: .9em; }
+.proom:last-child { border-bottom: none; }
+.proom .nm { font-weight: 500; }
+.proom select { width: 100%; }
+.proom .pill { justify-self: end; }
+.wrap.narrow .proom { grid-template-columns: 1fr 120px; grid-template-areas: "nm pill" "bar sel" "sub sub" "ed ed"; }
+.wrap.narrow .proom .nm { grid-area: nm; }
+.wrap.narrow .proom .pill { grid-area: pill; }
+.wrap.narrow .proom .fresh-cell { grid-area: bar; }
+.wrap.narrow .proom select { grid-area: sel; }
+.wrap.narrow .proom .sub { grid-area: sub; }
+.wrap.narrow .proom .sensors { grid-area: ed; }
+.proom .sub { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; font-size: .82em; color: var(--secondary-text-color); }
+.proom .sub button { border: none; background: none; color: var(--primary-color); cursor: pointer; padding: 0; font-size: 1em; }
+.proom select, .cond select, .cond input[type=time] { padding: 6px 8px; border-radius: 8px; border: 1px solid color-mix(in srgb, var(--primary-text-color) 20%, transparent);
+  background: var(--card-background-color); color: var(--primary-text-color); font-size: .9em; }
+.fbar { height: 8px; border-radius: 4px; background: color-mix(in srgb, var(--primary-text-color) 10%, transparent); overflow: hidden; }
+.fbar > div { height: 100%; border-radius: 4px; background: var(--primary-color); }
+.fbar.due > div { background: var(--warning-color, #ffa600); }
+.ago { font-size: .8em; color: var(--secondary-text-color); margin-top: 3px; }
+.pill { padding: 4px 9px; border-radius: 999px; font-size: .8em; white-space: nowrap; background: color-mix(in srgb, var(--primary-text-color) 7%, transparent); }
+.pill.over, .pill.due { background: color-mix(in srgb, var(--warning-color, #ffa600) 20%, transparent); }
+.pill.fresh { background: color-mix(in srgb, var(--success-color, #43a047) 20%, transparent); }
+.pill.out { opacity: .6; }
+.sensors { grid-column: 1 / -1; padding: 10px; border-radius: 10px; background: color-mix(in srgb, var(--primary-text-color) 4%, transparent); }
+.cond { display: grid; gap: 8px; }
+.cond .c { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 10px;
+  background: color-mix(in srgb, var(--primary-text-color) 4%, transparent); font-size: .9em; }
+.cond .c small { display: block; color: var(--secondary-text-color); font-size: .86em; margin-top: 2px; }
+.cond .c .ctl { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+.cond .people { padding: 0 12px 4px; }
+.log .e { display: flex; gap: 12px; padding: 7px 0; border-bottom: 1px solid color-mix(in srgb, var(--primary-text-color) 8%, transparent); font-size: .88em; }
+.log .e:last-child { border-bottom: none; }
+.log .e b { font-weight: 400; color: var(--secondary-text-color); width: 96px; flex: none; }
 .empty { padding: 24px; text-align: center; color: var(--secondary-text-color); }
 .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .err { color: var(--error-color, #db4437); font-size: .86em; }
@@ -214,19 +257,21 @@ class TapoRV30Panel extends HTMLElement {
 
   _renderRight(first) {
     const right = this.shadowRoot.querySelector(".right");
-    const tabs = [["schedules", "mdi:calendar-clock", "Schedules"], ["history", "mdi:history", "History"], ["rooms", "mdi:floor-plan", "Rooms"],
+    const tabs = [["schedules", "mdi:calendar-clock", "Schedules"], ["planner", "mdi:calendar-check", "Planner"], ["history", "mdi:history", "History"], ["rooms", "mdi:floor-plan", "Rooms"],
                   ["drive", "mdi:gamepad-variant", "Drive"], ["maintenance", "mdi:wrench", "Maintenance"], ["settings", "mdi:tune", "Settings"]];
     if (!right.querySelector(".tabs")) {
       right.innerHTML = `<div class="tabs">${tabs.map(([k, i, l]) => `<button data-tab="${k}"><ha-icon icon="${i}"></ha-icon>${l}</button>`).join("")}</div><div class="pane"></div>`;
-      right.querySelectorAll(".tabs button").forEach((b) => b.onclick = () => { if (this._stopDrive) this._stopDrive(); this._tab = b.dataset.tab; this._editing = null; this._renderRight(true); });
+      right.querySelectorAll(".tabs button").forEach((b) => b.onclick = () => { if (this._stopDrive) this._stopDrive(); this._tab = b.dataset.tab; this._editing = null; this._planOpen = null; this._renderRight(true); });
     }
     right.querySelectorAll(".tabs button").forEach((b) => b.classList.toggle("on", b.dataset.tab === this._tab));
     const pane = right.querySelector(".pane");
-    const sig = JSON.stringify([this._tab, this._robot, this._editing && this._editing.id, this._signature()]);
+    if (this._tab === "planner") this._ensurePlanSub(); else this._dropPlanSub();
+    const sig = JSON.stringify([this._tab, this._robot, this._editing && this._editing.id,
+      this._tab === "planner" ? [this._planRev, this._planOpen] : this._signature()]);
     if (!first && sig === this._paneSig) return;
     this._paneSig = sig;
     ({ schedules: this._paneSchedules, history: this._paneHistory, rooms: this._paneRooms, drive: this._paneDrive,
-       maintenance: this._paneMaintenance, settings: this._paneSettings }[this._tab]).call(this, pane);
+       maintenance: this._paneMaintenance, settings: this._paneSettings, planner: this._panePlanner }[this._tab]).call(this, pane);
   }
 
   _signature() {
@@ -506,6 +551,142 @@ class TapoRV30Panel extends HTMLElement {
     pane.querySelector(".dpad").setAttribute("aria-disabled", live ? "false" : "true");
     pane.querySelector(".take").hidden = live; pane.querySelector(".give").hidden = !live;
     if (sw) { const b = pane.querySelector(".sweep"); b.classList.toggle("primary", sw.state === "on"); b.querySelector("span").textContent = sw.state === "on" ? "Vacuuming while driving" : "Vacuum while driving"; }
+  }
+
+  // ---- planner (fed by the integration's websocket subscription) ---------------------------
+  async _ensurePlanSub() {
+    if (this._planFor === this._robot && (this._planUnsub || this._planPending)) return;
+    this._dropPlanSub();
+    this._planFor = this._robot; this._planPending = true; this._plan = null; this._planErr = null;
+    try {
+      this._planUnsub = await this._hass.connection.subscribeMessage((view) => {
+        this._plan = view; this._planRev = (this._planRev || 0) + 1;
+        if (this._tab !== "planner") return;
+        const a = this.shadowRoot.activeElement;
+        if (a && (a.tagName === "SELECT" || a.tagName === "INPUT")) { this._planDirty = true; return; }
+        this._renderRight(false);
+      }, { type: "tapo_rv30/planner/subscribe", entity_id: this._robot });
+    } catch (e) {
+      this._planErr = (e && e.message) || "The planner needs the integration's 0.20 beta or newer.";
+      this._planRev = (this._planRev || 0) + 1; this._renderRight(false);
+    } finally { this._planPending = false; }
+  }
+  _dropPlanSub() {
+    if (this._planUnsub) { try { this._planUnsub(); } catch (e) { /* already closed */ } }
+    this._planUnsub = null; this._planFor = null;
+  }
+  disconnectedCallback() { this._dropPlanSub(); }
+
+  async _planWS(msg) {
+    try {
+      const res = await this._hass.callWS({ entity_id: this._robot, ...msg });
+      const view = res && (res.view || (res.rooms ? res : null));
+      if (view) { this._plan = view; this._planRev = (this._planRev || 0) + 1; this._renderRight(false); }
+      return res;
+    } catch (e) {
+      this.dispatchEvent(new CustomEvent("hass-notification", { detail: { message: (e && e.message) || "The planner refused that" }, bubbles: true, composed: true }));
+      return null;
+    }
+  }
+  _planSet(config) { return this._planWS({ type: "tapo_rv30/planner/set", config }); }
+  _planAct(action, extra) { return this._planWS({ type: "tapo_rv30/planner/action", action, ...(extra || {}) }); }
+
+  _panePlanner(pane) {
+    const v = this._plan;
+    if (this._planErr) { pane.innerHTML = `<ha-card><div class="card"><div class="empty">${esc(this._planErr)}</div></div></ha-card>`; return; }
+    if (!v) { pane.innerHTML = `<ha-card><div class="card"><div class="empty">Loading the planner...</div></div></ha-card>`; return; }
+    const c = v.config, on = !!c.enabled, targets = v.target_choices || [0, 1, 2, 3, 4, 5, 7, 14];
+    const tname = (n) => (n === 0 ? "Leave out" : n === 1 ? "every day" : n === 7 ? "every week" : n === 14 ? "every 2 weeks" : `every ${n} days`);
+    const home = v.people.filter((p) => p.included && p.home).length;
+    const pillCls = (st) => (st === "Overdue" ? "over" : st === "Due today" ? "due" : st === "Fresh" ? "fresh" : st === "Left out" ? "out" : "");
+    const fresh = (r) => {
+      if (!r.target_days) return 0;
+      if (!r.last_cleaned) return 100;
+      return Math.min(100, Math.round(100 * (Date.now() / 1000 - r.last_cleaned) / 86400 / r.target_days));
+    };
+    const rooms = v.rooms.map((r) => {
+      const listen = r.ignore_occupancy ? "ignores motion" : r.sensors.length ? `listening to ${r.sensors.map((s) => esc(s.name)).join(", ")}` : "no sensors";
+      const areas = r.areas.length ? `area ${r.areas.map((a) => esc(a.name)).join(", ")}` : "not linked to an area";
+      const inuse = r.in_use_by.length ? ` &middot; <span class="warn" style="display:inline">in use: ${esc(r.in_use_by.join(", "))}</span>` : "";
+      let editor = "";
+      if (this._planOpen === r.key) {
+        const chosen = new Set(r.sensors.map((s) => s.entity_id));
+        editor = `<div class="sensors"><div class="chips">${v.sensors.map((s) => `<button class="chip ${chosen.has(s.entity_id) ? "on" : ""}" data-sensor="${esc(s.entity_id)}" data-room="${esc(r.key)}">${esc(s.name)}${s.area ? ` <span style="opacity:.7">(${esc(s.area)})</span>` : ""}</button>`).join("") || `<span class="note">No motion, occupancy or presence sensors in Home Assistant.</span>`}</div>
+          <div class="c" style="display:flex;justify-content:space-between;align-items:center;margin-top:10px;font-size:.88em"><span>Ignore motion for this room</span><button class="switch ${r.ignore_occupancy ? "on" : ""}" data-ignore="${esc(r.key)}"></button></div>
+          <p class="note">Sensors from the room's area are picked for you; tap to add others or drop one (a sensor the pets set off, say).</p></div>`;
+      }
+      return `<div class="proom">
+        <div class="nm">${esc(r.name)}</div>
+        <div class="fresh-cell"><div class="fbar ${r.score >= 1 ? "due" : ""}"><div style="width:${fresh(r)}%"></div></div><div class="ago">${r.last_cleaned ? esc(ago(r.last_cleaned)) : "not cleaned yet"}</div></div>
+        <select data-target="${esc(r.key)}">${targets.map((n) => `<option value="${n}" ${n === r.target_days ? "selected" : ""}>${tname(n)}</option>`).join("")}</select>
+        <span class="pill ${pillCls(r.status)}">${esc(r.skipped_today ? "Skipped today" : r.status)}</span>
+        <div class="sub"><span>${areas} &middot; ${listen}${inuse}</span><button data-edit="${esc(r.key)}">${this._planOpen === r.key ? "Done" : "Sensors"}</button><button data-skiproom="${esc(r.key)}" data-on="${r.skipped_today ? "0" : "1"}">${r.skipped_today ? "Include today" : "Leave out today"}</button></div>
+        ${editor}</div>`;
+    }).join("");
+    const people = v.people.map((p) => `<button class="chip ${p.included ? "on" : ""}" data-person="${esc(p.entity_id)}">${esc(p.name)}${p.home ? " (home)" : ""}</button>`).join("");
+    const opt = (vals, cur, label) => vals.map((n) => `<option value="${n}" ${Number(cur) === n ? "selected" : ""}>${label(n)}</option>`).join("");
+    const w = c.windows;
+    const log = (v.log || []).map((e) => { const d = new Date(e.ts * 1000);
+      const when = (Date.now() - d) / 864e5 < 1 && d.getDate() === new Date().getDate() ? d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : d.toLocaleDateString([], { weekday: "short" }) + " " + d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+      return `<div class="e"><b>${esc(when)}</b><span>${esc(e.text)}</span></div>`; }).join("");
+    pane.innerHTML = `
+      <ha-card><div class="card">
+        <h3><span>Planner</span><button class="switch ${on ? "on" : ""}" data-set="enabled"></button></h3>
+        <div class="plan-next">${esc(v.status)}</div>
+        <div class="plan-sub">${on ? "Keeps each room within its target: it cleans the due rooms when the conditions below allow." : "Turn it on to keep rooms clean by how long ago they were done, instead of fixed times."}</div>
+        <div class="chips" style="margin-top:10px">${(v.chips || []).map((t) => `<span class="chip warn">${esc(t)}</span>`).join("")}${v.battery != null ? `<span class="chip info">Battery ${esc(v.battery)}%</span>` : ""}<span class="chip info">${home ? `${home} ${home === 1 ? "person" : "people"} home` : "Nobody home"}</span></div>
+        <div class="actions" style="justify-content:flex-start;margin-top:12px;flex-wrap:wrap">
+          <button class="btn primary" data-act="clean_now" ${v.due.length ? "" : "disabled"}><ha-icon icon="mdi:play"></ha-icon>Clean due rooms now</button>
+          <button class="btn" data-act="skip_today" data-on="${v.skip_today ? "0" : "1"}"><ha-icon icon="mdi:calendar-remove"></ha-icon>${v.skip_today ? "Back on today" : "Skip today"}</button></div>
+        <div class="banner" ${c.preview ? "" : "hidden"}><ha-icon icon="mdi:eye-outline"></ha-icon><span class="grow">Preview mode: the planner logs what it would do and never starts the robot. Turn preview off when the log looks right.</span><button class="switch on" data-set="preview"></button></div>
+        <div class="banner" ${c.preview ? "hidden" : ""}><ha-icon icon="mdi:robot-vacuum"></ha-icon><span class="grow">The planner starts the robot when rooms are due. Preview mode only logs instead.</span><button class="switch" data-set="preview"></button></div>
+      </div></ha-card>
+      ${v.unmapped.length ? `<ha-card><div class="card"><div class="banner" style="margin:0"><ha-icon icon="mdi:link-variant"></ha-icon><span class="grow">Not linked to a Home Assistant area: ${esc(v.unmapped.join(", "))}. Linked rooms use the motion sensors in their area.</span></div>
+        <div class="actions" style="justify-content:flex-start;margin-top:10px;flex-wrap:wrap"><button class="btn" data-act="match_areas"><ha-icon icon="mdi:auto-fix"></ha-icon>Match by name</button><button class="btn" data-mapping><ha-icon icon="mdi:cog"></ha-icon>Map rooms to areas</button></div></div></ha-card>` : ""}
+      <ha-card><div class="card"><h3><span>Rooms</span><span class="plan-sub">how fresh each room is against its target</span></h3>${rooms || `<div class="empty">No rooms on the current map.</div>`}</div></ha-card>
+      <ha-card><div class="card"><h3><span>Only clean when</span></h3><div class="cond">
+        <div class="c"><span>Nobody is home<small>${v.people.length ? "tap people to leave someone out" : "no people in Home Assistant"}</small></span><button class="switch ${c.require_away ? "on" : ""}" data-set="require_away"></button></div>
+        ${c.require_away && v.people.length ? `<div class="chips people">${people}</div>` : ""}
+        <div class="c"><span>Leave out rooms in use<small>motion counts as in use for a while after it stops</small></span><span class="ctl"><select data-num="clear_minutes">${opt([0, 5, 10, 15, 30, 60], c.clear_minutes, (n) => `${n} min`)}</select><button class="switch ${c.skip_in_use ? "on" : ""}" data-set="skip_in_use"></button></span></div>
+        <div class="c"><span>Battery at least<small>it waits on the dock below this</small></span><select data-num="min_battery">${opt([0, 20, 30, 40, 50, 60, 80], c.min_battery, (n) => (n ? `${n}%` : "any"))}</select></div>
+        <div class="c"><span>Not near the robot's own schedules<small>holds off when one starts within the hour</small></span><button class="switch ${c.avoid_schedules ? "on" : ""}" data-set="avoid_schedules"></button></div>
+        <div class="c"><span>Outside Do Not Disturb<small>always: the robot would refuse anyway</small></span><span class="plan-sub">always</span></div>
+        <div class="c"><span>Weekdays<small>when it may start</small></span><span class="ctl"><input type="time" data-win="weekdays" data-i="0" value="${esc(w.weekdays[0])}"> to <input type="time" data-win="weekdays" data-i="1" value="${esc(w.weekdays[1])}"></span></div>
+        <div class="c"><span>Weekends</span><span class="ctl"><input type="time" data-win="weekends" data-i="0" value="${esc(w.weekends[0])}"> to <input type="time" data-win="weekends" data-i="1" value="${esc(w.weekends[1])}"></span></div>
+        <div class="c"><span>If someone comes home mid-run</span><span class="seg" style="min-width:220px"><button data-ret="finish_room" class="${c.on_return === "finish_room" ? "on" : ""}">Finish room, dock</button><button data-ret="keep_going" class="${c.on_return === "keep_going" ? "on" : ""}">Keep going</button></span></div>
+        <div class="c"><span>Target for new rooms</span><select data-num="default_target_days">${opt(targets.filter((n) => n), c.default_target_days, tname)}</select></div>
+      </div></div></ha-card>
+      <ha-card><div class="card log"><h3><span>Recent decisions</span></h3>${log || `<div class="empty">Nothing yet.</div>`}</div></ha-card>`;
+    const q = (sel) => pane.querySelectorAll(sel);
+    q("[data-set]").forEach((b) => b.onclick = () => this._planSet({ [b.dataset.set]: !c[b.dataset.set] }));
+    q("[data-act]").forEach((b) => b.onclick = () => this._planAct(b.dataset.act, b.dataset.on != null ? { on: b.dataset.on === "1" } : {}));
+    q("[data-mapping]").forEach((b) => b.onclick = () => this.dispatchEvent(new CustomEvent("hass-more-info", { detail: { entityId: this._robot, view: "settings" }, bubbles: true, composed: true })));
+    q("[data-target]").forEach((s) => s.onchange = () => { this._planDirty = false; this._planSet({ rooms: { [s.dataset.target]: { target_days: Number(s.value) } } }); });
+    q("[data-num]").forEach((s) => s.onchange = () => { this._planDirty = false; this._planSet({ [s.dataset.num]: Number(s.value) }); });
+    q("[data-win]").forEach((i) => i.onchange = () => {
+      if (!i.value) return;
+      const pair = [...w[i.dataset.win]]; pair[Number(i.dataset.i)] = i.value; this._planDirty = false;
+      this._planSet({ windows: { [i.dataset.win]: pair } });
+    });
+    q("[data-ret]").forEach((b) => b.onclick = () => this._planSet({ on_return: b.dataset.ret }));
+    q("[data-edit]").forEach((b) => b.onclick = () => { this._planOpen = this._planOpen === b.dataset.edit ? null : b.dataset.edit; this._renderRight(false); });
+    q("[data-skiproom]").forEach((b) => b.onclick = () => this._planAct("skip_room", { room: b.dataset.skiproom, on: b.dataset.on === "1" }));
+    q("[data-ignore]").forEach((b) => b.onclick = () => { const r = v.rooms.find((x) => x.key === b.dataset.ignore); this._planSet({ rooms: { [r.key]: { ignore_occupancy: !r.ignore_occupancy } } }); });
+    q("[data-person]").forEach((b) => b.onclick = () => {
+      const now = v.people.filter((p) => p.included).map((p) => p.entity_id), id = b.dataset.person;
+      const next = now.includes(id) ? now.filter((x) => x !== id) : [...now, id];
+      this._planSet({ people: next.length === v.people.length ? null : next });
+    });
+    q("[data-sensor]").forEach((b) => b.onclick = () => {
+      const r = v.rooms.find((x) => x.key === b.dataset.room), id = b.dataset.sensor;
+      const rc = (c.rooms || {})[r.key] || {}, add = new Set(rc.add_sensors || []), rem = new Set(rc.remove_sensors || []);
+      const auto = new Set([...r.sensors.filter((s) => s.auto).map((s) => s.entity_id), ...(r.removed || [])]);
+      const chosen = r.sensors.some((s) => s.entity_id === id);
+      if (chosen) { if (auto.has(id)) rem.add(id); else add.delete(id); }
+      else { if (auto.has(id)) rem.delete(id); else add.add(id); }
+      this._planSet({ rooms: { [r.key]: { add_sensors: [...add], remove_sensors: [...rem] } } });
+    });
+    q("select, input[type=time]").forEach((el) => el.onblur = () => { if (this._planDirty) { this._planDirty = false; this._renderRight(true); } });
   }
 
   _paneMaintenance(pane) {

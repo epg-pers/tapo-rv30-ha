@@ -12,6 +12,8 @@ from .aes import AesVacuumClient
 from .const import CONF_TRANSPORT, DEFAULT_PORT, DOMAIN, OPT_SHOW_PANEL, TRANSPORT_AES
 from .coordinator import TapoCoordinator
 from .frontend import async_remove_panel_if_present, async_setup_frontend, async_setup_panel
+from .planner import TapoPlanner
+from .planner_ws import async_setup_planner_ws
 from .services import async_setup_services, async_unload_services
 from .voice import async_setup_voice
 
@@ -38,10 +40,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
     coordinator = TapoCoordinator(hass, client, entry)
     await coordinator.async_config_entry_first_refresh()
+    coordinator.planner = TapoPlanner(hass, coordinator, entry)
+    await coordinator.planner.async_load()
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     async_setup_services(hass)
+    async_setup_planner_ws(hass)
+    coordinator.planner.async_start()
+    entry.async_on_unload(coordinator.planner.async_stop)
     if VOICE_KEY not in hass.data:
         hass.data[VOICE_KEY] = async_setup_voice(hass)
     await _async_apply_panel_option(hass, integration.version or "0")

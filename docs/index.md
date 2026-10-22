@@ -19,6 +19,8 @@ tool, on [the card and dashboards](card.md).*
 
 - [Getting started](getting-started.md): what you need, install, options, updates, supported
   models.
+- [The planner](planner.md): keeps rooms clean by how long ago they were done, around
+  the people and sensors in the house. Beta.
 - [The sidebar page](panel.md): map, schedules editor, history, rooms, drive, maintenance,
   settings.
 - [The card and dashboards](card.md): card options, map modes, the one-line dashboard.

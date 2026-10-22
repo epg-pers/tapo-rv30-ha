@@ -12,7 +12,8 @@
     "frontend",
     "http",
     "lovelace",
-    "panel_custom"
+    "panel_custom",
+    "websocket_api"
   ],
   "dhcp": [
     {
@@ -29,5 +30,5 @@
     "ecdsa>=0.18",
     "python-kasa>=0.10.0"
   ],
-  "version": "0.19.3"
+  "version": "0.20.0b1"
 }

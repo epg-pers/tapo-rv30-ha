@@ -63,6 +63,7 @@ nav:
   - Overview: index.md
   - Getting started: getting-started.md
   - The sidebar page: panel.md
+  - The planner: planner.md
   - The card and dashboards: card.md
   - Voice and automations: automations.md
   - Entities: entities.md

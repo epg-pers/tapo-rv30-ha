@@ -43,6 +43,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry,
         TapoSettingSwitch(c, entry, *s) for s in SETTING_GROUP_SWITCHES if s[3] in c.settings]
     entities += [TapoBoolSettingSwitch(c, entry, key) for key in c.bool_settings_supported
                  if key in BOOL_SETTING_LABELS]
+    if getattr(c, "planner", None) is not None:
+        entities.append(TapoPlannerSwitch(c, entry))
     async_add_entities(entities)
 
 
@@ -89,3 +91,30 @@ class TapoBoolSettingSwitch(TapoEntity, SwitchEntity):
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         await self._set(False)
+
+
+class TapoPlannerSwitch(TapoEntity, SwitchEntity):
+    """The smart cleaning planner on or off (its settings are on the Tapo Vacuum page)."""
+    _attr_icon = "mdi:calendar-check"
+
+    def __init__(self, coordinator, entry) -> None:
+        super().__init__(coordinator, entry, "planner", "Planner")
+        self._planner = coordinator.planner
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        self.async_on_remove(self._planner.add_listener(self.async_write_ha_state))
+
+    @property
+    def is_on(self) -> bool:
+        return bool(self._planner.config.get("enabled"))
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        return {"preview": bool(self._planner.config.get("preview"))}
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        await self._planner.async_set_config({"enabled": True})
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        await self._planner.async_set_config({"enabled": False})

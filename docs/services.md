@@ -31,6 +31,7 @@ names in it, so it shows in the UI and in automation traces.
 |---|---|---|
 | `tapo_rv30_clean_started` | a clean begins | `device`, `status_code`, `current_room` |
 | `tapo_rv30_clean_finished` | a running or paused clean ends (stopped, docking) | `device`, `status_code`, `record` (area, minutes, bin emptied, preset name) when the robot logged one |
+| `tapo_rv30_planner` | the planner starts a run, or in preview would have | `device`, `kind` (`start` or `preview`), `rooms`, `by` |
 | `tapo_rv30_error` | the robot reports a new error | `device`, `code`, `error`, `current_room` |
 
 ## Xiaomi Vacuum Map Card calibration
