@@ -206,6 +206,10 @@ restore_map_backup:
       default: false
       selector:
         boolean: {}
+    allow_missing_map:
+      default: false
+      selector:
+        boolean: {}
     confirm:
       required: true
       default: false

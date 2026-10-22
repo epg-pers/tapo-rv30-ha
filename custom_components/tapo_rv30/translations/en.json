@@ -361,6 +361,10 @@
         "dry_run": {
           "name": "Dry run",
           "description": "Prepare the download but do not send anything to the robot (for checking what it would receive)."
+        },
+        "allow_missing_map": {
+          "name": "Allow missing map",
+          "description": "Try even if the robot no longer lists this map (for recovering a deleted or lost map; experimental)."
         }
       }
     }

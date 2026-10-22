@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.21.0b9
+
+### Changed
+
+- Restore map backup: `allow_missing_map` to try restoring a map the robot no longer lists (experimental), and the result lists the robot's maps before and after.
+
 ## v0.21.0b8
 
 ### Changed

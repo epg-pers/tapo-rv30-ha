@@ -450,10 +450,11 @@ def async_setup_services(hass: HomeAssistant) -> None:
             raise ServiceValidationError(f"{call.service}: {coord.device_name} must be docked and idle")
         map_id = int(call.data["map_id"])
         names = await hass.async_add_executor_job(coord.map_names)
-        if map_id not in names:
+        if map_id not in names and not call.data.get("allow_missing_map"):
             raise ServiceValidationError(f"{call.service}: no map {map_id} on the robot ({names})")
         source = call.data.get("source", "local")
-        out: dict = {"map_id": map_id, "map_name": names[map_id], "source": source}
+        out: dict = {"map_id": map_id, "map_name": names.get(map_id, "(not on the robot)"), "source": source,
+                     "maps_before": {str(k): v for k, v in names.items()}}
         link = None
         try:
             if source == "cloud":
@@ -523,6 +524,11 @@ def async_setup_services(hass: HomeAssistant) -> None:
             out["error"] = f"{type(exc).__name__}: {exc}"
         if link is not None:
             out["robot_downloads"] = link["hits"]
+        try:
+            after = await hass.async_add_executor_job(coord.map_names)
+            out["maps_after"] = {str(k): v for k, v in after.items()}
+        except Exception as exc:
+            out["maps_after"] = f"could not read: {exc}"
         await coord.async_request_map_refresh()
         return out
 
