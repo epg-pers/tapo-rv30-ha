@@ -11,6 +11,7 @@ from homeassistant.helpers import entity_registry as er
 from .const import DOMAIN, FAN_NAME_TO_INT, REMOTE_CONTROL_CODE, REMOTE_DIRECTIONS, WATER_NAME_TO_INT
 from .coordinator import TapoCoordinator
 from .mapdata import build_schedule_rule, decode_clean_record, dnd_active, dnd_window, encode_weekdays, parse_hhmm
+from .targets import INDIRECT_TARGET_KEYS, TargetError, as_list, has_indirect_target, resolve
 
 _LOGGER = logging.getLogger(__name__)
 SERVICES = ("clean_rooms", "set_room_settings", "clean_zone", "run_schedule", "send_raw",
@@ -28,26 +29,27 @@ SAFE_WHILE_BUSY = frozenset({
 
 
 def _coordinators(hass: HomeAssistant, call: ServiceCall) -> list[TapoCoordinator]:
-    """The coordinator(s) a call targets. With no target, the only vacuum set up."""
+    """The coordinator(s) a call targets: named vacuum entities, or a device, area, floor or
+    label that holds one. With no target, the only vacuum set up."""
     loaded: dict[str, TapoCoordinator] = hass.data.get(DOMAIN, {})
-    raw = call.data.get("entity_id") or []
-    entity_ids = [raw] if isinstance(raw, str) else list(raw)
-    if not entity_ids:
-        if len(loaded) == 1:
-            return list(loaded.values())
-        raise ServiceValidationError(
-            f"{call.service}: pick a target vacuum entity "
-            f"({len(loaded)} Tapo vacuums are set up)"
-        )
+    explicit = as_list(call.data.get("entity_id"))
+    indirect: list[str] = []
+    indirect_given = has_indirect_target(call.data)
+    if indirect_given:
+        from homeassistant.helpers.target import TargetSelection, async_extract_referenced_entity_ids
+        selection = TargetSelection({k: call.data[k] for k in INDIRECT_TARGET_KEYS if call.data.get(k)})
+        selected = async_extract_referenced_entity_ids(hass, selection)
+        indirect = sorted(selected.referenced | selected.indirectly_referenced)
     registry = er.async_get(hass)
-    found: dict[str, TapoCoordinator] = {}
-    for eid in entity_ids:
+
+    def entry_of(eid: str) -> tuple[str | None, str | None] | None:
         entry = registry.async_get(eid)
-        coord = loaded.get(entry.config_entry_id) if entry and entry.config_entry_id else None
-        if coord is None:
-            raise ServiceValidationError(f"{call.service}: {eid} is not a Tapo RV30 entity")
-        found[entry.config_entry_id] = coord
-    return list(found.values())
+        return (entry.platform, entry.config_entry_id) if entry else None
+
+    try:
+        return resolve(loaded, explicit, indirect, entry_of, DOMAIN, indirect_given)
+    except TargetError as exc:
+        raise ServiceValidationError(f"{call.service}: {exc}") from None
 
 
 def _one(hass: HomeAssistant, call: ServiceCall) -> TapoCoordinator:

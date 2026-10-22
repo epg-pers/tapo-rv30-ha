@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.19.3
+
+### Fixed
+
+- Services now accept device, area, floor and label targets, as the docs said. Before, only a named vacuum entity worked, and with two robots set up a device or area target was refused. Only Tapo robots inside the target are used, so an area that also holds lights or another brand's vacuum works, and a target with no Tapo robot in it gets a clear error instead of falling back to some robot.
+
+### Docs
+
+- New pages on the docs site: getting started, the card and dashboards, voice and automations. The changelog and contributing guide are now pages on the site too.
+
 ## v0.19.2
 
 ### Fixed

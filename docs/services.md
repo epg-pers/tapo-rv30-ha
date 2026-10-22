@@ -1,7 +1,9 @@
 # Services and events
 
-Every service lives under `tapo_rv30` (so `tapo_rv30.clean_rooms`). All of them target a vacuum entity (`entity_id` or a device / area target). With one
-vacuum set up the target is optional.
+Every service lives under `tapo_rv30` (so `tapo_rv30.clean_rooms`). Target the robot by its
+vacuum entity, or by a device, area, floor or label that holds it; only Tapo robots in the
+target are used, so an area with lights and sensors in it is fine, and a target with no Tapo
+robot in it is refused with a clear message. With one vacuum set up the target is optional.
 
 | Service | What it does |
 |---|---|
