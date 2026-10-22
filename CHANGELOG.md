@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.21.0b1 (beta)
+## v0.21.0b1
 
 ### New
 
