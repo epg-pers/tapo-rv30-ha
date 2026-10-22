@@ -66,7 +66,7 @@ its code, so this is what shipped on that day, not a promise about tomorrow.
 | | This project | TapoVac-ADV 2.6.0 |
 |---|:---:|:---:|
 | Local TPAP control, rooms, zones, spot, presets, `run_schedule`, native `vacuum.clean_area`, dock buttons, raw send | yes | yes |
-| Bundled map card (tap rooms, draw zones, floors) | yes | separate card project |
+| Bundled map card (tap rooms, draw zones, floors) | yes | separate card project (H.A. Design) |
 | Live cleaning path and last clean map | yes | yes |
 | Per-room "last cleaned" and coverage | yes | yes |
 | Sidebar page (schedules editor, history, drive, maintenance, settings) | yes | no (and not planned) |
@@ -74,7 +74,7 @@ its code, so this is what shipped on that day, not a promise about tomorrow.
 | Do Not Disturb aware schedules | yes | yes |
 | Remote drive (joystick) | yes | yes |
 | Go to a point | yes | yes |
-| Furniture on the map | yes |yes |
+| Furniture on the map | yes | yes |
 | Matter pairing state, code and window | yes | yes |
 | Voice (Assist sentences), device triggers, blueprints | yes | yes |
 | Network discovery, follows IP changes | yes | yes |
