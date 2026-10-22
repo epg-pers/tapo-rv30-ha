@@ -62,10 +62,12 @@ Several forks of this project exist. The only one still maintained is
 [jan-tdy/TapoVac-ADV](https://github.com/jan-tdy/TapoVac-ADV); the others last changed
 between March and August 2026. Checked on 2026-10-22 against TapoVac-ADV 3.0.3 by its author, so this is what shipped on that day, not a promise about tomorrow.
 
+<-- Introducting the: Vacuum fork feature-race -->
+
 | | This project | TapoVac-ADV 3.0.3 |
 |---|:---:|:---:|
 | Local TPAP control, rooms, zones, spot, presets, `run_schedule`, native `vacuum.clean_area`, dock buttons, raw send | buggy (has regression) | yes |
-| Bundled map card (tap rooms, draw zones, floors) | yes | separate card project (H.A. Design) |
+| Bundled map card (tap rooms, draw zones, floors) | yes (AI design) | separate card project (H.A. Design) |
 | Live cleaning path and last clean map | yes | yes (nicer) |
 | Per-room "last cleaned" and coverage | yes | yes |
 | Sidebar page (schedules editor, history, drive, maintenance, settings) | yes | no (and not planned) |
@@ -77,7 +79,7 @@ between March and August 2026. Checked on 2026-10-22 against TapoVac-ADV 3.0.3 b
 | Matter pairing state, code and window | yes | yes |
 | Voice (Assist sentences), device triggers, blueprints | yes | yes |
 | Network discovery, follows IP changes | yes | yes |
-| Dashboard strategy (whole dashboard in one line) | yes | yes |
+| Dashboard strategy (whole dashboard in one line) | yes | no |
 | Tests and CI (hassfest, HACS, lint, unit tests) | yes | yes |
 | Documentation site | yes (incomplete) | README |
 
