@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.21.0b2
+
+### Fixed
+
+- Fetch cloud map backups: trust TP-Link's own root certificates (as the Tapo app does), so the account login no longer fails certificate checks.
+
 ## v0.21.0b1
 
 ### New

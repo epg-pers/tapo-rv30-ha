@@ -15,10 +15,14 @@ import hashlib
 import hmac
 import json
 import logging
+import os
+import ssl
 import uuid
 from typing import Any
 
+import certifi
 import requests
+from requests.adapters import HTTPAdapter
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -64,12 +68,32 @@ def _unwrap(resp: requests.Response, what: str) -> Any:
     return data
 
 
+class _TapoCAAdapter(HTTPAdapter):
+    """TP-Link's account servers use TP-Link's own root CAs (shipped in the Tapo app,
+    copied to tplink_ca.pem); trust those on top of the usual public roots."""
+
+    @staticmethod
+    def _context() -> ssl.SSLContext:
+        ctx = ssl.create_default_context(cafile=certifi.where())
+        ctx.load_verify_locations(cafile=os.path.join(os.path.dirname(__file__), "tplink_ca.pem"))
+        return ctx
+
+    def init_poolmanager(self, *args: Any, **kwargs: Any) -> None:
+        kwargs["ssl_context"] = self._context()
+        super().init_poolmanager(*args, **kwargs)
+
+    def proxy_manager_for(self, proxy: str, **kwargs: Any) -> Any:
+        kwargs["ssl_context"] = self._context()
+        return super().proxy_manager_for(proxy, **kwargs)
+
+
 class TapoCloud:
     def __init__(self, username: str, password: str, terminal_uuid: str) -> None:
         self._username = username
         self._password = password
         self._terminal = terminal_uuid
         self._http = requests.Session()
+        self._http.mount("https://", _TapoCAAdapter())
         self.token: str | None = None
         self.app_server: str | None = None
 
@@ -145,7 +169,6 @@ def fetch_backups(client, username: str, password: str, terminal_uuid: str, fold
                   local_reads: bool) -> dict:
     """Blocking: save every cloud map backup of this robot (plus, when the robot is idle,
     its current local getMapData for the same maps) into folder, and summarise."""
-    import os
     import time
 
     info = client.send("get_device_info")["result"]
