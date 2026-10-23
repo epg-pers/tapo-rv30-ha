@@ -554,25 +554,55 @@ def async_setup_services(hass: HomeAssistant) -> None:
             cands = sorted(f for f in os.listdir(folder) if pat.match(f))
             return os.path.join(folder, cands[-1]) if cands else None
 
-        path = await hass.async_add_executor_job(_pick)
-        if path is None:
-            raise ServiceValidationError(
-                f"{call.service}: no backup file for map {map_id} in {folder}; "
-                "run fetch_cloud_map_backups first, or pass file:")
-        md5 = await hass.async_add_executor_job(
-            lambda: hashlib.md5(open(path, "rb").read()).hexdigest())  # noqa: SIM115
+        # use_cloud_url: hand the robot the backup's OWN TP-Link presigned URL (as the app does),
+        # instead of serving our local copy. Tests whether the robot requires a cloud-signed URL.
+        store = None
+        token = None
+        src = "local"
+        if call.data.get("use_cloud_url"):
+            import uuid as _uuid
 
-        base = call.data.get("base_url")
-        if base:
-            base = str(base).rstrip("/")
+            from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
+
+            from .cloud import _connect
+            terminal = str(_uuid.uuid5(_uuid.NAMESPACE_URL, f"{DOMAIN}:{coord.entry.entry_id}"))
+
+            def _cloud_backup() -> dict | None:
+                cloud, thing = _connect(coord.client, coord.entry.data[CONF_USERNAME],
+                                        coord.entry.data[CONF_PASSWORD], terminal,
+                                        call.data.get("verification_code"))
+                best = None
+                for b in cloud.map_backups(thing):
+                    if b.get("mapId") == map_id and (best is None
+                            or (b.get("timestamp") or 0) > (best.get("timestamp") or 0)):
+                        best = b
+                return best
+
+            best = await hass.async_add_executor_job(_cloud_backup)
+            if not best or not best.get("mapUrl"):
+                raise ServiceValidationError(f"{call.service}: no cloud backup for map {map_id}")
+            url = best["mapUrl"]
+            md5 = best.get("mapMd5")
+            src = "cloud"
         else:
-            ip = await async_get_source_ip(hass, coord.client.host)
-            scheme = "https" if hass.http.ssl_certificate else "http"
-            base = f"{scheme}://{ip}:{hass.http.server_port}"
-        store = async_setup_map_restore(hass)
-        token = secrets.token_urlsafe(24)
-        store[token] = path
-        url = f"{base}/api/tapo_rv30/bkmap/{token}"
+            path = await hass.async_add_executor_job(_pick)
+            if path is None:
+                raise ServiceValidationError(
+                    f"{call.service}: no backup file for map {map_id} in {folder}; "
+                    "run fetch_cloud_map_backups first, or pass file:")
+            md5 = await hass.async_add_executor_job(
+                lambda: hashlib.md5(open(path, "rb").read()).hexdigest())  # noqa: SIM115
+            base = call.data.get("base_url")
+            if base:
+                base = str(base).rstrip("/")
+            else:
+                ip = await async_get_source_ip(hass, coord.client.host)
+                scheme = "https" if hass.http.ssl_certificate else "http"
+                base = f"{scheme}://{ip}:{hass.http.server_port}"
+            store = async_setup_map_restore(hass)
+            token = secrets.token_urlsafe(24)
+            store[token] = path
+            url = f"{base}/api/tapo_rv30/bkmap/{token}"
         try:
             # The robot's recovery takes two paths (seen in robot_control_node, build 260206):
             # recovering the ACTIVE map reloads the live SLAM map and relocalises, which fails
@@ -604,15 +634,16 @@ def async_setup_services(hass: HomeAssistant) -> None:
                 if process.get("process") in (100, "100") or process.get("status") not in (None, 0, 1):
                     break
         finally:
-            await asyncio.sleep(3)  # let a slow fetch finish before the URL stops serving
-            store.pop(token, None)
+            if store is not None and token is not None:
+                await asyncio.sleep(3)  # let a slow fetch finish before the URL stops serving
+                store.pop(token, None)
         await coord.async_request_map_refresh()
         status = process.get("status")
         # error_code 0 only means the request was accepted; status 13 is a commit failure,
         # status 2 means it was still downloading/applying when we stopped polling.
         note = ("the robot refused to commit the backup (status 13)" if status == 13
                 else "still applying when polling ended" if status == 2 else None)
-        return {"map_id": map_id, "map_name": names.get(map_id), "file": os.path.basename(path),
+        return {"map_id": map_id, "map_name": names.get(map_id), "source": src,
                 "md5": md5, "url": url, "error_code": code, "process": process, "note": note}
 
     hass.services.async_register(DOMAIN, "restore_map_backup", handle_restore_map_backup,

@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.22.0b9
+
+### Fixed
+
+- Local map restore: add use_cloud_url to hand the robot the backup's own TP-Link presigned URL instead of a locally-served copy (diagnostic for whether the robot requires a cloud-signed URL).
+
 ## v0.22.0b8
 
 ### Fixed

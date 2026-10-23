@@ -229,6 +229,10 @@ restore_map_backup:
       example: 1792705899
       selector:
         text: {}
+    use_cloud_url:
+      default: false
+      selector:
+        boolean: {}
     confirm:
       required: true
       default: false
