@@ -1,0 +1,46 @@
+"""Serve a downloaded map backup (.bkmap) to the robot for a local mapRecovery.
+
+The robot's firmware downloads the backup file from whatever URL mapRecovery is given -
+it does not have to be TP-Link's storage - then checks the file's MD5 and the account
+binding baked into it before applying it. So we host the backup HA already holds on a
+short-lived, unguessable local URL and hand that to the robot: restore works without any
+cloud round-trip, using only backups made by this account's own robot.
+"""
+from __future__ import annotations
+
+import os
+
+from aiohttp import web
+from homeassistant.components.http import HomeAssistantView
+from homeassistant.core import HomeAssistant, callback
+
+from .const import DOMAIN
+
+_KEY = f"{DOMAIN}_bkmap_store"
+
+
+class _BkmapView(HomeAssistantView):
+    """Hands one downloaded .bkmap back to the robot, by unguessable token."""
+
+    url = "/api/tapo_rv30/bkmap/{token}"
+    name = "api:tapo_rv30:bkmap"
+    requires_auth = False  # the robot has no HA credentials; the token is the guard
+
+    def __init__(self, store: dict[str, str]) -> None:
+        self._store = store
+
+    async def get(self, request: web.Request, token: str) -> web.StreamResponse:
+        path = self._store.get(token)
+        if not path or not os.path.isfile(path):
+            return web.Response(status=404)
+        return web.FileResponse(path)
+
+
+@callback
+def async_setup_map_restore(hass: HomeAssistant) -> dict[str, str]:
+    """Register the file view once and return the shared token -> path store."""
+    store = hass.data.get(_KEY)
+    if store is None:
+        store = hass.data[_KEY] = {}
+        hass.http.register_view(_BkmapView(store))
+    return store

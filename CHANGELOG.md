@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.22.0b4
+
+### New
+
+- **Local map restore** (`restore_map_backup`). Re-applies a downloaded map backup to the robot without the cloud: HA serves the `.bkmap` it already holds (from `fetch_cloud_map_backups`) on a short-lived LAN URL and the robot fetches and applies it with its own `mapRecovery` call. Works only with backups made by your own account (the robot checks the MD5 and the account binding baked into the file). Writes a whole map, so the robot must be docked and idle and you must pass `confirm: true`.
+
 ## v0.22.0b3
 
 ### Fixed

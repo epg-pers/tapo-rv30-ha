@@ -13,6 +13,7 @@ from .const import CONF_TRANSPORT, DEFAULT_PORT, DOMAIN, OPT_SHOW_PANEL, TRANSPO
 from .coordinator import TapoCoordinator
 from .frontend import async_remove_panel_if_present, async_setup_frontend, async_setup_panel
 from .map_edit_ws import async_setup_map_edit_ws
+from .map_restore import async_setup_map_restore
 from .planner import TapoPlanner
 from .planner_ws import async_setup_planner_ws
 from .services import async_setup_services, async_unload_services
@@ -49,6 +50,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     async_setup_services(hass)
     async_setup_planner_ws(hass)
     async_setup_map_edit_ws(hass)
+    async_setup_map_restore(hass)
     coordinator.planner.async_start()
     entry.async_on_unload(coordinator.planner.async_stop)
     if VOICE_KEY not in hass.data:

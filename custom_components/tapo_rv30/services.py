@@ -17,7 +17,7 @@ _LOGGER = logging.getLogger(__name__)
 SERVICES = ("clean_rooms", "set_room_settings", "clean_zone", "run_schedule", "send_raw",
             "get_clean_records", "run_preset", "set_map", "go_to",
             "add_schedule", "set_schedule", "remove_schedule", "remove_matter_fabric",
-            "fetch_cloud_map_backups", "save_map_setup", "apply_map_setup")
+            "fetch_cloud_map_backups", "save_map_setup", "apply_map_setup", "restore_map_backup")
 
 
 # Methods the integration itself calls while the robot is working.
@@ -516,6 +516,75 @@ def async_setup_services(hass: HomeAssistant) -> None:
                 "from_setup": setup.get("map_name") or setup.get("map_id"), "saved_at": setup.get("saved_at"),
                 "applied": applied, "counts_before": before, "counts_after": after}
 
+    async def handle_restore_map_backup(call: ServiceCall) -> ServiceResponse:
+        """Restore a downloaded map backup locally: serve the .bkmap HA already holds on a
+        short-lived LAN URL and have the robot fetch and apply it (no cloud round-trip)."""
+        import asyncio
+        import glob
+        import hashlib
+        import os
+        import secrets
+
+        from homeassistant.components.network import async_get_source_ip
+
+        from .map_restore import async_setup_map_restore
+        coord = _one(hass, call)
+        if not call.data.get("confirm"):
+            raise ServiceValidationError(f"{call.service}: this overwrites a map on the robot; set confirm: true")
+        if coord.busy:
+            raise ServiceValidationError(f"{call.service}: {coord.device_name} must be docked and idle")
+        map_id, names = await _setup_map_id(call, coord)
+        folder = hass.config.path(DOMAIN, "map_backups")
+
+        def _pick() -> str | None:
+            fname = call.data.get("file")
+            if fname:
+                p = os.path.join(folder, os.path.basename(str(fname)))
+                return p if os.path.isfile(p) else None
+            cands = sorted(glob.glob(os.path.join(folder, f"cloud_{map_id}_*.bin")))
+            return cands[-1] if cands else None
+
+        path = await hass.async_add_executor_job(_pick)
+        if path is None:
+            raise ServiceValidationError(
+                f"{call.service}: no backup file for map {map_id} in {folder}; "
+                "run fetch_cloud_map_backups first, or pass file:")
+        md5 = await hass.async_add_executor_job(
+            lambda: hashlib.md5(open(path, "rb").read()).hexdigest())  # noqa: SIM115
+
+        base = call.data.get("base_url")
+        if base:
+            base = str(base).rstrip("/")
+        else:
+            ip = await async_get_source_ip(hass, coord.client.host)
+            scheme = "https" if hass.http.ssl_certificate else "http"
+            base = f"{scheme}://{ip}:{hass.http.server_port}"
+        store = async_setup_map_restore(hass)
+        token = secrets.token_urlsafe(24)
+        store[token] = path
+        url = f"{base}/api/tapo_rv30/bkmap/{token}"
+        try:
+            # Recovery applies the backup's own map; make it the active one first.
+            info = await hass.async_add_executor_job(coord.client.send, "getMapInfo")
+            if (info.get("result") or {}).get("current_map_id") != map_id:
+                await hass.async_add_executor_job(coord.client.set_current_map, map_id)
+                await asyncio.sleep(5)
+            code = await hass.async_add_executor_job(coord.client.recover_map, map_id, md5, url)
+            process = {}
+            for _ in range(30):
+                await asyncio.sleep(2)
+                process = await hass.async_add_executor_job(coord.client.get_map_br_process)
+                if process.get("process") in (100, "100") or process.get("status") not in (None, 0, 1):
+                    break
+        finally:
+            await asyncio.sleep(3)  # let a slow fetch finish before the URL stops serving
+            store.pop(token, None)
+        await coord.async_request_map_refresh()
+        return {"map_id": map_id, "map_name": names.get(map_id), "file": os.path.basename(path),
+                "md5": md5, "url": url, "error_code": code, "process": process}
+
+    hass.services.async_register(DOMAIN, "restore_map_backup", handle_restore_map_backup,
+                                 supports_response=SupportsResponse.ONLY)
     hass.services.async_register(DOMAIN, "save_map_setup", handle_save_map_setup,
                                  supports_response=SupportsResponse.ONLY)
     hass.services.async_register(DOMAIN, "apply_map_setup", handle_apply_map_setup,
