@@ -1,10 +1,10 @@
 # Changelog
 
-## v0.22.0b1
+## v0.22.0b2
 
 ### New
 
-- **Map editor** on the sidebar page's new **Edit map** tab. Draw and delete no-go zones, virtual walls and carpets, place furniture, and rename rooms, then save them to the robot with its own editing API (no cloud). Changes are held locally with undo until you press Save; the robot must be docked and idle to save.
+- **Map editor** on the sidebar page's new **Edit map** tab. Draw and delete no-go zones and virtual walls, and place furniture, then save them to the robot with its own editing API (no cloud). Carpets and room names are drawn for context (view-only for now). Changes are held locally with undo until you press Save; the robot must be docked and idle to save.
 
 ## v0.21.0
 

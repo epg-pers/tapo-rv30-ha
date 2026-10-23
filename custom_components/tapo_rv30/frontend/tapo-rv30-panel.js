@@ -493,9 +493,10 @@ class TapoRV30Panel extends HTMLElement {
     const FURN = [[1, "Single bed"], [2, "Double bed"], [101, "Sofa"], [103, "Corner sofa"],
       [201, "Table & chairs"], [202, "Table"], [301, "TV unit"], [302, "Wardrobe"],
       [401, "Fridge"], [402, "Washer"], [503, "Plant"], [601, "Toilet"], [701, "Pet house"]];
+    // Carpets and room renaming are read-only for now: carpet writes do not persist
+    // standalone, and setAreaInfo "room" can disturb room geometry; both pending safe testing.
     const tools = [["select", "mdi:cursor-move", "Select"], ["forbid", "mdi:cancel", "No-go"],
-      ["virtual_wall", "mdi:wall", "Wall"], ["carpet_rectangle", "mdi:rug", "Carpet"],
-      ["furniture", "mdi:sofa", "Furniture"]];
+      ["virtual_wall", "mdi:wall", "Wall"], ["furniture", "mdi:sofa", "Furniture"]];
     pane.innerHTML = `<ha-card><div class="card">
       <div class="etools">${tools.map(([k, i, l]) => `<button class="btn etool" data-tool="${k}"><ha-icon icon="${i}"></ha-icon>${l}</button>`).join("")}
         <select class="efurn" title="Furniture type">${FURN.map(([c, n]) => `<option value="${c}">${n}</option>`).join("")}</select>
@@ -558,9 +559,9 @@ class TapoRV30Panel extends HTMLElement {
   _editRenderRooms() {
     const el = this._editEl.rooms;
     if (!this._edit.rooms.length) { el.innerHTML = ""; return; }
-    el.innerHTML = `<h5>Room names</h5>` + this._edit.rooms.map((rm, i) =>
-      `<div class="row"><div class="main"><div class="t">Room ${rm.id}</div></div><input data-room="${i}" value="${esc(rm.name || "")}"></div>`).join("");
-    el.querySelectorAll("[data-room]").forEach((inp) => inp.onchange = () => { this._edit.rooms[Number(inp.dataset.room)].name = inp.value; });
+    el.innerHTML = `<h5>Rooms</h5>` + this._edit.rooms.map((rm) =>
+      `<div class="row"><div class="main"><div class="t">${esc(rm.name || ("Room " + rm.id))}</div></div></div>`).join("") +
+      `<div class="ehint">Carpets and room renaming are view-only for now.</div>`;
   }
 
   _editDraw() {
@@ -614,7 +615,7 @@ class TapoRV30Panel extends HTMLElement {
     const inside = (verts) => { let hit = false; const pts = verts.map((p) => this._editMm2Px(p[0], p[1])); for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) { const [xi, yi] = pts[i], [xj, yj] = pts[j]; if ((yi > y) !== (yj > y) && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) hit = !hit; } return hit; };
     const near = (verts) => { const [x0, y0] = this._editMm2Px(verts[0][0], verts[0][1]), [x1, y1] = this._editMm2Px(verts[1][0], verts[1][1]); const L = Math.hypot(x1 - x0, y1 - y0) || 1; return Math.abs((y1 - y0) * x - (x1 - x0) * y + x1 * y0 - y1 * x0) / L < 8; };
     for (const [i, f] of (this._edit.furniture || []).entries()) if (inside(f.vertexs)) return { kind: "furniture", i };
-    for (const t of ["forbid", "carpet_rectangle", "carpet_round"]) for (const [i, a] of (this._edit.areas[t] || []).entries()) if (inside(a.vertexs)) return { kind: t, i };
+    for (const [i, a] of (this._edit.areas.forbid || []).entries()) if (inside(a.vertexs)) return { kind: "forbid", i };
     for (const [i, a] of (this._edit.areas.virtual_wall || []).entries()) if (near(a.vertexs)) return { kind: "virtual_wall", i };
     return null;
   }
@@ -623,9 +624,11 @@ class TapoRV30Panel extends HTMLElement {
   _editUndo() { const u = this._edit.undo.pop(); if (!u) return; const o = JSON.parse(u); this._edit.areas = o.areas; this._edit.furniture = o.furniture; this._edit.rooms = o.rooms; this._edit.sel = null; this._editRenderRooms(); this._editDraw(); }
 
   async _editSave() {
+    // Only the verified-safe layers are written: no-go zones, virtual walls and furniture.
+    // Carpets and rooms are left untouched (not sent), so they are preserved as-is.
     const payload = { type: "tapo_rv30/map/edit_apply", entity_id: this._robot, map_id: this._edit.mapId,
-      areas: this._edit.areas, furniture: this._edit.furniture };
-    if (this._edit.rooms.length) payload.rooms = this._edit.rooms.map((r) => ({ id: r.id, name: r.name }));
+      areas: { forbid: this._edit.areas.forbid || [], virtual_wall: this._edit.areas.virtual_wall || [] },
+      furniture: this._edit.furniture };
     this._editEl.status.textContent = "Saving to robot...";
     try { await this._hass.callWS(payload); this._editEl.status.textContent = "Saved."; this._editLoad(); }
     catch (err) { this._editEl.status.textContent = "Save failed: " + (err.message || err); }
