@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.23.1b1
+
+### Fixed
+
+- **Per-room "last cleaned" date** now updates for every kind of run. Room cleans and scheduled/auto-area cleans store the map as a full room segmentation rather than a cleaned-cell mask, so the old coverage check (which only counted cleaned-cell markers) never registered them and the room's date stayed stale. Coverage is now read from the robot's actual path, which is reliable across all record formats and correctly tells a single-room clean from a whole-floor one. The saved history is re-folded once on upgrade so existing dates correct themselves.
+
 ## v0.23.0
 
 ### New

@@ -154,3 +154,28 @@ def test_room_coverage_maps_record_cells_onto_live_rooms():
             px2[row * width + col] = 255
     rec["map_data"] = base64.b64encode(_lz4_literal(bytes(px2))).decode()
     assert room_coverage(rec, live, live_px)[1] == (12, 12)
+
+
+def _pos_array(points):
+    """Encode (x_mm, y_mm) points the way getCleanRecordExtraInfo does: an 8-byte header then
+    big-endian int16 pairs, LZ4 block, base64. Returns (pos_array, pos_len)."""
+    import struct
+    raw = b"\x00" * 8 + b"".join(struct.pack(">hh", x, y) for x, y in points)
+    return base64.b64encode(_lz4_literal(raw)).decode(), len(raw)
+
+
+def test_room_coverage_uses_path_not_segmentation():
+    from custom_components.tapo_rv30.mapdata import grid_pixels, room_coverage
+    live = _map()
+    live_px = grid_pixels(live)
+    # a record whose grid is the FULL room segmentation (both rooms present, no 255 mask) - the
+    # format auto-area cleans use. Only the path tells which room was actually cleaned.
+    rec = _map()
+    ox, oy = rec["real_origin_coor"][:2]
+    res = rec["resolution"]
+    # drive only through room 1 (cols 1-2, rows 1-2 in grid coords), away from room 2
+    pts = [(ox + gx * res, oy + gy * res) for gy in (1, 2) for gx in (1, 2)]
+    rec["pos_array"], rec["pos_len"] = _pos_array(pts)
+    cov = room_coverage(rec, live, live_px)
+    assert cov[1][0] > 0            # room 1 was driven, so it is counted as cleaned
+    assert cov[2] == (0, 12)        # room 2 is in the grid but was not driven: not cleaned

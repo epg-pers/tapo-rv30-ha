@@ -445,31 +445,75 @@ def grid_pixels(map_data: dict) -> bytes:
     return lz4_block_decompress(base64.b64decode(map_data["map_data"]), int(map_data["pix_len"]))
 
 
+# Half-width, in grid cells, of the swath the robot cleans as it drives (~250 mm at 50 mm/cell).
+_PATH_BRUSH = 2
+
+
+def _painted_cells(record: dict, live: dict) -> set[tuple[int, int]] | None:
+    """The live-map grid cells the run's path swept, or None if the record has no usable path.
+
+    The path (pos_array) is in world mm, the same frame as the live map, so each point maps
+    straight onto the live grid; a small brush around each point stands for the robot's width.
+    """
+    pos, plen = record.get("pos_array"), record.get("pos_len")
+    if not pos or not plen:
+        return None
+    try:
+        pts = decode_path(pos, int(plen))
+    except Exception:
+        return None
+    if len(pts) < 2:
+        return None
+    painted: set[tuple[int, int]] = set()
+    b = _PATH_BRUSH
+    for x_mm, y_mm in pts:
+        gx, gy = mm_to_grid(live, x_mm, y_mm)
+        cx, cy = round(gx), round(gy)
+        for dx in range(-b, b + 1):
+            for dy in range(-b, b + 1):
+                painted.add((cx + dx, cy + dy))
+    return painted
+
+
 def room_coverage(record: dict, live: dict, live_pixels: bytes) -> dict[int, tuple[int, int]]:
     """How much of each room a finished run covered: {room_id: (cleaned cells, room cells)}.
-    Cleaned cells (255 in the record grid) are mapped through mm coordinates onto the live
-    map's grid, so it works even if the two grids have different origins or sizes."""
-    rec_px = grid_pixels(record)
-    rw, rh = int(record["width"]), int(record["height"])
+
+    Which cells the robot cleaned is taken from its path (pos_array), painted onto the live
+    map's room grid with a brush the robot's width. The path is the one signal reliable across
+    every record format: some records carry a 255 'cleaned' mask over the whole floor, others
+    only the map's room segmentation (every room shown full size whatever was actually cleaned),
+    so counting grid cells over- or under-counts. If a record has no usable path, the 255 mask
+    is used as a fallback. Everything is mapped through mm, so differing origins or sizes between
+    the record and the live map do not matter."""
     lw, lh = int(live["width"]), int(live["height"])
-    rox, roy = record["real_origin_coor"][:2]
-    rres = record.get("resolution") or 50
     totals: dict[int, int] = {}
     for p in live_pixels:
         if 0 < p < 127 or 127 < p < 255:
             totals[p] = totals.get(p, 0) + 1
     cleaned: dict[int, int] = {}
-    for i, p in enumerate(rec_px):
-        if p != 255:
-            continue
-        gx, gy = i % rw, i // rw
-        if gy >= rh:
-            break
-        x_mm, y_mm = rox + (gx + 0.5) * rres, roy + (gy + 0.5) * rres
-        lx, ly = mm_to_grid(live, x_mm, y_mm)
-        lx, ly = int(lx), int(ly)
-        if 0 <= lx < lw and 0 <= ly < lh:
-            rid = live_pixels[ly * lw + lx]
-            if rid in totals:
-                cleaned[rid] = cleaned.get(rid, 0) + 1
+    painted = _painted_cells(record, live)
+    if painted is not None:
+        for gx, gy in painted:
+            if 0 <= gx < lw and 0 <= gy < lh:
+                rid = live_pixels[gy * lw + gx]
+                if rid in totals:
+                    cleaned[rid] = cleaned.get(rid, 0) + 1
+    else:
+        rec_px = grid_pixels(record)
+        rw, rh = int(record["width"]), int(record["height"])
+        rox, roy = record["real_origin_coor"][:2]
+        rres = record.get("resolution") or 50
+        for i, p in enumerate(rec_px):
+            if p != 255:
+                continue
+            gx, gy = i % rw, i // rw
+            if gy >= rh:
+                break
+            x_mm, y_mm = rox + (gx + 0.5) * rres, roy + (gy + 0.5) * rres
+            lx, ly = mm_to_grid(live, x_mm, y_mm)
+            lx, ly = int(lx), int(ly)
+            if 0 <= lx < lw and 0 <= ly < lh:
+                rid = live_pixels[ly * lw + lx]
+                if rid in totals:
+                    cleaned[rid] = cleaned.get(rid, 0) + 1
     return {rid: (cleaned.get(rid, 0), total) for rid, total in totals.items()}

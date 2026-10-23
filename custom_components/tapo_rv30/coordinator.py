@@ -56,6 +56,7 @@ _LOGGER = logging.getLogger(__name__)
 
 STATUS_RETRIES = 3          # attempts per poll before the entities go unavailable
 STATUS_RETRY_DELAY = 1.5    # seconds, doubled each retry
+_FRESHNESS_ALGO = 2         # per-room coverage logic; bump to re-fold saved history after a change
 
 
 # ---------------------------------------------------------------------------
@@ -257,8 +258,14 @@ class TapoCoordinator(DataUpdateCoordinator):
         self._freshness_loaded = True
         try:
             data = await self._freshness_store.async_load() or {}
-            self.rooms_last_cleaned = dict(data.get("rooms") or {})
-            self._processed_records = set(int(t) for t in data.get("processed") or [])
+            if data and data.get("algo") != _FRESHNESS_ALGO:
+                # The per-room coverage logic has changed; drop the saved table and the
+                # processed set so the history is re-folded with the new logic.
+                self.rooms_last_cleaned = {}
+                self._processed_records = set()
+            else:
+                self.rooms_last_cleaned = dict(data.get("rooms") or {})
+                self._processed_records = set(int(t) for t in data.get("processed") or [])
         except Exception as exc:
             _LOGGER.debug("Room freshness store unreadable: %s", exc)
 
@@ -324,7 +331,8 @@ class TapoCoordinator(DataUpdateCoordinator):
         if changed and self._freshness_store is not None:
             keep = sorted(self._processed_records)[-200:]
             self._processed_records = set(keep)
-            await self._freshness_store.async_save({"rooms": self.rooms_last_cleaned, "processed": keep})
+            await self._freshness_store.async_save(
+                {"algo": _FRESHNESS_ALGO, "rooms": self.rooms_last_cleaned, "processed": keep})
 
     def room_freshness(self) -> dict[str, dict]:
         """{room name: {last_cleaned, coverage}} for the current map."""
