@@ -566,11 +566,16 @@ def async_setup_services(hass: HomeAssistant) -> None:
         store[token] = path
         url = f"{base}/api/tapo_rv30/bkmap/{token}"
         try:
-            # Recovery applies the backup's own map; make it the active one first.
-            info = await hass.async_add_executor_job(coord.client.send, "getMapInfo")
-            if (info.get("result") or {}).get("current_map_id") != map_id:
-                await hass.async_add_executor_job(coord.client.set_current_map, map_id)
-                await asyncio.sleep(5)
+            # The robot's recovery takes two paths (seen in robot_control_node, build 260206):
+            # recovering the ACTIVE map reloads the live SLAM map and relocalises, which fails
+            # ("RequestLoadState load map failed") when the robot cannot localise on it. Recovering
+            # a NON-active map just stages the map files and succeeds. So by default we recover the
+            # map while it is NOT the active one. activate: true forces the live-reload path.
+            if call.data.get("activate"):
+                info = await hass.async_add_executor_job(coord.client.send, "getMapInfo")
+                if (info.get("result") or {}).get("current_map_id") != map_id:
+                    await hass.async_add_executor_job(coord.client.set_current_map, map_id)
+                    await asyncio.sleep(5)
             try:
                 code = await hass.async_add_executor_job(coord.client.recover_map, map_id, md5, url)
             except RuntimeError as exc:

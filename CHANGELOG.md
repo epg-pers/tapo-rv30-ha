@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.22.0b6
+
+### Fixed
+
+- Local map restore: recover the map while it is NOT the active one. Recovering the active map makes the robot reload the live SLAM map and relocalise, which fails when it cannot localise there ("RequestLoadState load map failed"); staging a non-active map applies cleanly. Pass activate: true to force the old live-reload path.
+
 ## v0.22.0b5
 
 ### Fixed

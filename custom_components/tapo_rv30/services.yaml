@@ -217,6 +217,10 @@ restore_map_backup:
       example: http://192.168.1.10:8123
       selector:
         text: {}
+    activate:
+      default: false
+      selector:
+        boolean: {}
     confirm:
       required: true
       default: false
