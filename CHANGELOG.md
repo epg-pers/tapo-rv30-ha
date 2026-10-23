@@ -1,94 +1,19 @@
 # Changelog
 
-## v0.21.0b14
+## v0.21.0
 
 ### New
 
-- Map setup: `apply_map_setup` gains `source_map` - apply a snapshot saved under a different map, so a re-mapped floor (which gets a new id) can be recovered from the old map's saved setup.
-- Save/Restore map setup buttons on the sidebar page's Maintenance tab.
-
-## v0.21.0b13
-
-### New
-
-- **Save / apply map setup** (`tapo_rv30.save_map_setup`, `tapo_rv30.apply_map_setup`). Snapshot a map's editable layers - no-go zones, virtual walls, carpets and room names - and write them back with the robot's own editing API (no cloud, no mapRecovery). This re-applies your zones and settings onto a re-mapped floor, the practical recovery the cloud restore can't do locally. The map shape itself is SLAM-only and not included; per-room suction/water/passes are preset-only on RV30 1.3.3 firmware so they are not part of this.
-
-## v0.21.0b12
+- **Save and re-apply your map setup** (`save_map_setup` / `apply_map_setup`, and Save/Restore buttons on the sidebar page's Maintenance tab). Snapshot a map's editable layers - no-go zones, virtual walls, carpets and room names - and write them back with the robot's own editing API. After the robot re-maps a floor, re-apply your zones and settings in one go; `apply_map_setup`'s `source_map` lets you apply an old map's setup to the new map. The map shape itself is rebuilt by the robot. (Per-room suction/water/passes stay preset-only on RV30 1.3.3 firmware.)
+- **Keep local copies of your cloud map backups** (`fetch_cloud_map_backups`). Logs in to your TP-Link account and downloads the backups made with the Tapo app's backup feature into `config/tapo_rv30/map_backups`, so they survive even if TP-Link deletes them. Supports two-step login.
 
 ### Fixed
 
-- Live map: the robot's path and dot no longer lag behind the position pulse. The card now cache-busts the map image on each update, so the browser fetches the fresh render instead of a stale cached one.
+- Live map: the robot's path and dot no longer lag behind the position pulse (the card now fetches the fresh render each update instead of a cached one).
 
-## v0.21.0b11
+### Notes
 
-### New
-
-- `tapo_rv30.cloud_firmware_info` (diagnostic, read-only): what TP-Link's firmware service offers this robot.
-
-### Fixed
-
-- The beta map actions are removed cleanly when the integration unloads.
-
-## v0.21.0b10
-
-### Changed
-
-- Restore map backup: S3-style response headers on the download link, and a `redirect` source (diagnostic) whose link redirects to TP-Link's copy.
-
-## v0.21.0b9
-
-### Changed
-
-- Restore map backup: `allow_missing_map` to try restoring a map the robot no longer lists (experimental), and the result lists the robot's maps before and after.
-
-## v0.21.0b8
-
-### Changed
-
-- Restore map backup: the download link ends in `robotVacMap/<map id>`, the same shape as TP-Link's own links.
-
-## v0.21.0b7
-
-### Changed
-
-- Restore map backup: the download link answers HEAD and byte-range requests like a storage bucket, ends in the backup's file name, and logs every request the robot makes.
-
-## v0.21.0b6
-
-### Changed
-
-- Restore map backup: serves the file with the same kind of headers as TP-Link's storage, and has a `dry_run` option for checking the download without touching the robot. Testing so far: restoring from TP-Link's copy works; the robot downloads Home Assistant's copy only over HTTPS with a valid certificate, and only restores the active map.
-
-## v0.21.0b5
-
-### New
-
-- **Restore map backup** (`tapo_rv30.restore_map_backup`, beta, being tested on a spare map). Restores a map from its backup as the Tapo app does, either from TP-Link's copy or from the copy saved in Home Assistant (served to the robot from a one-time link). Needs the robot docked and idle and `confirm: true`.
-- Downloaded backups are now saved as `.bin` (they are the robot's own binary backup format, not JSON).
-
-## v0.21.0b4
-
-### Fixed
-
-- Fetch cloud map backups: look up TP-Link's device server before listing devices (the device list lives on a different server from the login).
-
-## v0.21.0b3
-
-### New
-
-- Fetch cloud map backups: supports TP-Link two-step login. The first run emails you a code; run it again with `verification_code` and Home Assistant becomes a trusted device, so later runs need no code.
-
-## v0.21.0b2
-
-### Fixed
-
-- Fetch cloud map backups: trust TP-Link's own root certificates (as the Tapo app does), so the account login no longer fails certificate checks.
-
-## v0.21.0b1
-
-### New
-
-- **Fetch cloud map backups** (`tapo_rv30.fetch_cloud_map_backups`, beta, untested). Read-only: logs in to your TP-Link account, downloads the map backups you made with the Tapo app's backup feature, and saves them in `config/tapo_rv30/map_backups`, alongside the robot's current local map data when it is idle, so the two formats can be compared. It sends nothing to the robot except routine reads. First step towards local map backups.
+- Restoring a backup *file* to the robot (`mapRecovery`) is cloud/account-bound in firmware and cannot be driven from a local file - see the [protocol notes](https://epg-pers.github.io/tapo-rv30-ha/protocol/) for the full investigation. `save_map_setup`/`apply_map_setup` is the local recovery that does work.
 
 ## v0.20.0
 

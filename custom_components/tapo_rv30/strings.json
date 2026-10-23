@@ -334,50 +334,6 @@
         }
       }
     },
-    "restore_map_backup": {
-      "name": "Restore map backup (beta)",
-      "description": "Overwrite a map on the robot with its backup, as the Tapo app's restore does. Beta and only tested on a spare map: the robot must be docked and idle. Source local serves the copy saved by Fetch cloud map backups from Home Assistant; source cloud uses TP-Link's copy.",
-      "fields": {
-        "map_id": {
-          "name": "Map id",
-          "description": "The map to restore (its own backup is used)."
-        },
-        "source": {
-          "name": "Source",
-          "description": "local (the copy in Home Assistant), cloud (TP-Link's copy) or redirect (diagnostic: a Home Assistant link that redirects to TP-Link's copy)."
-        },
-        "base_url": {
-          "name": "Base URL",
-          "description": "How the robot reaches Home Assistant on your network, if not your internal URL."
-        },
-        "wait": {
-          "name": "Wait",
-          "description": "How long to follow the robot's restore progress."
-        },
-        "confirm": {
-          "name": "Confirm",
-          "description": "Required: this overwrites the map on the robot."
-        },
-        "dry_run": {
-          "name": "Dry run",
-          "description": "Prepare the download but do not send anything to the robot (for checking what it would receive)."
-        },
-        "allow_missing_map": {
-          "name": "Allow missing map",
-          "description": "Try even if the robot no longer lists this map (for recovering a deleted or lost map; experimental)."
-        }
-      }
-    },
-    "cloud_firmware_info": {
-      "name": "Cloud firmware info (diagnostic)",
-      "description": "Read-only. Ask TP-Link's firmware service what it offers this robot's hardware, as if it ran the given version.",
-      "fields": {
-        "current_version": {
-          "name": "Current version",
-          "description": "Version to report (default: a very old one)."
-        }
-      }
-    },
     "save_map_setup": {
       "name": "Save map setup",
       "description": "Snapshot a map's editable layers (rooms, no-go zones, virtual walls, carpets) to config/tapo_rv30/map_setups. Not the map shape itself. Defaults to the active map.",

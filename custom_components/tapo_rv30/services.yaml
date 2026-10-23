@@ -160,16 +160,6 @@ get_clean_records:
         number:
           min: 1
           max: 100
-cloud_firmware_info:
-  target:
-    entity:
-      domain: vacuum
-      integration: tapo_rv30
-  fields:
-    current_version:
-      example: 1.3.2 Build 250101 Rel.000000
-      selector:
-        text: {}
 save_map_setup:
   target:
     entity:
@@ -209,52 +199,6 @@ fetch_cloud_map_backups:
       example: "123456"
       selector:
         text: {}
-restore_map_backup:
-  target:
-    entity:
-      domain: vacuum
-      integration: tapo_rv30
-  fields:
-    map_id:
-      required: true
-      example: 1792702710
-      selector:
-        number:
-          min: 0
-          max: 4294967295
-          mode: box
-    source:
-      default: local
-      selector:
-        select:
-          options:
-          - local
-          - cloud
-          - redirect
-    base_url:
-      example: http://192.168.1.10:8123
-      selector:
-        text: {}
-    wait:
-      default: 180
-      selector:
-        number:
-          min: 0
-          max: 600
-          unit_of_measurement: s
-    dry_run:
-      default: false
-      selector:
-        boolean: {}
-    allow_missing_map:
-      default: false
-      selector:
-        boolean: {}
-    confirm:
-      required: true
-      default: false
-      selector:
-        boolean: {}
 run_preset:
   target:
     entity:

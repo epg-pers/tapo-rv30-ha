@@ -237,49 +237,6 @@ def _connect(client, username: str, password: str, terminal_uuid: str,
     return cloud, thing
 
 
-def cloud_backup_link(client, username: str, password: str, terminal_uuid: str, map_id: int) -> tuple[str, str]:
-    """(download link, md5) of the TP-Link cloud backup of map_id, as the app restores from."""
-    try:
-        cloud, thing = _connect(client, username, password, terminal_uuid)
-    except MfaRequired as exc:
-        raise CloudError("TP-Link wants a verification code; run fetch_cloud_map_backups first") from exc
-    for b in cloud.map_backups(thing):
-        if b.get("mapId") == map_id and b.get("mapUrl") and b.get("mapMd5"):
-            return b["mapUrl"], b["mapMd5"]
-    raise CloudError(f"no cloud backup of map {map_id}; back it up in the Tapo app first")
-
-
-def firmware_info(client, username: str, password: str, terminal_uuid: str, current_ver: str) -> dict:
-    """Diagnostic: what TP-Link's firmware service offers this robot's hardware, as if it
-    were on current_ver (the app's getLatestFwListForNonCloudDevices), plus the thing
-    API's own "latest firmware" view. Read-only."""
-    info = client.send("get_device_info")["result"]
-    try:
-        cloud, thing = _connect(client, username, password, terminal_uuid)
-    except MfaRequired as exc:
-        raise CloudError("TP-Link wants a verification code; run fetch_cloud_map_backups first") from exc
-    out: dict = {"device": {k: info.get(k) for k in ("model", "hw_ver", "fw_ver", "hw_id", "oem_id")}}
-    try:
-        out["non_cloud_list"] = cloud._account_post(cloud.app_server, "/v2/firmware/getLatestFwListForNonCloudDevices", {
-            "queryList": [{"hwId": info.get("hw_id"), "oemId": info.get("oem_id"), "currentFwVer": current_ver,
-                           "locale": "en_GB", "extendedReleaseLogTypes": []}]}, "firmware list", token=cloud.token)
-    except (CloudError, requests.RequestException) as exc:
-        out["non_cloud_list"] = f"error: {exc}"
-    try:
-        server = (thing.get("appServerUrl") or cloud.iot_server).rstrip("/")
-        out["thing_latest"] = cloud._get(f"{server}/v1/things/{thing['thingName']}/firmwares/latest", "latest firmware")
-    except (CloudError, requests.RequestException) as exc:
-        out["thing_latest"] = f"error: {exc}"
-    return out
-
-
-def local_backup_file(folder: str, map_id: int) -> str | None:
-    """Newest downloaded cloud backup of map_id in folder (full path)."""
-    names = sorted(n for n in (os.listdir(folder) if os.path.isdir(folder) else [])
-                   if n.startswith(f"cloud_{map_id}_") and "_snapshot" not in n)
-    return os.path.join(folder, names[-1]) if names else None
-
-
 def fetch_backups(client, username: str, password: str, terminal_uuid: str, folder: str,
                   local_reads: bool, code: str | None = None) -> dict:
     """Blocking: save every cloud map backup of this robot (plus, when the robot is idle,

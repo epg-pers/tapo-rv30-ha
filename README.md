@@ -79,6 +79,7 @@ about tomorrow.
 | Bundled map card (tap rooms, draw zones, floors) | yes | no, separate card project |
 | Sidebar page (schedules editor, history, drive, maintenance, settings) | yes | no |
 | Smart cleaning planner (room targets, people, motion sensors) | yes | no |
+| Map backup and recovery (local copies of cloud backups; save and re-apply no-go zones, walls, carpets, room names) | yes | no |
 | Dashboard strategy (whole dashboard in one line) | yes | no |
 | Tests and CI (hassfest, HACS, lint, unit tests) | yes | yes |
 | Documentation site | [yes](https://epg-pers.github.io/tapo-rv30-ha/) | README |

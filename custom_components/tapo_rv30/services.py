@@ -17,8 +17,7 @@ _LOGGER = logging.getLogger(__name__)
 SERVICES = ("clean_rooms", "set_room_settings", "clean_zone", "run_schedule", "send_raw",
             "get_clean_records", "run_preset", "set_map", "go_to",
             "add_schedule", "set_schedule", "remove_schedule", "remove_matter_fabric",
-            "fetch_cloud_map_backups", "restore_map_backup", "cloud_firmware_info",
-            "save_map_setup", "apply_map_setup")
+            "fetch_cloud_map_backups", "save_map_setup", "apply_map_setup")
 
 
 # Methods the integration itself calls while the robot is working.
@@ -434,137 +433,6 @@ def async_setup_services(hass: HomeAssistant) -> None:
         except Exception as exc:
             raise HomeAssistantError(f"{call.service}: {type(exc).__name__}: {exc}") from exc
 
-    async def handle_restore_map_backup(call: ServiceCall) -> ServiceResponse:
-        import asyncio
-        import os
-        import uuid
-
-        from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
-        from homeassistant.helpers.network import NoURLAvailableError, get_url
-
-        from .cloud import CloudError, cloud_backup_link, local_backup_file
-        from .maprestore import serve_data
-        coord = _one(hass, call)
-        if not call.data.get("confirm"):
-            raise ServiceValidationError(f"{call.service}: this overwrites a map on the robot; set confirm: true")
-        if coord.busy or coord.entry is None:
-            raise ServiceValidationError(f"{call.service}: {coord.device_name} must be docked and idle")
-        map_id = int(call.data["map_id"])
-        names = await hass.async_add_executor_job(coord.map_names)
-        if map_id not in names and not call.data.get("allow_missing_map"):
-            raise ServiceValidationError(f"{call.service}: no map {map_id} on the robot ({names})")
-        source = call.data.get("source", "local")
-        out: dict = {"map_id": map_id, "map_name": names.get(map_id, "(not on the robot)"), "source": source,
-                     "maps_before": {str(k): v for k, v in names.items()}}
-        link = None
-        try:
-            if source in ("cloud", "redirect"):
-                terminal = str(uuid.uuid5(uuid.NAMESPACE_URL, f"{DOMAIN}:{coord.entry.entry_id}"))
-                url, md5 = await hass.async_add_executor_job(
-                    cloud_backup_link, coord.client, coord.entry.data[CONF_USERNAME],
-                    coord.entry.data[CONF_PASSWORD], terminal, map_id)
-                out["url"] = "TP-Link cloud link"
-                if source == "redirect":
-                    # Diagnostic: our link, answering 302 to TP-Link's.
-                    base = call.data.get("base_url") or get_url(
-                        hass, allow_external=False, allow_cloud=False, prefer_external=False)
-                    url_path, _, link = serve_data(hass, "redirect", b"", f"robotVacMap/{map_id}", redirect=url)
-                    url = base.rstrip("/") + url_path
-                    out["url"] = base.rstrip("/") + "/api/tapo_rv30/map_backup/... -> TP-Link cloud link"
-            else:
-                path = await hass.async_add_executor_job(
-                    local_backup_file, hass.config.path(DOMAIN, "map_backups"), map_id)
-                if path is None:
-                    raise ServiceValidationError(f"{call.service}: no saved backup of map {map_id}; "
-                                                 "run fetch_cloud_map_backups first")
-                from pathlib import Path
-                data = await hass.async_add_executor_job(Path(path).read_bytes)
-                try:
-                    base = call.data.get("base_url") or get_url(
-                        hass, allow_external=False, allow_cloud=False, prefer_external=False)
-                except NoURLAvailableError as exc:
-                    raise ServiceValidationError(f"{call.service}: no internal URL for Home Assistant; "
-                                                 "set one or pass base_url") from exc
-                url_path, md5, link = serve_data(hass, os.path.basename(path), data, f"robotVacMap/{map_id}")
-                url = base.rstrip("/") + url_path
-                out.update(file=os.path.basename(path), url=base.rstrip("/") + "/api/tapo_rv30/map_backup/...")
-            out["md5"] = md5
-            if call.data.get("dry_run"):
-                # Serve the file but leave the robot alone, to check what a download returns.
-                if source == "local":
-                    out["url"] = url
-                else:
-                    import hashlib
-
-                    import requests
-                    resp = await hass.async_add_executor_job(
-                        lambda: requests.get(url, timeout=30, headers={"User-Agent": "SHIP/2.0"}))
-                    out["cloud_headers"] = {k: v for k, v in resp.headers.items() if not k.lower().startswith("x-amz-id")}
-                    out["cloud_status"] = resp.status_code
-                    out["cloud_body_md5"] = hashlib.md5(resp.content).hexdigest()
-                    from urllib.parse import urlparse
-                    parsed = urlparse(url)
-                    out["cloud_host"], out["cloud_path"] = parsed.hostname, parsed.path
-                return out
-            # mapRecovery only restores the active map; switch to it first (as the app does),
-            # or restoring a spare map silently no-ops with -3022.
-            info = await hass.async_add_executor_job(coord.client.send, "getMapInfo")
-            active = (info.get("result") or {}).get("current_map_id")
-            if active != map_id:
-                out["switched_active_map"] = {"from": active, "to": map_id}
-                await hass.async_add_executor_job(coord.client.set_current_map, map_id)
-                await asyncio.sleep(5)  # let it relocalise on the new map
-            resp = await hass.async_add_executor_job(
-                coord.client.send, "mapRecovery", {"map_id": map_id, "map_md5": md5, "url": url})
-            out["mapRecovery"] = resp
-            progress, seen_restore = [], False
-            for _ in range(int(call.data.get("wait", 180)) // 5):
-                await asyncio.sleep(5)
-                try:
-                    p = (await hass.async_add_executor_job(
-                        coord.client.send, "getMapBRProcess", {"map_id": map_id})).get("result")
-                except Exception as exc:
-                    p = {"error": str(exc)}
-                if not progress or progress[-1] != p:
-                    progress.append(p)
-                if isinstance(p, dict) and p.get("type") == 2:
-                    seen_restore = True
-                elif seen_restore and isinstance(p, dict) and p.get("type") == 0:
-                    break
-            out["progress"] = progress
-        except CloudError as exc:
-            raise HomeAssistantError(f"{call.service}: {exc}") from exc
-        except ServiceValidationError:
-            raise
-        except Exception as exc:
-            out["error"] = f"{type(exc).__name__}: {exc}"
-        if link is not None:
-            out["robot_downloads"] = link["hits"]
-        try:
-            after = await hass.async_add_executor_job(coord.map_names)
-            out["maps_after"] = {str(k): v for k, v in after.items()}
-        except Exception as exc:
-            out["maps_after"] = f"could not read: {exc}"
-        await coord.async_request_map_refresh()
-        return out
-
-    async def handle_cloud_firmware_info(call: ServiceCall) -> ServiceResponse:
-        import uuid
-
-        from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
-
-        from .cloud import CloudError, firmware_info
-        coord = _one(hass, call)
-        if coord.entry is None:
-            raise ServiceValidationError(f"{call.service}: no config entry")
-        terminal = str(uuid.uuid5(uuid.NAMESPACE_URL, f"{DOMAIN}:{coord.entry.entry_id}"))
-        try:
-            return await hass.async_add_executor_job(
-                firmware_info, coord.client, coord.entry.data[CONF_USERNAME], coord.entry.data[CONF_PASSWORD],
-                terminal, call.data.get("current_version") or "1.0.0 Build 000000 Rel.000000")
-        except CloudError as exc:
-            raise HomeAssistantError(f"{call.service}: {exc}") from exc
-
     async def _setup_map_id(call: ServiceCall, coord: TapoCoordinator) -> tuple[int, dict]:
         """(map_id, names) for a map-setup call: the 'map' field (name or id), else active."""
         names = await hass.async_add_executor_job(coord.map_names)
@@ -652,11 +520,7 @@ def async_setup_services(hass: HomeAssistant) -> None:
                                  supports_response=SupportsResponse.ONLY)
     hass.services.async_register(DOMAIN, "apply_map_setup", handle_apply_map_setup,
                                  supports_response=SupportsResponse.ONLY)
-    hass.services.async_register(DOMAIN, "cloud_firmware_info", handle_cloud_firmware_info,
-                                 supports_response=SupportsResponse.ONLY)
     hass.services.async_register(DOMAIN, "fetch_cloud_map_backups", handle_fetch_cloud_map_backups,
-                                 supports_response=SupportsResponse.ONLY)
-    hass.services.async_register(DOMAIN, "restore_map_backup", handle_restore_map_backup,
                                  supports_response=SupportsResponse.ONLY)
     hass.services.async_register(DOMAIN, "clean_rooms", handle_clean_rooms)
     hass.services.async_register(DOMAIN, "run_preset", handle_run_preset)
