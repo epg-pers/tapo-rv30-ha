@@ -87,6 +87,16 @@ h5 { margin: 12px 0 6px; font-size: .76em; font-weight: 500; letter-spacing: .04
 .stat .v { font-size: 1.4em; font-weight: 500; }
 .stat .l { font-size: .78em; color: var(--secondary-text-color); }
 canvas.chart { width: 100%; height: 140px; display: block; }
+.etools { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 8px; }
+.etool.on { background: var(--primary-color); color: var(--text-primary-color, #fff); }
+.efurn { padding: 7px 10px; border-radius: 10px; border: 1px solid var(--divider-color); background: var(--card-background-color); color: var(--primary-text-color); }
+.ehint { font-size: .8em; color: var(--secondary-text-color); margin-bottom: 8px; }
+.estage { background: #1b1b1b; border-radius: 10px; overflow: hidden; line-height: 0; }
+.ecanvas { width: 100%; height: auto; display: block; touch-action: none; cursor: crosshair; }
+.erooms { margin-top: 10px; } .erooms h5 { margin: 6px 0; }
+.erooms input { width: 150px; padding: 5px 8px; border-radius: 8px; border: 1px solid var(--divider-color); background: var(--card-background-color); color: var(--primary-text-color); }
+.ebtns { display: flex; gap: 8px; margin-top: 12px; align-items: center; flex-wrap: wrap; }
+.estatus { margin-top: 8px; min-height: 1.2em; }
 .bar-row { display: grid; grid-template-columns: 110px 1fr 60px; gap: 10px; align-items: center; font-size: .86em; padding: 5px 0; }
 .bar-row .track { height: 8px; border-radius: 4px; background: color-mix(in srgb, var(--primary-text-color) 10%, transparent); overflow: hidden; }
 .bar-row .track > div { height: 100%; border-radius: 4px; background: var(--primary-color); }
@@ -258,7 +268,7 @@ class TapoRV30Panel extends HTMLElement {
   _renderRight(first) {
     const right = this.shadowRoot.querySelector(".right");
     const tabs = [["schedules", "mdi:calendar-clock", "Schedules"], ["planner", "mdi:calendar-check", "Planner"], ["history", "mdi:history", "History"], ["rooms", "mdi:floor-plan", "Rooms"],
-                  ["drive", "mdi:gamepad-variant", "Drive"], ["maintenance", "mdi:wrench", "Maintenance"], ["settings", "mdi:tune", "Settings"]];
+                  ["drive", "mdi:gamepad-variant", "Drive"], ["edit", "mdi:pencil-ruler", "Edit map"], ["maintenance", "mdi:wrench", "Maintenance"], ["settings", "mdi:tune", "Settings"]];
     if (!right.querySelector(".tabs")) {
       right.innerHTML = `<div class="tabs">${tabs.map(([k, i, l]) => `<button data-tab="${k}"><ha-icon icon="${i}"></ha-icon>${l}</button>`).join("")}</div><div class="pane"></div>`;
       right.querySelectorAll(".tabs button").forEach((b) => b.onclick = () => { if (this._stopDrive) this._stopDrive(); this._tab = b.dataset.tab; this._editing = null; this._planOpen = null; this._renderRight(true); });
@@ -267,11 +277,13 @@ class TapoRV30Panel extends HTMLElement {
     const pane = right.querySelector(".pane");
     if (this._tab === "planner") this._ensurePlanSub(); else this._dropPlanSub();
     const sig = JSON.stringify([this._tab, this._robot, this._editing && this._editing.id,
-      this._tab === "planner" ? [this._planRev, this._planOpen] : this._signature()]);
+      this._tab === "planner" ? [this._planRev, this._planOpen]
+        : this._tab === "edit" ? "edit"   // the editor owns its canvas; don't re-render on map updates
+        : this._signature()]);
     if (!first && sig === this._paneSig) return;
     this._paneSig = sig;
     ({ schedules: this._paneSchedules, history: this._paneHistory, rooms: this._paneRooms, drive: this._paneDrive,
-       maintenance: this._paneMaintenance, settings: this._paneSettings, planner: this._panePlanner }[this._tab]).call(this, pane);
+       edit: this._paneEdit, maintenance: this._paneMaintenance, settings: this._paneSettings, planner: this._panePlanner }[this._tab]).call(this, pane);
   }
 
   _signature() {
@@ -474,6 +486,149 @@ class TapoRV30Panel extends HTMLElement {
     }).join("");
     pane.innerHTML = `<ha-card><div class="card"><h3><span>Rooms and freshness</span></h3>${rows || `<div class="empty">No rooms on the current map.</div>`}</div></ha-card>`;
     pane.querySelectorAll("[data-room]").forEach((b) => b.onclick = () => this._call(DOMAIN, "clean_rooms", { rooms: [b.dataset.room] }, { entity_id: this._robot }));
+  }
+
+  // ---- map editor ----------------------------------------------------------------------
+  _paneEdit(pane) {
+    const FURN = [[1, "Single bed"], [2, "Double bed"], [101, "Sofa"], [103, "Corner sofa"],
+      [201, "Table & chairs"], [202, "Table"], [301, "TV unit"], [302, "Wardrobe"],
+      [401, "Fridge"], [402, "Washer"], [503, "Plant"], [601, "Toilet"], [701, "Pet house"]];
+    const tools = [["select", "mdi:cursor-move", "Select"], ["forbid", "mdi:cancel", "No-go"],
+      ["virtual_wall", "mdi:wall", "Wall"], ["carpet_rectangle", "mdi:rug", "Carpet"],
+      ["furniture", "mdi:sofa", "Furniture"]];
+    pane.innerHTML = `<ha-card><div class="card">
+      <div class="etools">${tools.map(([k, i, l]) => `<button class="btn etool" data-tool="${k}"><ha-icon icon="${i}"></ha-icon>${l}</button>`).join("")}
+        <select class="efurn" title="Furniture type">${FURN.map(([c, n]) => `<option value="${c}">${n}</option>`).join("")}</select>
+        <button class="btn edel" title="Delete selected"><ha-icon icon="mdi:delete"></ha-icon></button></div>
+      <div class="ehint">Pick a tool, then draw on the map. Changes are saved to the robot only when you press Save.</div>
+      <div class="estage"><canvas class="ecanvas"></canvas></div>
+      <div class="erooms"></div>
+      <div class="ebtns">
+        <button class="btn eundo"><ha-icon icon="mdi:undo"></ha-icon>Undo</button>
+        <button class="btn ecancel"><ha-icon icon="mdi:refresh"></ha-icon>Discard</button>
+        <button class="go esave"><ha-icon icon="mdi:content-save"></ha-icon>Save to robot</button>
+      </div>
+      <div class="s estatus"></div>
+    </div></ha-card>`;
+    const q = (s) => pane.querySelector(s);
+    this._editEl = { canvas: q(".ecanvas"), rooms: q(".erooms"), status: q(".estatus"), furn: q(".efurn") };
+    this._edit = { tool: "select", sel: null, areas: null, furniture: [], rooms: [], undo: [], img: null, geom: null, mapId: null };
+    pane.querySelectorAll(".etool").forEach((b) => b.onclick = () => {
+      this._edit.tool = b.dataset.tool; this._edit.sel = null;
+      pane.querySelectorAll(".etool").forEach((x) => x.classList.toggle("on", x === b)); this._editDraw();
+    });
+    q(".etool").classList.add("on");
+    q(".edel").onclick = () => this._editDelete();
+    q(".eundo").onclick = () => this._editUndo();
+    q(".ecancel").onclick = () => this._editLoad();
+    q(".esave").onclick = () => this._editSave();
+    const c = this._editEl.canvas;
+    c.onpointerdown = (e) => this._editDown(e);
+    c.onpointermove = (e) => this._editMove(e);
+    c.onpointerup = (e) => this._editUp(e);
+    this._editLoad();
+  }
+
+  _editGeom() { return this._edit.geom; }
+  _editMm2Px(x, y) { const g = this._edit.geom, s = g.scale_px_per_cell, r = g.resolution_mm, [ox, oy] = g.real_origin_mm, gh = g.grid_size[1]; return [((x - ox) / r) * s + s / 2, (gh - 1 - (y - oy) / r) * s + s / 2]; }
+  _editPx2Mm(x, y) { const g = this._edit.geom, s = g.scale_px_per_cell, r = g.resolution_mm, [ox, oy] = g.real_origin_mm, gh = g.grid_size[1]; return [Math.round(ox + ((x - s / 2) / s) * r), Math.round(oy + (gh - 1 - (y - s / 2) / s) * r)]; }
+  _editPoint(e) { const c = this._editEl.canvas, b = c.getBoundingClientRect(); return [(e.clientX - b.left) / b.width * c.width, (e.clientY - b.top) / b.height * c.height]; }
+
+  async _editLoad() {
+    const r = this._related(this._robot), cam = this._st(r.camera);
+    const geom = cam && cam.attributes.map_geometry;
+    this._editEl.status.textContent = "Loading map...";
+    if (!geom) { this._editEl.status.textContent = "No map available yet."; return; }
+    let res;
+    try { res = await this._hass.callWS({ type: "tapo_rv30/map/edit_get", entity_id: this._robot }); }
+    catch (err) { this._editEl.status.textContent = "Could not read the map: " + (err.message || err); return; }
+    const img = new Image();
+    img.onload = () => {
+      const c = this._editEl.canvas; c.width = img.naturalWidth; c.height = img.naturalHeight;
+      this._edit.img = img; this._edit.geom = geom; this._edit.mapId = res.map_id;
+      this._edit.areas = res.areas; this._edit.furniture = res.furniture || []; this._edit.rooms = res.rooms || [];
+      this._edit.sel = null; this._edit.undo = [];
+      this._editRenderRooms(); this._editDraw();
+      this._editEl.status.textContent = "";
+    };
+    const src = cam.attributes.entity_picture;
+    img.src = src.startsWith("http") ? src : this._hass.hassUrl(src);
+  }
+
+  _editRenderRooms() {
+    const el = this._editEl.rooms;
+    if (!this._edit.rooms.length) { el.innerHTML = ""; return; }
+    el.innerHTML = `<h5>Room names</h5>` + this._edit.rooms.map((rm, i) =>
+      `<div class="row"><div class="main"><div class="t">Room ${rm.id}</div></div><input data-room="${i}" value="${esc(rm.name || "")}"></div>`).join("");
+    el.querySelectorAll("[data-room]").forEach((inp) => inp.onchange = () => { this._edit.rooms[Number(inp.dataset.room)].name = inp.value; });
+  }
+
+  _editDraw() {
+    const c = this._editEl.canvas, ctx = c.getContext("2d"); if (!this._edit.img) return;
+    ctx.clearRect(0, 0, c.width, c.height); ctx.drawImage(this._edit.img, 0, 0);
+    const poly = (verts) => { ctx.beginPath(); verts.forEach((p, i) => { const [x, y] = this._editMm2Px(p[0], p[1]); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }); };
+    const styles = { forbid: ["rgba(219,68,55,.22)", "rgba(219,68,55,.95)"], carpet_rectangle: ["rgba(186,140,90,.30)", "rgba(150,100,55,.95)"], carpet_round: ["rgba(186,140,90,.30)", "rgba(150,100,55,.95)"] };
+    for (const t of ["forbid", "carpet_rectangle", "carpet_round"]) for (const [i, a] of (this._edit.areas[t] || []).entries()) {
+      poly(a.vertexs); ctx.closePath(); ctx.fillStyle = styles[t][0]; ctx.fill();
+      ctx.strokeStyle = styles[t][1]; ctx.lineWidth = this._editSelMatch(t, i) ? 4 : 2; ctx.setLineDash(t === "forbid" ? [] : [6, 4]); ctx.stroke(); ctx.setLineDash([]);
+    }
+    for (const [i, a] of (this._edit.areas.virtual_wall || []).entries()) {
+      poly(a.vertexs); ctx.strokeStyle = "rgba(150,70,210,.95)"; ctx.lineWidth = this._editSelMatch("virtual_wall", i) ? 6 : 4; ctx.stroke();
+    }
+    for (const [i, f] of (this._edit.furniture || []).entries()) {
+      poly(f.vertexs); ctx.closePath(); ctx.fillStyle = "rgba(90,120,170,.30)"; ctx.fill();
+      ctx.strokeStyle = "rgba(60,90,150,.95)"; ctx.lineWidth = this._editSelMatch("furniture", i) ? 4 : 2; ctx.stroke();
+    }
+    if (this._edit.drag) { const d = this._edit.drag; ctx.strokeStyle = "rgba(40,110,220,.95)"; ctx.lineWidth = 2; ctx.setLineDash([5, 4]); if (d.line) { ctx.beginPath(); ctx.moveTo(d.x0, d.y0); ctx.lineTo(d.x1, d.y1); ctx.stroke(); } else { ctx.strokeRect(Math.min(d.x0, d.x1), Math.min(d.y0, d.y1), Math.abs(d.x1 - d.x0), Math.abs(d.y1 - d.y0)); } ctx.setLineDash([]); }
+  }
+
+  _editSelMatch(kind, i) { const s = this._edit.sel; return s && s.kind === kind && s.i === i; }
+  _editSnapshot() { this._edit.undo.push(JSON.stringify({ areas: this._edit.areas, furniture: this._edit.furniture, rooms: this._edit.rooms })); if (this._edit.undo.length > 30) this._edit.undo.shift(); }
+
+  _editDown(e) {
+    const [x, y] = this._editPoint(e); const t = this._edit.tool;
+    if (t === "select") { this._edit.sel = this._editHit(x, y); if (this._edit.sel) this._edit.moveFrom = this._editPx2Mm(x, y); this._editDraw(); return; }
+    if (t === "furniture") { this._editSnapshot(); const [mx, my] = this._editPx2Mm(x, y); const hw = 350, hh = 250; const type = Number(this._editEl.furn.value); this._edit.furniture.push({ type, id: 0, angle: 0, vertexs: [[mx - hw, my - hh], [mx + hw, my - hh], [mx + hw, my + hh], [mx - hw, my + hh]] }); this._edit.sel = { kind: "furniture", i: this._edit.furniture.length - 1 }; this._editDraw(); return; }
+    this._edit.drag = { x0: x, y0: y, x1: x, y1: y, line: t === "virtual_wall" };
+  }
+  _editMove(e) {
+    const [x, y] = this._editPoint(e);
+    if (this._edit.drag) { this._edit.drag.x1 = x; this._edit.drag.y1 = y; this._editDraw(); return; }
+    if (this._edit.tool === "select" && this._edit.sel && this._edit.moveFrom && (e.buttons & 1)) {
+      const [mx, my] = this._editPx2Mm(x, y); const dx = mx - this._edit.moveFrom[0], dy = my - this._edit.moveFrom[1];
+      if (!this._edit.moving) { this._editSnapshot(); this._edit.moving = true; }
+      this._edit.moveFrom = [mx, my]; const it = this._editSelItem(); if (it) it.vertexs = it.vertexs.map(([a, b]) => [a + dx, b + dy]); this._editDraw();
+    }
+  }
+  _editUp(e) {
+    this._edit.moving = false; this._edit.moveFrom = null;
+    const d = this._edit.drag; if (!d) return; this._edit.drag = null;
+    const moved = Math.hypot(d.x1 - d.x0, d.y1 - d.y0); if (moved < 6) { this._editDraw(); return; }
+    const [ax, ay] = this._editPx2Mm(d.x0, d.y0), [bx, by] = this._editPx2Mm(d.x1, d.y1); this._editSnapshot();
+    if (this._edit.tool === "virtual_wall") { (this._edit.areas.virtual_wall ||= []).push({ id: 0, vertexs: [[ax, ay], [bx, by]] }); }
+    else { const t = this._edit.tool; (this._edit.areas[t] ||= []).push({ id: 0, vertexs: [[ax, ay], [bx, ay], [bx, by], [ax, by]] }); }
+    this._editDraw();
+  }
+
+  _editHit(x, y) {
+    const inside = (verts) => { let hit = false; const pts = verts.map((p) => this._editMm2Px(p[0], p[1])); for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) { const [xi, yi] = pts[i], [xj, yj] = pts[j]; if ((yi > y) !== (yj > y) && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) hit = !hit; } return hit; };
+    const near = (verts) => { const [x0, y0] = this._editMm2Px(verts[0][0], verts[0][1]), [x1, y1] = this._editMm2Px(verts[1][0], verts[1][1]); const L = Math.hypot(x1 - x0, y1 - y0) || 1; return Math.abs((y1 - y0) * x - (x1 - x0) * y + x1 * y0 - y1 * x0) / L < 8; };
+    for (const [i, f] of (this._edit.furniture || []).entries()) if (inside(f.vertexs)) return { kind: "furniture", i };
+    for (const t of ["forbid", "carpet_rectangle", "carpet_round"]) for (const [i, a] of (this._edit.areas[t] || []).entries()) if (inside(a.vertexs)) return { kind: t, i };
+    for (const [i, a] of (this._edit.areas.virtual_wall || []).entries()) if (near(a.vertexs)) return { kind: "virtual_wall", i };
+    return null;
+  }
+  _editSelItem() { const s = this._edit.sel; if (!s) return null; return s.kind === "furniture" ? this._edit.furniture[s.i] : this._edit.areas[s.kind][s.i]; }
+  _editDelete() { const s = this._edit.sel; if (!s) return; this._editSnapshot(); if (s.kind === "furniture") this._edit.furniture.splice(s.i, 1); else this._edit.areas[s.kind].splice(s.i, 1); this._edit.sel = null; this._editDraw(); }
+  _editUndo() { const u = this._edit.undo.pop(); if (!u) return; const o = JSON.parse(u); this._edit.areas = o.areas; this._edit.furniture = o.furniture; this._edit.rooms = o.rooms; this._edit.sel = null; this._editRenderRooms(); this._editDraw(); }
+
+  async _editSave() {
+    const payload = { type: "tapo_rv30/map/edit_apply", entity_id: this._robot, map_id: this._edit.mapId,
+      areas: this._edit.areas, furniture: this._edit.furniture };
+    if (this._edit.rooms.length) payload.rooms = this._edit.rooms.map((r) => ({ id: r.id, name: r.name }));
+    this._editEl.status.textContent = "Saving to robot...";
+    try { await this._hass.callWS(payload); this._editEl.status.textContent = "Saved."; this._editLoad(); }
+    catch (err) { this._editEl.status.textContent = "Save failed: " + (err.message || err); }
   }
 
   // ---- maintenance ---------------------------------------------------------------------
