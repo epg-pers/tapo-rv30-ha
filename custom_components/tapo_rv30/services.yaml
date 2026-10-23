@@ -225,6 +225,10 @@ restore_map_backup:
       default: false
       selector:
         boolean: {}
+    map_id:
+      example: 1792705899
+      selector:
+        text: {}
     confirm:
       required: true
       default: false

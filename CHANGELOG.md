@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.22.0b8
+
+### Fixed
+
+- Local map restore: add a map_id override so a deleted / lost map can be restored (the real recovery case), where name resolution cannot find it.
+
 ## v0.22.0b7
 
 ### Fixed

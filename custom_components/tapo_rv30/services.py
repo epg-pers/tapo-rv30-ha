@@ -534,7 +534,13 @@ def async_setup_services(hass: HomeAssistant) -> None:
             raise ServiceValidationError(
                 f"{call.service}: {coord.device_name} must be docked and idle (force: true to override - "
                 "recovery needs the robot able to relocalise, which it cannot do while charging on the dock)")
-        map_id, names = await _setup_map_id(call, coord)
+        # map_id override: restore a map that no longer exists (a deleted / lost slot),
+        # where name resolution cannot find it. Otherwise resolve by name/id as usual.
+        if call.data.get("map_id") is not None:
+            map_id = int(call.data["map_id"])
+            names = await hass.async_add_executor_job(coord.map_names)
+        else:
+            map_id, names = await _setup_map_id(call, coord)
         folder = hass.config.path(DOMAIN, "map_backups")
 
         def _pick() -> str | None:
