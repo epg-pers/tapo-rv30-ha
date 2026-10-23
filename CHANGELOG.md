@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.22.0b5
+
+### Fixed
+
+- Local map restore: pick the real backup file, never the snapshot preview image, and give clear messages when the robot refuses (-3022 pending recovery, -3023 no cloud link).
+
 ## v0.22.0b4
 
 ### New

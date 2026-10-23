@@ -520,7 +520,6 @@ def async_setup_services(hass: HomeAssistant) -> None:
         """Restore a downloaded map backup locally: serve the .bkmap HA already holds on a
         short-lived LAN URL and have the robot fetch and apply it (no cloud round-trip)."""
         import asyncio
-        import glob
         import hashlib
         import os
         import secrets
@@ -541,8 +540,11 @@ def async_setup_services(hass: HomeAssistant) -> None:
             if fname:
                 p = os.path.join(folder, os.path.basename(str(fname)))
                 return p if os.path.isfile(p) else None
-            cands = sorted(glob.glob(os.path.join(folder, f"cloud_{map_id}_*.bin")))
-            return cands[-1] if cands else None
+            import re
+            # cloud_<map_id>_<timestamp>.bin only - never the _snapshot preview image.
+            pat = re.compile(rf"^cloud_{map_id}_\d+\.bin$")
+            cands = sorted(f for f in os.listdir(folder) if pat.match(f))
+            return os.path.join(folder, cands[-1]) if cands else None
 
         path = await hass.async_add_executor_job(_pick)
         if path is None:
@@ -569,7 +571,19 @@ def async_setup_services(hass: HomeAssistant) -> None:
             if (info.get("result") or {}).get("current_map_id") != map_id:
                 await hass.async_add_executor_job(coord.client.set_current_map, map_id)
                 await asyncio.sleep(5)
-            code = await hass.async_add_executor_job(coord.client.recover_map, map_id, md5, url)
+            try:
+                code = await hass.async_add_executor_job(coord.client.recover_map, map_id, md5, url)
+            except RuntimeError as exc:
+                msg = str(exc)
+                if "-3022" in msg:
+                    raise HomeAssistantError(
+                        f"{call.service}: the robot refused the restore (-3022) - a previous recovery is "
+                        "likely still pending. Power-cycle the robot to clear it, then try once more.") from exc
+                if "-3023" in msg:
+                    raise HomeAssistantError(
+                        f"{call.service}: the robot refused the restore (-3023) - it has no cloud link. "
+                        "The robot must be online with TP-Link reachable for a recovery.") from exc
+                raise HomeAssistantError(f"{call.service}: {msg}") from exc
             process = {}
             for _ in range(30):
                 await asyncio.sleep(2)
