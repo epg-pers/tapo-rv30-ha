@@ -505,6 +505,14 @@ def async_setup_services(hass: HomeAssistant) -> None:
                     parsed = urlparse(url)
                     out["cloud_host"], out["cloud_path"] = parsed.hostname, parsed.path
                 return out
+            # mapRecovery only restores the active map; switch to it first (as the app does),
+            # or restoring a spare map silently no-ops with -3022.
+            info = await hass.async_add_executor_job(coord.client.send, "getMapInfo")
+            active = (info.get("result") or {}).get("current_map_id")
+            if active != map_id:
+                out["switched_active_map"] = {"from": active, "to": map_id}
+                await hass.async_add_executor_job(coord.client.set_current_map, map_id)
+                await asyncio.sleep(5)  # let it relocalise on the new map
             resp = await hass.async_add_executor_job(
                 coord.client.send, "mapRecovery", {"map_id": map_id, "map_md5": md5, "url": url})
             out["mapRecovery"] = resp
