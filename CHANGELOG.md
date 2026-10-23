@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.22.0b10
+
+### New
+
+- **Map backup restore now works.** `restore_map_backup` restores one of your cloud map backups to the robot, triggered from Home Assistant - no app needed. The robot fetches the backup from its own TP-Link cloud URL (it will not commit a locally-served copy) and applies it; it works with the robot docked. Verified end to end: a change to the map was reverted back to the backed-up state.
+
+
 ## v0.22.0b9
 
 ### Fixed

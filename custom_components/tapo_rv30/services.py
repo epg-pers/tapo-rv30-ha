@@ -554,12 +554,14 @@ def async_setup_services(hass: HomeAssistant) -> None:
             cands = sorted(f for f in os.listdir(folder) if pat.match(f))
             return os.path.join(folder, cands[-1]) if cands else None
 
-        # use_cloud_url: hand the robot the backup's OWN TP-Link presigned URL (as the app does),
-        # instead of serving our local copy. Tests whether the robot requires a cloud-signed URL.
+        # The robot only COMMITS a recovery when the backup is fetched from its own TP-Link
+        # cloud (S3) URL - it downloads any URL but rejects the commit of a locally-served copy.
+        # So default to the cloud presigned URL (as the app does); use_cloud_url: false falls
+        # back to serving our local copy (download works, but the robot will not apply it).
         store = None
         token = None
         src = "local"
-        if call.data.get("use_cloud_url"):
+        if call.data.get("use_cloud_url", True):
             import uuid as _uuid
 
             from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
