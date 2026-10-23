@@ -1,9 +1,5 @@
 # Changelog
 
-## v0.22.0b12
-
-Release candidate for 0.22.0 (code cleanup and docs). See the 0.22.0 notes below.
-
 ## v0.22.0
 
 ### New
