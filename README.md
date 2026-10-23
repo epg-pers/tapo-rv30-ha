@@ -64,7 +64,8 @@ Several forks of this project exist. The only one still maintained is
 between March and August 2026. Since its 3.0.1 release, TapoVac-ADV includes many of this
 project's features, adapted from here as its README credits. Checked on 2026-10-22 against
 TapoVac-ADV 3.0.2 by reading its code, so this is what shipped on that day, not a promise
-about tomorrow.
+about tomorrow. Its 4.0.0 betas (unreleased as stable, untested on hardware at the time of
+writing) port this project's smart planner and sidebar page from v0.20.0, credited to here.
 
 | | This project | TapoVac-ADV 3.0.2 |
 |---|:---:|:---:|
@@ -77,8 +78,8 @@ about tomorrow.
 | Go to a point | yes, tap the map or call the service | yes, in the separate VacuumCard-ADV card |
 | Remote drive | yes, joystick on the sidebar page | yes, in the separate VacuumCard-ADV card |
 | Bundled map card (tap rooms, draw zones, floors) | yes | no, separate card project |
-| Sidebar page (schedules editor, history, drive, maintenance, settings) | yes | no |
-| Smart cleaning planner (room targets, people, motion sensors) | yes | no |
+| Sidebar page (schedules editor, history, drive, maintenance, settings) | yes | no in 3.0.2; ported from here in the 4.0.0 betas |
+| Smart cleaning planner (room targets, people, motion sensors) | yes | no in 3.0.2; ported from here in the 4.0.0 betas |
 | Map backup and recovery (local copies of cloud backups; save and re-apply no-go zones, walls, carpets, room names) | yes | no |
 | Dashboard strategy (whole dashboard in one line) | yes | no |
 | Tests and CI (hassfest, HACS, lint, unit tests) | yes | yes |
