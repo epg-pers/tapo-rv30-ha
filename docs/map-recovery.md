@@ -48,6 +48,18 @@ If the robot can't reach Home Assistant on the LAN at all, `use_cloud_url: true`
 handing the robot the backup's own TP-Link URL instead (this needs your TP-Link login, as for
 `fetch_cloud_map_backups`).
 
+## See your backups before you restore
+
+The sidebar page's **Backups** tab shows every backup Home Assistant holds as a grid of
+thumbnails, so you can tell which map a backup is and what it looked like before you put it
+back. Tap a thumbnail to see it full size; press **Restore** on one to restore it to the robot
+(the same `restore_map_backup` as above, docked and idle). **Fetch from cloud** downloads your
+latest TP-Link backups without leaving the page.
+
+Each backup is pictured from the best source it has: the robot's own snapshot image, or - when
+there isn't one - the saved map drawn exactly like the live map. The `.bkmap` file itself is
+also decoded, so each backup shows its explored floor area, dock position and room count.
+
 ## Save and re-apply your map setup
 
 A lighter-weight recovery for the common case - you re-mapped a floor and just want your zones

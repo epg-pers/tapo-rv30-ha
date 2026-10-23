@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.23.0b1
+
+### New
+
+- **Backup map viewer** on the sidebar page's new **Backups** tab. See every map backup Home Assistant holds as a thumbnail grid, tap one to view it full size, and restore it to the robot in one press. Each backup is pictured from the best source available - the robot's own snapshot, or the saved map rendered exactly like the live map - and the `.bkmap` file itself is decoded to show the map's explored area, dock and room count. **Fetch from cloud** downloads your latest TP-Link backups without leaving the page.
+
 ## v0.22.0
 
 ### New

@@ -65,6 +65,15 @@ it. The robot must be docked and idle to save. Carpets and room names are drawn 
 are view-only for now. Behind the scenes this is the robot's own editing API (`setAreaInfo` /
 `setFurnitureInfo`), the same one the Tapo app uses.
 
+### Backups
+
+Every map backup Home Assistant holds, as a grid of thumbnails. Tap one to see it full size, or
+press **Restore** to put it back on the robot (docked and idle). **Fetch from cloud** downloads
+your latest TP-Link backups into `config/tapo_rv30/map_backups` without leaving the page. Each
+backup is pictured from the robot's own snapshot or the saved map drawn like the live map, and
+its `.bkmap` is decoded to show the explored floor area, dock and room count. See
+[map backup and recovery](map-recovery.md) for the detail.
+
 ### Maintenance
 
 Consumable life bars (amber under 30 percent, red under 10), Empty Bin, resets, and the

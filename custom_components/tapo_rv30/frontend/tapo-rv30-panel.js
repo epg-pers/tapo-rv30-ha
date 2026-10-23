@@ -161,6 +161,21 @@ canvas.chart { width: 100%; height: 140px; display: block; }
 .empty { padding: 24px; text-align: center; color: var(--secondary-text-color); }
 .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .err { color: var(--error-color, #db4437); font-size: .86em; }
+.bkgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; }
+.bkcard { border-radius: 12px; overflow: hidden; background: color-mix(in srgb, var(--primary-text-color) 4%, transparent); border: 1px solid color-mix(in srgb, var(--primary-text-color) 10%, transparent); }
+.bkcard .thumb { display: block; width: 100%; aspect-ratio: 1; object-fit: contain; background:
+  repeating-conic-gradient(color-mix(in srgb, var(--primary-text-color) 6%, transparent) 0% 25%, transparent 0% 50%) 0 / 20px 20px; cursor: pointer; }
+.bkcard .thumb.none { display: flex; align-items: center; justify-content: center; color: var(--secondary-text-color); font-size: .8em; }
+.bkcard .meta { padding: 9px 11px; }
+.bkcard .meta .t { font-weight: 500; display: flex; align-items: center; gap: 6px; }
+.bkcard .meta .s { font-size: .8em; color: var(--secondary-text-color); margin-top: 2px; }
+.bkcard .meta .acts { display: flex; gap: 6px; margin-top: 9px; }
+.bkcard .meta .acts .btn { flex: 1; justify-content: center; padding: 7px 6px; }
+.src { font-size: .68em; text-transform: uppercase; letter-spacing: .04em; padding: 2px 6px; border-radius: 6px;
+  background: color-mix(in srgb, var(--primary-text-color) 10%, transparent); color: var(--secondary-text-color); }
+.lightbox { position: fixed; inset: 0; background: rgba(0,0,0,.72); display: flex; align-items: center; justify-content: center; z-index: 9; padding: 20px; }
+.lightbox img { max-width: 92vw; max-height: 78vh; border-radius: 10px; background: #1b1b1b; }
+.lightbox .lb-info { position: absolute; bottom: 16px; left: 0; right: 0; text-align: center; color: #fff; font-size: .86em; }
 `;
 
 class TapoRV30Panel extends HTMLElement {
@@ -268,7 +283,7 @@ class TapoRV30Panel extends HTMLElement {
   _renderRight(first) {
     const right = this.shadowRoot.querySelector(".right");
     const tabs = [["schedules", "mdi:calendar-clock", "Schedules"], ["planner", "mdi:calendar-check", "Planner"], ["history", "mdi:history", "History"], ["rooms", "mdi:floor-plan", "Rooms"],
-                  ["drive", "mdi:gamepad-variant", "Drive"], ["edit", "mdi:pencil-ruler", "Edit map"], ["maintenance", "mdi:wrench", "Maintenance"], ["settings", "mdi:tune", "Settings"]];
+                  ["drive", "mdi:gamepad-variant", "Drive"], ["edit", "mdi:pencil-ruler", "Edit map"], ["backups", "mdi:content-save-outline", "Backups"], ["maintenance", "mdi:wrench", "Maintenance"], ["settings", "mdi:tune", "Settings"]];
     if (!right.querySelector(".tabs")) {
       right.innerHTML = `<div class="tabs">${tabs.map(([k, i, l]) => `<button data-tab="${k}"><ha-icon icon="${i}"></ha-icon>${l}</button>`).join("")}</div><div class="pane"></div>`;
       right.querySelectorAll(".tabs button").forEach((b) => b.onclick = () => { if (this._stopDrive) this._stopDrive(); this._tab = b.dataset.tab; this._editing = null; this._planOpen = null; this._renderRight(true); });
@@ -279,11 +294,12 @@ class TapoRV30Panel extends HTMLElement {
     const sig = JSON.stringify([this._tab, this._robot, this._editing && this._editing.id,
       this._tab === "planner" ? [this._planRev, this._planOpen]
         : this._tab === "edit" ? "edit"   // the editor owns its canvas; don't re-render on map updates
+        : this._tab === "backups" ? "backups"   // loads its own data once; don't re-render on map updates
         : this._signature()]);
     if (!first && sig === this._paneSig) return;
     this._paneSig = sig;
     ({ schedules: this._paneSchedules, history: this._paneHistory, rooms: this._paneRooms, drive: this._paneDrive,
-       edit: this._paneEdit, maintenance: this._paneMaintenance, settings: this._paneSettings, planner: this._panePlanner }[this._tab]).call(this, pane);
+       edit: this._paneEdit, backups: this._paneBackups, maintenance: this._paneMaintenance, settings: this._paneSettings, planner: this._panePlanner }[this._tab]).call(this, pane);
   }
 
   _signature() {
@@ -851,6 +867,88 @@ class TapoRV30Panel extends HTMLElement {
       this._planSet({ rooms: { [r.key]: { add_sensors: [...add], remove_sensors: [...rem] } } });
     });
     q("select, input[type=time]").forEach((el) => el.onblur = () => { if (this._planDirty) { this._planDirty = false; this._renderRight(true); } });
+  }
+
+  // ---- backups -------------------------------------------------------------------------
+  _paneBackups(pane) {
+    pane.innerHTML = `<ha-card><div class="card">
+      <h3><span>Map backups</span>
+        <button class="btn bkfetch"><ha-icon icon="mdi:cloud-download"></ha-icon>Fetch from cloud</button></h3>
+      <div class="s">Backups held under <code>config/tapo_rv30/map_backups</code>. Tap a map to see it full size, or restore it to the robot (docked and idle). Fetching downloads your latest TP-Link cloud backups so you keep your own copies.</div>
+      <div class="s bkstatus" style="margin-top:8px"></div>
+      <div class="bkgrid" style="margin-top:12px"><div class="empty">Loading backups...</div></div>
+    </div></ha-card>`;
+    const grid = pane.querySelector(".bkgrid"), status = pane.querySelector(".bkstatus");
+    pane.querySelector(".bkfetch").onclick = () => this._backupFetch(status, grid);
+    this._backupLoad(grid, status);
+  }
+
+  async _backupLoad(grid, status) {
+    let res;
+    try { res = await this._hass.callWS({ type: "tapo_rv30/backups/list", entity_id: this._robot }); }
+    catch (e) { grid.innerHTML = `<div class="err">Could not list backups: ${esc(e.message || e)}</div>`; return; }
+    const list = res.backups || [];
+    this._backups = list;
+    if (!list.length) { grid.innerHTML = `<div class="empty">No backups yet. Press "Fetch from cloud" to download your TP-Link map backups.</div>`; return; }
+    grid.innerHTML = list.map((b, i) => {
+      const f = b.facts || {};
+      const sub = [f.extent ? `${f.extent.area_m2} m2` : "", f.room_count ? `${f.room_count} room${f.room_count > 1 ? "s" : ""}` : ""].filter(Boolean).join(" · ");
+      const kb = Math.round(b.size / 1024);
+      const thumb = b.thumb ? `<img class="thumb" data-i="${i}" src="${b.thumb}" alt="map preview">` : `<div class="thumb none">No preview</div>`;
+      return `<div class="bkcard">${thumb}
+        <div class="meta"><div class="t">${esc(b.map_name)} <span class="src">${esc(b.source)}</span></div>
+          <div class="s">${esc(b.when)} · ${kb} KB${sub ? " · " + esc(sub) : ""}</div>
+          <div class="acts">
+            <button class="btn bkview" data-i="${i}"><ha-icon icon="mdi:eye"></ha-icon>View</button>
+            <button class="go bkrestore" data-i="${i}"><ha-icon icon="mdi:backup-restore"></ha-icon>Restore</button>
+          </div></div></div>`;
+    }).join("");
+    grid.querySelectorAll(".thumb[data-i], .bkview").forEach((el) => el.onclick = () => this._backupView(list[+el.dataset.i]));
+    grid.querySelectorAll(".bkrestore").forEach((el) => el.onclick = () => this._backupRestore(list[+el.dataset.i], status));
+  }
+
+  async _backupView(b) {
+    const box = document.createElement("div");
+    box.className = "lightbox";
+    box.innerHTML = `<img src="${b.thumb || ""}"><div class="lb-info">Loading full image...</div>`;
+    box.onclick = () => box.remove();
+    this.shadowRoot.appendChild(box);
+    try {
+      const res = await this._hass.callWS({ type: "tapo_rv30/backups/image", entity_id: this._robot, file: b.file });
+      if (res.image) box.querySelector("img").src = res.image;
+      const f = res.facts || {};
+      const bits = [b.map_name, b.when];
+      if (f.extent) bits.push(`${f.extent.width_m} × ${f.extent.height_m} m (${f.extent.area_m2} m2)`);
+      if (f.room_count) bits.push(`${f.room_count} rooms`);
+      box.querySelector(".lb-info").textContent = bits.filter(Boolean).join("   ·   ");
+    } catch (e) { box.querySelector(".lb-info").textContent = "Could not load image: " + (e.message || e); }
+  }
+
+  _backupRestore(b, status) {
+    if (!window.confirm(`Restore "${b.map_name}" from ${b.when}?\n\nThis replaces that map's shape and layout on the robot with this backup. The robot must be docked and idle.`)) return;
+    status.textContent = `Restoring "${b.map_name}"...`;
+    this._hass.callService(DOMAIN, "restore_map_backup", { map: String(b.map_id), file: b.file, confirm: true }, { entity_id: this._robot }, false, true)
+      .then((res) => {
+        const r = (res && res.response) ? res.response : res;
+        if (r && r.applied) status.textContent = `Restored "${b.map_name}".`;
+        else status.textContent = `Restore ended without confirmation: ${r && r.note ? r.note : "check the robot"}.`;
+      })
+      .catch((e) => { status.textContent = "Restore failed: " + (e.message || e); });
+  }
+
+  async _backupFetch(status, grid) {
+    status.textContent = "Fetching cloud backups (this can take a moment)...";
+    try {
+      const res = await this._hass.callService(DOMAIN, "fetch_cloud_map_backups", {}, { entity_id: this._robot }, false, true);
+      const r = (res && res.response) ? res.response : res;
+      if (r && r.status === "code_sent") {
+        status.innerHTML = `TP-Link emailed a verification code. Run the <code>fetch_cloud_map_backups</code> action once with that code, then fetch again.`;
+        return;
+      }
+      const n = (r && r.backups) ? r.backups.length : 0;
+      status.textContent = `Fetched ${n} backup${n === 1 ? "" : "s"}.`;
+      this._backupLoad(grid, status);
+    } catch (e) { status.textContent = "Fetch failed: " + (e.message || e); }
   }
 
   _paneMaintenance(pane) {
