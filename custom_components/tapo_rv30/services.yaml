@@ -230,7 +230,7 @@ restore_map_backup:
       selector:
         text: {}
     use_cloud_url:
-      default: true
+      default: false
       selector:
         boolean: {}
     confirm:

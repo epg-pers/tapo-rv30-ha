@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.22.0b11
+
+### Fixed
+
+- Map restore is fully local by default again: HA serves the backup on the LAN and the robot fetches it directly, no cloud. The earlier failure was a reverse proxy (Cloudflare) in front of HA chunking the response so the robot's HTTP client could not finish the download - serving the robot HA's direct LAN address fixes it. use_cloud_url: true remains as a fallback for when the robot cannot reach HA on the LAN. Verified end to end over the LAN: a map change was reverted to the backed-up state.
+
+
 ## v0.22.0b10
 
 ### New
