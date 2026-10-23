@@ -810,6 +810,7 @@ class TapoVacuumClient:
         "extended_mopping":    ("getExtendedMoppingSwitch", "setExtendedMoppingSwitch", "switch"),
         "pet_area_deep_clean": ("getPetAreaDeepSwitch", "setPetAreaDeepSwitch", "switch"),
         "sweep_walk":          ("getSweepWalk", "setSweepWalk", "sweepWalk"),
+        "auto_change_map":     ("getAutoChangeMap", "setAutoChangeMap", "auto_change_map"),
     }
 
     def probe_bool_settings(self) -> tuple[dict[str, bool], bool]:

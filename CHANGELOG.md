@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.24.0b1
+
+### New
+
+- **Auto-change Map** switch. Turns on the robot's automatic map selection, so it picks the saved map that matches the floor it wakes up on. Found by going back through the robot firmware and confirmed live on 1.3.3.
+
+### Docs
+
+- Full TPAP endpoint map in the [protocol notes](protocol.md): every method the firmware dispatcher carries, cross-checked against the live robot and marked by what it actually supports, plus the map/clean actions still to wire up and confirmation there is no camera/video endpoint.
+
 ## v0.23.1
 
 ### Fixed

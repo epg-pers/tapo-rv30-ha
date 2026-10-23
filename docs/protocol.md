@@ -200,3 +200,65 @@ Omni dock actions from the cavefire and jan-tdy forks, untested here: `getBackWa
 
 Unknown on this firmware (-1002): voice pack listing, lifetime statistics beyond
 `getCleanRecords` totals, `getCleanOrder`, `getCleanTaskGroupList`.
+
+## Full endpoint map
+
+The robot's local API dispatcher (the `VAC` binary in the firmware) carries a table of method
+names. The list below is from the unencrypted RVSD30 debug build cross-checked against the live
+RV30 Max Plus on 1.3.3: each method was called read-only where safe, and marked by what the
+robot actually answered. `-1002` means the robot does not know the method; `-1001` means it
+knows it but rejected the call (wrong parameters or state).
+
+**Already used by the integration:** `getVacStatus`, `getBatteryInfo`, `getCleanInfo`
+(carries `clean_percent`, the live progress), `getCleanStatus`, `getCleanAttr` / `setCleanAttr`,
+`getMapInfo` / `setMapInfo`, `getMapData`, `getPathData`, `getAreaInfo` / `setAreaInfo`,
+`getFurnitureInfo` / `setFurnitureInfo`, `getCleanRecords` / `getCleanRecordExtraInfo`,
+`getScheduleRules` / `addScheduleRule` / `editScheduleRule` / `removeScheduleRules`,
+`getCustomizationRulesInfo` / `getCustomizationRuleData`, `getConsumablesInfo` /
+`resetConsumablesTime`, `getVolume` / `setVolume`, `getDoNotDisturb` / `setDoNotDisturb`,
+`getDustCollectionInfo` / `setDustCollectionInfo` / `setSwitchDustCollection`, `getMopState`,
+`getChildLockInfo` / `setChildLockInfo`, `getCarpetAutoBoost` / `setCarpetAutoBoost`,
+`getSweepWalk` / `setSweepWalk`, `getComponentList`, `getAutoUpdateInfo` / `setAutoUpdateInfo`,
+`setRobotPause`, `setSwitchClean` / `setSwitchCharge`, `mapBackup` / `mapRecovery` /
+`getMapBRProcess`, `deleteMap`, `playSelectAudio`, plus the 1.3.x switch family
+(`get/setAiAvoidSwitch`, `get/setExtendedMoppingSwitch`, `get/setAutomaticRemoppingSwitch`,
+`get/setCleanAlongFloorSwitch`, `get/setPetAreaDeepSwitch`, `get/setDryMopMode`,
+`get/setCutHairMode`, `get/setBackWashMode`) and the Matter calls.
+
+**Confirmed on 1.3.3 but newly wired up / available to wire up:**
+
+- `getAutoChangeMap` / `setAutoChangeMap` (`{auto_change_map: bool}`) - whether the robot picks
+  the matching saved map automatically when it relocates on a different floor. **Now exposed as
+  the "Auto-change Map" switch.**
+- `getRobotPauseTime` (`{pause_min}`) - how long the robot waits, paused, before it gives up and
+  returns to the dock. Read-only companion to `setRobotPause`; could be a number entity.
+- `getAreaUnit` / `setAreaUnit` (`{area_unit}` 0 = m2) - unit for reported clean areas.
+- `getDeviceTime` (`{time_diff, timestamp, region}`), `getDstTime` / `setDstTime` / `startDST` -
+  clock, timezone and daylight-saving. `getInheritInfo` (`{inherit_status}`) reads but
+  `setInheritInfo` rejected the obvious shape (-1001); the write form is still unknown.
+- `getWifiBasic` (`{ssid, key_type, rssi}`), `getWirelessConnectedStatus`, `getWirelessScanInfo` -
+  network info; `rssi` is already surfaced via `getDeviceInfo`.
+- Voice: `getCurrentVoiceLanguage`, `getVoiceDownloadState`, `setVoiceLanguage` - voice-pack
+  management (changing the pack needs a cloud download URL).
+
+**Actions present in the dispatcher, not yet wired (each drives the robot, so they need
+supervised live testing before shipping):**
+
+- `switchFastMapping` - run a quick mapping sweep to build a map without cleaning.
+- `switchExploringNewArea` - send the robot to explore and extend the current map.
+- `runCleanTask` - the unified clean entry point. The ROS service behind it
+  (`BridgeRoomCleanTask` / `BridgeTotalCleanTask` / `BridgeSelectCleanTask`) takes per-area
+  `fan_level`, `water_level`, `clean_number`, `clean_order`, `clean_interval_type`, `clean_type`,
+  `start_type` and `clean_mode`; the integration currently drives the same outcomes through
+  `setCleanAttr` + `setSwitchClean`.
+- `addCustomizationRule` - create a preset (the integration can run and read presets, but not yet
+  create them).
+- `saveMap` / `startUpdateMapData` - map build lifecycle, used around mapping runs.
+- `deleteCleanRecord` - remove a single run from history.
+
+**Not supported on this firmware (-1002):** `getLidarFreqPercent` / `setLidarEnabled`,
+`getSupportVoiceLanguage`, `getNextEvent` (-1001; present but rejected bare), `getCleanOrder`,
+`getCleanTaskGroupList`.
+
+**No camera/video endpoints exist** - the RV30 navigates by LiDAR and structured light, so there
+is no live-view or snapshot stream to expose (the dispatcher has nothing of the sort).

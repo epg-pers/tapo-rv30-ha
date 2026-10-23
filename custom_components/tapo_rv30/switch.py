@@ -33,6 +33,7 @@ BOOL_SETTING_LABELS = {
     "extended_mopping":    ("Extended Mopping", "mdi:water-plus"),
     "pet_area_deep_clean": ("Pet Area Deep Clean", "mdi:paw"),
     "sweep_walk":          ("Sweep Walk", "mdi:motion-sensor"),
+    "auto_change_map":     ("Auto-change Map", "mdi:map-clock"),
 }
 
 
