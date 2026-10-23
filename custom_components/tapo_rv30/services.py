@@ -530,8 +530,10 @@ def async_setup_services(hass: HomeAssistant) -> None:
         coord = _one(hass, call)
         if not call.data.get("confirm"):
             raise ServiceValidationError(f"{call.service}: this overwrites a map on the robot; set confirm: true")
-        if coord.busy:
-            raise ServiceValidationError(f"{call.service}: {coord.device_name} must be docked and idle")
+        if coord.busy and not call.data.get("force"):
+            raise ServiceValidationError(
+                f"{call.service}: {coord.device_name} must be docked and idle (force: true to override - "
+                "recovery needs the robot able to relocalise, which it cannot do while charging on the dock)")
         map_id, names = await _setup_map_id(call, coord)
         folder = hass.config.path(DOMAIN, "map_backups")
 
