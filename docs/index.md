@@ -30,6 +30,8 @@ tool, on [the card and dashboards](card.md).*
   Xiaomi map card calibration.
 - [Matter](matter.md): pairing state, setup code, the pairing window and why the code does
   not change.
+- [Map backup and recovery](map-recovery.md): save and re-apply your no-go zones, walls,
+  carpets and room names, and keep local copies of your cloud backups.
 - [Protocol notes](protocol.md): what the robot answers locally, learned from live traffic
   and the Tapo app, including the warning about probing a working robot.
 - [Troubleshooting](troubleshooting.md): symptoms, causes and fixes for the usual problems.

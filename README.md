@@ -41,6 +41,7 @@ Same domain, so your config entry and entities carry over; see
 - **Per-room "last cleaned"**: worked out from the robot's own run maps, shown when you hold a room, and available to automations
 - **Sidebar page**: map, a schedules editor for the robot's own schedules, history and statistics, rooms with freshness, maintenance and settings, no dashboard needed (switch it off in the integration options if you prefer)
 - **Smart cleaning planner**: keeps each room within a target like "every 2 days" and cleans the due rooms when nobody is home, inside your time window, leaving out rooms whose motion sensors say they are in use; starts in preview mode
+- **Map backup and recovery**: save a map's no-go zones, virtual walls, carpets and room names and re-apply them after the robot re-maps the floor, the recovery the Tapo app itself can't do; plus local copies of your cloud map backups so they survive even if TP-Link's are lost
 - **Remote drive**: take control from the sidebar page and steer the robot with arrows or keys, like the Tapo app
 - **Go to a point** from the card: tap the map, press Go
 - **Do Not Disturb aware**: a schedule inside the robot's Do Not Disturb window never runs; the sidebar page and the services flag it before you save, instead of leaving a dead schedule on the robot
