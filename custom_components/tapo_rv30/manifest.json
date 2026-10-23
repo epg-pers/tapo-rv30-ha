@@ -12,6 +12,7 @@
     "frontend",
     "http",
     "lovelace",
+    "network",
     "panel_custom",
     "websocket_api"
   ],

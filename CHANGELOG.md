@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.22.0b7
+
+### Fixed
+
+- Local map restore: add a `force` option so a restore can run while the robot is awake and off the dock. Recovery reloads the map into the robot's SLAM and relocalises, which it cannot do while charging on the dock, so a successful restore needs the robot able to move. Also declare the `network` dependency.
+
 ## v0.22.0b6
 
 ### Fixed
