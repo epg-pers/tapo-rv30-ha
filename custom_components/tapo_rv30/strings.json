@@ -323,6 +323,44 @@
           "description": "fabric_index of the ecosystem to remove, from the Matter sensor."
         }
       }
+    },
+    "fetch_cloud_map_backups": {
+      "name": "Fetch cloud map backups",
+      "description": "Read-only. Logs in to your TP-Link account, downloads the map backups made with the Tapo app's backup feature, and saves them in config/tapo_rv30/map_backups (with the robot's current local map data for comparison when it is idle). Nothing is sent to the robot except routine reads.",
+      "fields": {
+        "verification_code": {
+          "name": "Verification code",
+          "description": "Only when the first run says TP-Link emailed you a code: enter it here and run again."
+        }
+      }
+    },
+    "save_map_setup": {
+      "name": "Save map setup",
+      "description": "Snapshot a map's editable layers (rooms, no-go zones, virtual walls, carpets) to config/tapo_rv30/map_setups. Not the map shape itself. Defaults to the active map.",
+      "fields": {
+        "map": {
+          "name": "Map",
+          "description": "Map name or id. Defaults to the active map."
+        }
+      }
+    },
+    "apply_map_setup": {
+      "name": "Apply map setup",
+      "description": "Write a saved map setup back onto the map with the robot's own editing API (no cloud). Restores no-go zones, virtual walls, carpets and room names after a remap. Robot must be docked and idle.",
+      "fields": {
+        "map": {
+          "name": "Map",
+          "description": "Map name or id. Defaults to the active map."
+        },
+        "confirm": {
+          "name": "Confirm",
+          "description": "Required: this writes rooms and zones to the map."
+        },
+        "source_map": {
+          "name": "Source setup",
+          "description": "Apply a setup saved under a different map (for a remapped floor, which gets a new id). Name or id of the saved snapshot. Defaults to this map's own."
+        }
+      }
     }
   },
   "issues": {

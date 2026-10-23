@@ -1156,3 +1156,42 @@ class TapoVacuumClient:
         g = self.send("getCleanAttr", {"type": "global"})["result"]
         self.clean_zones(map_id, [[x - 750, y - 750, x + 750, y + 750]],
                          g.get("suction", 3), g.get("cistern", 0), 1)
+
+    # ---- map setup (save / re-apply the editable layers) --------------------------
+    # The grid (walls the robot sensed) is SLAM-only and not writable. Everything on top
+    # of it is: rooms, no-go zones, virtual walls and carpets. Their polygons are in world
+    # mm, so they re-apply onto any grid. Written with setAreaInfo, one call per type (the
+    # robot replaces all areas of that type). This is what the Tapo app uses for map edits.
+    SETUP_AREA_TYPES = ("room", "forbid", "virtual_wall", "carpet_rectangle", "carpet_round")
+    # Fields setAreaInfo accepts (RobotAreaData). Per-room clean settings (suction/cistern/
+    # clean_number) are NOT here - those go via setCleanAttr, and on RV30 1.3.3 only exist
+    # inside app presets (see set_room_settings).
+    _AREA_WRITE_FIELDS = ("type", "id", "name", "color", "define_type", "floor_material",
+                          "floor_texture", "carpet_strategy", "label", "vertexs")
+
+    def get_area_setup(self, map_id: int) -> dict:
+        """Snapshot a map's editable layers (rooms, no-go zones, virtual walls, carpets) as
+        world-coordinate polygons. Not the occupancy grid."""
+        data = self.get_map_data(map_id)
+        by_type: dict[str, list] = {}
+        for a in data.get("area_list", []):
+            t = a.get("type")
+            if t in self.SETUP_AREA_TYPES:
+                by_type.setdefault(t, []).append(a)
+        return {"map_id": map_id, "map_hash": data.get("map_hash"),
+                "counts": {t: len(v) for t, v in by_type.items()}, "areas": by_type}
+
+    def set_area_setup(self, map_id: int, setup: dict) -> dict:
+        """Write a saved setup back, one setAreaInfo call per captured type (the robot
+        replaces all areas of that type). Types absent from the snapshot are left untouched.
+        Returns {type: error_code}."""
+        results: dict[str, int] = {}
+        for t in self.SETUP_AREA_TYPES:
+            items = (setup.get("areas") or {}).get(t)
+            if not items:
+                continue
+            area_list = [{k: a[k] for k in self._AREA_WRITE_FIELDS if a.get(k) is not None}
+                         for a in items]
+            r = self.send("setAreaInfo", {"map_id": map_id, "type_list": [t], "area_list": area_list})
+            results[t] = r.get("error_code", 0)
+        return results

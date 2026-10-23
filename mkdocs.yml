@@ -69,6 +69,7 @@ nav:
   - Entities: entities.md
   - Services and events: services.md
   - Matter: matter.md
+  - Map backup and recovery: map-recovery.md
   - Troubleshooting: troubleshooting.md
   - Protocol notes: protocol.md
   - Changelog: changelog.md

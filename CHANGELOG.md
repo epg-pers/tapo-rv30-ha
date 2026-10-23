@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.21.0
+
+### New
+
+- **Save and re-apply your map setup** (`save_map_setup` / `apply_map_setup`, and Save/Restore buttons on the sidebar page's Maintenance tab). Snapshot a map's editable layers - no-go zones, virtual walls, carpets and room names - and write them back with the robot's own editing API. After the robot re-maps a floor, re-apply your zones and settings in one go; `apply_map_setup`'s `source_map` lets you apply an old map's setup to the new map. The map shape itself is rebuilt by the robot. (Per-room suction/water/passes stay preset-only on RV30 1.3.3 firmware.)
+- **Keep local copies of your cloud map backups** (`fetch_cloud_map_backups`). Logs in to your TP-Link account and downloads the backups made with the Tapo app's backup feature into `config/tapo_rv30/map_backups`, so they survive even if TP-Link deletes them. Supports two-step login.
+
+### Fixed
+
+- Live map: the robot's path and dot no longer lag behind the position pulse (the card now fetches the fresh render each update instead of a cached one).
+
+### Notes
+
+- Restoring a backup *file* to the robot (`mapRecovery`) is cloud/account-bound in firmware and cannot be driven from a local file - see the [protocol notes](https://epg-pers.github.io/tapo-rv30-ha/protocol/) for the full investigation. `save_map_setup`/`apply_map_setup` is the local recovery that does work.
+
 ## v0.20.0
 
 ### New
