@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.21.0b14
+
+### New
+
+- Map setup: `apply_map_setup` gains `source_map` - apply a snapshot saved under a different map, so a re-mapped floor (which gets a new id) can be recovered from the old map's saved setup.
+- Save/Restore map setup buttons on the sidebar page's Maintenance tab.
+
 ## v0.21.0b13
 
 ### New

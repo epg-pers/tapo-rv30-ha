@@ -190,6 +190,10 @@ apply_map_setup:
       example: Downstairs
       selector:
         text: {}
+    source_map:
+      example: Downstairs
+      selector:
+        text: {}
     confirm:
       required: true
       default: false

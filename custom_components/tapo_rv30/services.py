@@ -605,11 +605,33 @@ def async_setup_services(hass: HomeAssistant) -> None:
         if coord.busy:
             raise ServiceValidationError(f"{call.service}: {coord.device_name} must be docked and idle")
         map_id, names = await _setup_map_id(call, coord)
-        path = os.path.join(hass.config.path(DOMAIN, "map_setups"), f"{map_id}.json")
-        if not await hass.async_add_executor_job(os.path.exists, path):
-            raise ServiceValidationError(
-                f"{call.service}: no saved setup for map {map_id}; run save_map_setup first")
-        setup = await hass.async_add_executor_job(lambda: json.load(open(path)))  # noqa: SIM115
+        folder = hass.config.path(DOMAIN, "map_setups")
+        src = call.data.get("source_map")
+
+        def _load_setup() -> dict | None:
+            # source_map: apply a snapshot saved under a DIFFERENT map (the lost-and-remapped
+            # case - the new map has a new id). Match by saved id or saved map name. Default:
+            # this map's own snapshot.
+            if src in (None, ""):
+                p = os.path.join(folder, f"{map_id}.json")
+                return json.load(open(p)) if os.path.exists(p) else None
+            import glob
+
+            from .mapdata import fold
+            want = fold(str(src).strip())
+            for p in sorted(glob.glob(os.path.join(folder, "*.json"))):
+                try:
+                    d = json.load(open(p))  # noqa: SIM115
+                except (OSError, ValueError):
+                    continue
+                if str(d.get("map_id")) == want or fold(d.get("map_name") or "") == want:
+                    return d
+            return None
+
+        setup = await hass.async_add_executor_job(_load_setup)
+        if setup is None:
+            where = f"matching source_map '{src}'" if src else f"for map {map_id}"
+            raise ServiceValidationError(f"{call.service}: no saved setup {where}; run save_map_setup first")
         # setAreaInfo writes the active map; switch to the target first.
         info = await hass.async_add_executor_job(coord.client.send, "getMapInfo")
         if (info.get("result") or {}).get("current_map_id") != map_id:
@@ -622,7 +644,8 @@ def async_setup_services(hass: HomeAssistant) -> None:
             raise HomeAssistantError(f"{call.service}: {exc}") from exc
         after = (await hass.async_add_executor_job(coord.client.get_area_setup, map_id))["counts"]
         await coord.async_request_map_refresh()
-        return {"map_id": map_id, "map_name": names.get(map_id), "saved_at": setup.get("saved_at"),
+        return {"map_id": map_id, "map_name": names.get(map_id),
+                "from_setup": setup.get("map_name") or setup.get("map_id"), "saved_at": setup.get("saved_at"),
                 "applied": applied, "counts_before": before, "counts_after": after}
 
     hass.services.async_register(DOMAIN, "save_map_setup", handle_save_map_setup,

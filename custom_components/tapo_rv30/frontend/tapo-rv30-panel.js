@@ -694,8 +694,35 @@ class TapoRV30Panel extends HTMLElement {
     const bars = Object.entries(cons).map(([k, v]) => `<div class="bar-row ${v <= 10 ? "bad" : v <= 30 ? "warn" : ""}"><span>${esc(k)}</span><div class="track"><div style="width:${v}%"></div></div><span class="r">${v}%</span></div>`).join("");
     const btns = r.buttons.map((id) => { const s = this._st(id); return `<button class="btn" data-btn="${esc(id)}"><ha-icon icon="${esc(s.attributes.icon || "mdi:gesture-tap-button")}"></ha-icon>${esc(s.attributes.friendly_name.replace(vac.attributes.friendly_name + " ", ""))}</button>`; }).join(" ");
     pane.innerHTML = `<ha-card><div class="card"><h3><span>Consumables</span></h3>${bars || `<div class="empty">No consumable data.</div>`}</div></ha-card>
-      <ha-card><div class="card"><h3><span>Actions</span></h3><div class="chips">${btns}</div></div></ha-card>`;
+      <ha-card><div class="card"><h3><span>Actions</span></h3><div class="chips">${btns}</div></div></ha-card>
+      <ha-card><div class="card"><h3><span>Map setup</span></h3>
+        <div class="s">Save the current map's no-go zones, virtual walls, carpets and room names, then re-apply them after the robot re-maps the floor. The map shape itself is rebuilt by the robot.</div>
+        <div class="chips" style="margin-top:8px">
+          <button class="btn" data-mapsetup="save"><ha-icon icon="mdi:content-save-cog"></ha-icon>Save setup</button>
+          <button class="btn" data-mapsetup="apply"><ha-icon icon="mdi:backup-restore"></ha-icon>Restore setup</button>
+        </div>
+        <div class="s msetup" style="margin-top:8px" hidden></div>
+      </div></ha-card>`;
     pane.querySelectorAll("[data-btn]").forEach((b) => b.onclick = () => this._call("button", "press", {}, { entity_id: b.dataset.btn }));
+    const status = pane.querySelector(".msetup");
+    const counts = (c) => Object.entries(c || {}).map(([k, v]) => `${v} ${k.replace(/_/g, " ")}`).join(", ");
+    const run = async (service, data, busyText) => {
+      status.hidden = false; status.textContent = busyText;
+      try {
+        const res = await this._hass.callService(DOMAIN, service, data, { entity_id: this._robot }, false, true);
+        const r2 = (res && res.response) ? res.response : res;
+        if (service === "save_map_setup") {
+          const n = counts(r2.saved); status.textContent = n ? `Saved: ${n}.` : "Saved (nothing on this map to save yet).";
+        } else {
+          const n = counts(r2.counts_after); status.textContent = n ? `Restored: ${n}.` : "Applied (the saved setup had nothing to restore).";
+        }
+      } catch (e) { status.textContent = "Error: " + (e.message || e); }
+    };
+    pane.querySelector('[data-mapsetup="save"]').onclick = () => run("save_map_setup", {}, "Saving...");
+    pane.querySelector('[data-mapsetup="apply"]').onclick = () => {
+      if (!window.confirm("Restore the saved map setup? This writes the saved no-go zones, virtual walls, carpets and room names to the current map.")) return;
+      run("apply_map_setup", { confirm: true }, "Restoring...");
+    };
   }
 
   // ---- settings ------------------------------------------------------------------------

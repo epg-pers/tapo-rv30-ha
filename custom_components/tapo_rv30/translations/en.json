@@ -399,6 +399,10 @@
         "confirm": {
           "name": "Confirm",
           "description": "Required: this writes rooms and zones to the map."
+        },
+        "source_map": {
+          "name": "Source setup",
+          "description": "Apply a setup saved under a different map (for a remapped floor, which gets a new id). Name or id of the saved snapshot. Defaults to this map's own."
         }
       }
     }
