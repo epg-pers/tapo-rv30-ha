@@ -128,35 +128,42 @@ format: a short header (`"MZ"` + 16 bytes + `0xAA55`), a gzip tar of the raw map
 keyed digest, not a plain hash; the rest is plaintext.
 
 Restore is `mapRecovery {"map_id", "map_md5", "url"}`: the robot downloads the file at `url`,
-checks its MD5, and applies it. **It is cloud/account-bound and cannot be driven from a local
-file.** Tested exhaustively on an RV30 Max Plus (fw 1.3.3) with router-side packet captures:
+checks its MD5, unpacks it and applies it. **It works from a local URL - no cloud round-trip.**
+The integration serves the backup from Home Assistant and the robot fetches and applies it.
+Verified end to end on an RV30 Max Plus (fw 1.3.3): a change to a live map was restored back to
+the backed-up state, `getMapBRProcess` reaching `process: 100`, `status: 3`, robot docked.
 
-- Served from Home Assistant's own HTTPS (an ordinary public-CA cert), the robot downloads the
-  self-served file without complaint: a full `GET`, User-Agent `SHIP/2.0`, HTTP 200, the
-  complete file whose MD5 equals the S3 ETag. So the robot trusts public-CA certs and the
-  transfer is fine.
-- It then **fails at the apply step**: `getMapBRProcess` climbs to ~92-97% and flips to
-  `status: 13`, even with identical bytes, matching MD5, a trusted cert, and the target map
-  already active. The rejection is therefore not transport, bytes, MD5 or TLS.
-- `mapRecovery` also needs the robot's own cloud link just to *start*: with the device-cloud
-  gateway (MQTT) blocked at the router, `mapRecovery` is refused instantly with `-3023` and
-  never downloads; with the gateway reachable, a normal cloud restore (robot pulling its own
-  backup from S3) succeeds.
-- Error codes: `-3022` the target map is not the active map, `-3016` the map no longer exists,
-  `-3023` the robot has no cloud link.
+The one real constraint is the robot's HTTP client, and it caused a long detour worth recording:
 
-The commit-accept logic (the registered-backup check and the `-3023` cloud gate) lives in the
-robot firmware, which ships as an AES-encrypted `.scv` image (`ldrobot.scv`; the platform is a
-SigmaStar SSD222 with an LDROBOT nav board) and cannot be read without a flash dump.
-**Conclusion: a map backup can only be restored through TP-Link's cloud, onto a map the account
-has registered. Deleting a map also deletes its cloud backup, so the cloud backup does not
-protect against losing a map.** `tapo_rv30.fetch_cloud_map_backups` keeps a local copy of each
-cloud backup so it survives TP-Link deleting it, but it can still only be restored while TP-Link
-accepts it.
+- The robot's downloader needs a plain response with a correct `Content-Length` (which aiohttp's
+  `FileResponse` sends). Served that way - Home Assistant's **direct LAN address** - the download
+  completes and the map applies.
+- Served through a **reverse proxy** in front of Home Assistant (the external hostname here was
+  fronted by OpenResty), the proxy re-chunks the body. The robot's client reads the bytes but
+  never sees the end marker it understands, so `getMapBRProcess` climbs to ~92-99% and then flips
+  to `status: 13`. This looked like an apply-step rejection but is an unfinished download; the
+  direct-LAN URL fixes it. (A TP-Link S3 presigned URL also works, for the same reason - clean
+  `Content-Length`.)
+- Error codes seen: `-3016` the map no longer exists (recovery overwrites an existing map, it
+  does not recreate a deleted id), `-3002` the robot is mid-task, `-3022`/`-3023` on other
+  preconditions.
+
+The recovery logic itself was read from firmware. TP-Link also publishes unencrypted *debug*
+builds (`RVSD30_<ver>_Build_<n>.bin.gz`) whose build numbers track the shipping firmware; the
+build matching this robot (260206) unpacks to a plain squashfs. Its `robot_control_node`
+(`BackupInterface::recoveryMap`) verifies the MD5, unpacks the `.bkmap` into the map's component
+files (`.pbstream`, `.area`, forbid/carpet data, room info), then loads it via the Cartographer
+interface. None of that is cloud-gated. (The separate `ldrobot.scv` nav-board image is
+AES-encrypted, but the recovery path does not live there.)
+
+**Conclusion: a map backup can be restored to the robot entirely locally.**
+`tapo_rv30.restore_map_backup` does this, serving a backup that `tapo_rv30.fetch_cloud_map_backups`
+has downloaded. Note that deleting a map in the app deletes its cloud backup too, and recovery
+overwrites a map the robot still has - so fetch backups ahead of time and keep the map around.
 
 ### Writing the editable layers (setAreaInfo)
 
-What the cloud restore gatekeeps, `setAreaInfo` does openly - it is the method the app uses for
+`setAreaInfo` is the method the app uses for
 every map edit, and it needs no cloud:
 
 ```json

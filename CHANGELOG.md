@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.22.0
+
+### New
+
+- **Map editor** on the sidebar page's new **Edit map** tab. Draw and delete no-go zones and virtual walls, and place furniture, directly on the live map, then save them to the robot with its own editing API - no cloud. Each change is held locally with undo until you press Save; the robot must be docked and idle to save. (Carpets and room names are drawn for context but are view-only for now.)
+- **Restore a map backup to the robot** (`restore_map_backup`), fully locally. Home Assistant serves a backup it holds (from `fetch_cloud_map_backups`) on your LAN and the robot fetches and applies it with its own recovery - no app, no cloud round-trip. The robot must be able to reach Home Assistant directly on the LAN (a reverse proxy in front of HA breaks the robot's download, so the service uses HA's direct LAN address); `use_cloud_url: true` falls back to the backup's own TP-Link URL when the robot cannot reach HA. The robot must be docked and idle, and you pass `confirm: true`. Verified end to end: a change to the map was restored back to the backed-up state.
+
 ## v0.21.0
 
 ### New

@@ -1195,3 +1195,40 @@ class TapoVacuumClient:
             r = self.send("setAreaInfo", {"map_id": map_id, "type_list": [t], "area_list": area_list})
             results[t] = r.get("error_code", 0)
         return results
+
+    # ---- live map editing (the editor tab) ---------------------------------------
+    def set_areas(self, map_id: int, type_name: str, area_list: list) -> int:
+        """Replace every area of one type (forbid / virtual_wall / carpet_rectangle /
+        carpet_round / room) with area_list (world-mm polygons). Returns the error_code."""
+        out = []
+        for a in area_list:
+            entry = {k: a[k] for k in self._AREA_WRITE_FIELDS if a.get(k) is not None}
+            entry["type"] = type_name
+            out.append(entry)
+        r = self.send("setAreaInfo", {"map_id": map_id, "type_list": [type_name], "area_list": out})
+        return r.get("error_code", 0)
+
+    def set_furniture(self, map_id: int, furniture_list: list) -> int:
+        """Replace the map's furniture with furniture_list ({type, id, angle, vertexs})."""
+        fl = [{k: f[k] for k in ("type", "id", "angle", "vertexs") if f.get(k) is not None}
+              for f in furniture_list]
+        r = self.send("setFurnitureInfo", {"map_id": map_id, "furniture_list": fl})
+        return r.get("error_code", 0)
+
+    def set_clean_order(self, map_id: int, order_list: list) -> int:
+        """Set the room cleaning order (a list of room ids)."""
+        r = self.send("setCleanOrder", {"map_id": map_id, "order_list": list(order_list),
+                                         "type": "custom"})
+        return r.get("error_code", 0)
+
+    # ---- map backup restore (local) ----------------------------------------------
+    def recover_map(self, map_id: int, map_md5: str, url: str) -> int:
+        """Restore a map backup. The robot downloads the .bkmap from url (any http(s) host it
+        can reach - it need not be TP-Link's storage), checks map_md5, then applies it. The URL
+        must serve a plain response with a correct Content-Length. Returns the error_code."""
+        r = self.send("mapRecovery", {"map_id": int(map_id), "map_md5": str(map_md5), "url": str(url)})
+        return r.get("error_code", 0)
+
+    def get_map_br_process(self) -> dict:
+        """Backup / recovery progress: {type, process, status}."""
+        return self.send("getMapBRProcess").get("result", {})

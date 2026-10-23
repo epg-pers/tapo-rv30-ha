@@ -12,6 +12,7 @@
     "frontend",
     "http",
     "lovelace",
+    "network",
     "panel_custom",
     "websocket_api"
   ],
@@ -30,5 +31,5 @@
     "ecdsa>=0.18",
     "python-kasa>=0.10.0"
   ],
-  "version": "0.21.0"
+  "version": "0.22.0"
 }

@@ -56,6 +56,15 @@ RV30 Max Plus. If yours misbehaves, press Stop or Send home.
 
 ![The Drive tab](panel-drive.png){ width="520" }
 
+### Edit map
+
+Draw on the live map and save the result to the robot - no app. Pick a tool (**No-go**,
+**Wall** or **Furniture**), draw on the map, and the change is held locally with **Undo** until
+you press **Save to robot**; **Discard** throws the lot away. Select an item to move or delete
+it. The robot must be docked and idle to save. Carpets and room names are drawn for context but
+are view-only for now. Behind the scenes this is the robot's own editing API (`setAreaInfo` /
+`setFurnitureInfo`), the same one the Tapo app uses.
+
 ### Maintenance
 
 Consumable life bars (amber under 30 percent, red under 10), Empty Bin, resets, and the
