@@ -10,7 +10,7 @@
  * the vacuum's device automatically.
  */
 
-const CARD_VERSION = "0.21.0b12";
+const CARD_VERSION = "0.21.0b13";
 const ROOM_COLORS = ["#ffb3ba", "#bae1ff", "#baffc9", "#ffffba", "#dcbaff", "#ffdcba", "#baffff"];
 
 const ICONS = {

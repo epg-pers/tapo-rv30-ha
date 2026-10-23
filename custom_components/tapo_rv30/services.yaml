@@ -170,6 +170,31 @@ cloud_firmware_info:
       example: 1.3.2 Build 250101 Rel.000000
       selector:
         text: {}
+save_map_setup:
+  target:
+    entity:
+      domain: vacuum
+      integration: tapo_rv30
+  fields:
+    map:
+      example: Downstairs
+      selector:
+        text: {}
+apply_map_setup:
+  target:
+    entity:
+      domain: vacuum
+      integration: tapo_rv30
+  fields:
+    map:
+      example: Downstairs
+      selector:
+        text: {}
+    confirm:
+      required: true
+      default: false
+      selector:
+        boolean: {}
 fetch_cloud_map_backups:
   target:
     entity:

@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.21.0b13
+
+### New
+
+- **Save / apply map setup** (`tapo_rv30.save_map_setup`, `tapo_rv30.apply_map_setup`). Snapshot a map's editable layers - no-go zones, virtual walls, carpets and room names - and write them back with the robot's own editing API (no cloud, no mapRecovery). This re-applies your zones and settings onto a re-mapped floor, the practical recovery the cloud restore can't do locally. The map shape itself is SLAM-only and not included; per-room suction/water/passes are preset-only on RV30 1.3.3 firmware so they are not part of this.
+
 ## v0.21.0b12
 
 ### Fixed
