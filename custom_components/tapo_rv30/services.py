@@ -594,8 +594,13 @@ def async_setup_services(hass: HomeAssistant) -> None:
             await asyncio.sleep(3)  # let a slow fetch finish before the URL stops serving
             store.pop(token, None)
         await coord.async_request_map_refresh()
+        status = process.get("status")
+        # error_code 0 only means the request was accepted; status 13 is a commit failure,
+        # status 2 means it was still downloading/applying when we stopped polling.
+        note = ("the robot refused to commit the backup (status 13)" if status == 13
+                else "still applying when polling ended" if status == 2 else None)
         return {"map_id": map_id, "map_name": names.get(map_id), "file": os.path.basename(path),
-                "md5": md5, "url": url, "error_code": code, "process": process}
+                "md5": md5, "url": url, "error_code": code, "process": process, "note": note}
 
     hass.services.async_register(DOMAIN, "restore_map_backup", handle_restore_map_backup,
                                  supports_response=SupportsResponse.ONLY)
