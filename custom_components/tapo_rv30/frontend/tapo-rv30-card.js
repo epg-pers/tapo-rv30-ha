@@ -10,7 +10,7 @@
  * the vacuum's device automatically.
  */
 
-const CARD_VERSION = "0.21.0b11";
+const CARD_VERSION = "0.21.0b12";
 const ROOM_COLORS = ["#ffb3ba", "#bae1ff", "#baffc9", "#ffffba", "#dcbaff", "#ffdcba", "#baffff"];
 
 const ICONS = {
@@ -414,14 +414,22 @@ class TapoRV30Card extends HTMLElement {
   _loadImage() {
     const r = this._related;
     const img = this._st(r.image), cam = this._st(r.camera);
-    const src = img ? img.attributes.entity_picture : (cam ? cam.attributes.entity_picture : null);
+    const ent = img || cam;
+    const src = ent ? ent.attributes.entity_picture : null;
     if (!src) return;
-    const key = src + "|" + (img ? img.state : cam.last_updated);
+    // The camera's entity_picture URL keeps the same access token across updates, so the
+    // browser would serve the stale cached PNG and the rendered path + robot dot would lag
+    // behind the live position pulse. Bust the cache on last_updated (which bumps every poll
+    // as path_points changes while cleaning) so the image keeps pace with the robot.
+    const stamp = ent.last_updated;
+    const key = src + "|" + stamp;
     if (key === this._imgKey) return;
     this._imgKey = key;
+    let url = src.startsWith("http") ? src : this._hass.hassUrl(src);
+    url += (url.includes("?") ? "&" : "?") + "_c=" + encodeURIComponent(stamp);
     const im = new Image();
     im.onload = () => { this._img = im; this._draw(); };
-    im.src = src.startsWith("http") ? src : this._hass.hassUrl(src);
+    im.src = url;
   }
 
   async _loadMask() {

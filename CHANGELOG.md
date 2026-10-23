@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.21.0b12
+
+### Fixed
+
+- Live map: the robot's path and dot no longer lag behind the position pulse. The card now cache-busts the map image on each update, so the browser fetches the fresh render instead of a stale cached one.
+
 ## v0.21.0b11
 
 ### New
