@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.22.0b3
+
+### Fixed
+
+- Map editor: furniture now shows as a labelled box that moves as you drag it. (The robot bakes its own furniture picture into the map render, which only refreshes after Save; the labelled box makes the edit clear straight away.)
+
 ## v0.22.0b2
 
 ### New

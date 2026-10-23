@@ -493,6 +493,7 @@ class TapoRV30Panel extends HTMLElement {
     const FURN = [[1, "Single bed"], [2, "Double bed"], [101, "Sofa"], [103, "Corner sofa"],
       [201, "Table & chairs"], [202, "Table"], [301, "TV unit"], [302, "Wardrobe"],
       [401, "Fridge"], [402, "Washer"], [503, "Plant"], [601, "Toilet"], [701, "Pet house"]];
+    this._furnNames = Object.fromEntries(FURN);
     // Carpets and room renaming are read-only for now: carpet writes do not persist
     // standalone, and setAreaInfo "room" can disturb room geometry; both pending safe testing.
     const tools = [["select", "mdi:cursor-move", "Select"], ["forbid", "mdi:cancel", "No-go"],
@@ -577,8 +578,13 @@ class TapoRV30Panel extends HTMLElement {
       poly(a.vertexs); ctx.strokeStyle = "rgba(150,70,210,.95)"; ctx.lineWidth = this._editSelMatch("virtual_wall", i) ? 6 : 4; ctx.stroke();
     }
     for (const [i, f] of (this._edit.furniture || []).entries()) {
-      poly(f.vertexs); ctx.closePath(); ctx.fillStyle = "rgba(90,120,170,.30)"; ctx.fill();
-      ctx.strokeStyle = "rgba(60,90,150,.95)"; ctx.lineWidth = this._editSelMatch("furniture", i) ? 4 : 2; ctx.stroke();
+      // The robot bakes the furniture picture into the map render, which only refreshes on
+      // Save. Fill the box opaquely and label it so the furniture reads as moved straight away.
+      poly(f.vertexs); ctx.closePath(); ctx.fillStyle = "rgba(60,90,150,.78)"; ctx.fill();
+      ctx.strokeStyle = "rgba(230,238,250,.95)"; ctx.lineWidth = this._editSelMatch("furniture", i) ? 4 : 2; ctx.stroke();
+      const cx = f.vertexs.reduce((s, p) => s + p[0], 0) / f.vertexs.length, cy = f.vertexs.reduce((s, p) => s + p[1], 0) / f.vertexs.length;
+      const [px, py] = this._editMm2Px(cx, cy); ctx.fillStyle = "#fff"; ctx.font = "11px system-ui, sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.fillText(this._furnNames?.[f.type] || "Furniture", px, py); ctx.textAlign = "start"; ctx.textBaseline = "alphabetic";
     }
     if (this._edit.drag) { const d = this._edit.drag; ctx.strokeStyle = "rgba(40,110,220,.95)"; ctx.lineWidth = 2; ctx.setLineDash([5, 4]); if (d.line) { ctx.beginPath(); ctx.moveTo(d.x0, d.y0); ctx.lineTo(d.x1, d.y1); ctx.stroke(); } else { ctx.strokeRect(Math.min(d.x0, d.x1), Math.min(d.y0, d.y1), Math.abs(d.x1 - d.x0), Math.abs(d.y1 - d.y0)); } ctx.setLineDash([]); }
   }
