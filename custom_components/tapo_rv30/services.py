@@ -517,8 +517,10 @@ def async_setup_services(hass: HomeAssistant) -> None:
                 "applied": applied, "counts_before": before, "counts_after": after}
 
     async def handle_restore_map_backup(call: ServiceCall) -> ServiceResponse:
-        """Restore a downloaded map backup locally: serve the .bkmap HA already holds on a
-        short-lived LAN URL and have the robot fetch and apply it (no cloud round-trip)."""
+        """Restore a map backup to the robot. By default HA serves the backup it already holds
+        on a short-lived LAN URL and the robot fetches and applies it - a fully local restore,
+        no cloud. use_cloud_url hands the robot the backup's own TP-Link URL instead, for when
+        the robot cannot reach HA on the LAN."""
         import asyncio
         import hashlib
         import os
@@ -530,17 +532,9 @@ def async_setup_services(hass: HomeAssistant) -> None:
         coord = _one(hass, call)
         if not call.data.get("confirm"):
             raise ServiceValidationError(f"{call.service}: this overwrites a map on the robot; set confirm: true")
-        if coord.busy and not call.data.get("force"):
-            raise ServiceValidationError(
-                f"{call.service}: {coord.device_name} must be docked and idle (force: true to override - "
-                "recovery needs the robot able to relocalise, which it cannot do while charging on the dock)")
-        # map_id override: restore a map that no longer exists (a deleted / lost slot),
-        # where name resolution cannot find it. Otherwise resolve by name/id as usual.
-        if call.data.get("map_id") is not None:
-            map_id = int(call.data["map_id"])
-            names = await hass.async_add_executor_job(coord.map_names)
-        else:
-            map_id, names = await _setup_map_id(call, coord)
+        if coord.busy:
+            raise ServiceValidationError(f"{call.service}: {coord.device_name} must be docked and idle")
+        map_id, names = await _setup_map_id(call, coord)
         folder = hass.config.path(DOMAIN, "map_backups")
 
         def _pick() -> str | None:
@@ -554,12 +548,12 @@ def async_setup_services(hass: HomeAssistant) -> None:
             cands = sorted(f for f in os.listdir(folder) if pat.match(f))
             return os.path.join(folder, cands[-1]) if cands else None
 
-        # Default: serve the backup from HA on the LAN and let the robot fetch it directly -
-        # a fully local restore, no cloud. The robot's HTTP client needs a clean Content-Length
-        # response, so the URL must be HA's direct LAN address: a reverse proxy / Cloudflare that
-        # chunks or buffers the body makes the download stall near the end and the recovery fails.
-        # use_cloud_url: true instead hands the robot the backup's own TP-Link presigned URL,
-        # for when the robot cannot reach HA on the LAN.
+        # Default: serve the backup from HA on the LAN and let the robot fetch it directly - a
+        # fully local restore, no cloud. The robot's HTTP client needs a clean Content-Length
+        # response, so the URL must be HA's direct LAN address: a reverse proxy in front of HA
+        # that serves the body chunked makes the robot's download stall near the end and fail.
+        # base_url overrides the auto-derived address; use_cloud_url hands the robot the backup's
+        # own TP-Link URL instead, for when it cannot reach HA on the LAN.
         store = None
         token = None
         src = "local"
@@ -608,29 +602,10 @@ def async_setup_services(hass: HomeAssistant) -> None:
             store[token] = path
             url = f"{base}/api/tapo_rv30/bkmap/{token}"
         try:
-            # The robot's recovery takes two paths (seen in robot_control_node, build 260206):
-            # recovering the ACTIVE map reloads the live SLAM map and relocalises, which fails
-            # ("RequestLoadState load map failed") when the robot cannot localise on it. Recovering
-            # a NON-active map just stages the map files and succeeds. So by default we recover the
-            # map while it is NOT the active one. activate: true forces the live-reload path.
-            if call.data.get("activate"):
-                info = await hass.async_add_executor_job(coord.client.send, "getMapInfo")
-                if (info.get("result") or {}).get("current_map_id") != map_id:
-                    await hass.async_add_executor_job(coord.client.set_current_map, map_id)
-                    await asyncio.sleep(5)
             try:
                 code = await hass.async_add_executor_job(coord.client.recover_map, map_id, md5, url)
             except RuntimeError as exc:
-                msg = str(exc)
-                if "-3022" in msg:
-                    raise HomeAssistantError(
-                        f"{call.service}: the robot refused the restore (-3022) - a previous recovery is "
-                        "likely still pending. Power-cycle the robot to clear it, then try once more.") from exc
-                if "-3023" in msg:
-                    raise HomeAssistantError(
-                        f"{call.service}: the robot refused the restore (-3023) - it has no cloud link. "
-                        "The robot must be online with TP-Link reachable for a recovery.") from exc
-                raise HomeAssistantError(f"{call.service}: {msg}") from exc
+                raise HomeAssistantError(f"{call.service}: {exc}") from exc
             process = {}
             for _ in range(30):
                 await asyncio.sleep(2)
@@ -643,12 +618,12 @@ def async_setup_services(hass: HomeAssistant) -> None:
                 store.pop(token, None)
         await coord.async_request_map_refresh()
         status = process.get("status")
-        # error_code 0 only means the request was accepted; status 13 is a commit failure,
-        # status 2 means it was still downloading/applying when we stopped polling.
-        note = ("the robot refused to commit the backup (status 13)" if status == 13
+        # The robot reports status 3 when the map is applied, 13 on failure, 2 while still working.
+        note = ("restore failed on the robot (status 13); if the backup is served through a reverse "
+                "proxy, set base_url to HA's direct LAN address" if status == 13
                 else "still applying when polling ended" if status == 2 else None)
-        return {"map_id": map_id, "map_name": names.get(map_id), "source": src,
-                "md5": md5, "url": url, "error_code": code, "process": process, "note": note}
+        return {"map_id": map_id, "map_name": names.get(map_id), "source": src, "md5": md5,
+                "url": url, "error_code": code, "process": process, "applied": status == 3, "note": note}
 
     hass.services.async_register(DOMAIN, "restore_map_backup", handle_restore_map_backup,
                                  supports_response=SupportsResponse.ONLY)

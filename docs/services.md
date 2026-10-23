@@ -24,6 +24,7 @@ robot in it is refused with a clear message. With one vacuum set up the target i
 | `save_map_setup` | Snapshot a map's no-go zones, virtual walls, carpets and room names to `config/tapo_rv30/map_setups`. See [map-recovery.md](map-recovery.md). |
 | `apply_map_setup` | Write a saved map setup back onto the map (robot docked and idle, `confirm: true`). `source_map` applies another map's setup, for a re-mapped floor. See [map-recovery.md](map-recovery.md). |
 | `fetch_cloud_map_backups` | Download your TP-Link cloud map backups to `config/tapo_rv30/map_backups` for safe keeping. See [map-recovery.md](map-recovery.md). |
+| `restore_map_backup` | Restore a whole map backup to the robot, locally - Home Assistant serves it on the LAN and the robot fetches and applies it (robot docked and idle, `confirm: true`). See [map-recovery.md](map-recovery.md). |
 
 Bad input (unknown room, map, option) raises an error with the available
 names in it, so it shows in the UI and in automation traces.

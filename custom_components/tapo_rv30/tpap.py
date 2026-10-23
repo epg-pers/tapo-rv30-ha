@@ -1223,9 +1223,9 @@ class TapoVacuumClient:
 
     # ---- map backup restore (local) ----------------------------------------------
     def recover_map(self, map_id: int, map_md5: str, url: str) -> int:
-        """Restore a map backup. The robot downloads the .bkmap from url (any http(s)
-        host it can reach - it need not be TP-Link's storage), checks map_md5 and the
-        account binding baked into the file, then applies it. Returns the error_code."""
+        """Restore a map backup. The robot downloads the .bkmap from url (any http(s) host it
+        can reach - it need not be TP-Link's storage), checks map_md5, then applies it. The URL
+        must serve a plain response with a correct Content-Length. Returns the error_code."""
         r = self.send("mapRecovery", {"map_id": int(map_id), "map_md5": str(map_md5), "url": str(url)})
         return r.get("error_code", 0)
 

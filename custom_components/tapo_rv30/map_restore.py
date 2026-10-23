@@ -1,10 +1,14 @@
 """Serve a downloaded map backup (.bkmap) to the robot for a local mapRecovery.
 
-The robot's firmware downloads the backup file from whatever URL mapRecovery is given -
-it does not have to be TP-Link's storage - then checks the file's MD5 and the account
-binding baked into it before applying it. So we host the backup HA already holds on a
-short-lived, unguessable local URL and hand that to the robot: restore works without any
-cloud round-trip, using only backups made by this account's own robot.
+The robot's firmware downloads the backup file from whatever URL mapRecovery is given - it
+does not have to be TP-Link's storage - checks its MD5, and applies it. So we host the
+backup HA already holds on a short-lived, unguessable local URL and hand that to the robot:
+restore works with no cloud round-trip.
+
+One constraint: the robot's HTTP client needs a plain response with a correct Content-Length
+(which aiohttp's FileResponse sends). The URL therefore has to be HA's direct LAN address -
+a reverse proxy in front of HA that re-chunks the body makes the robot's download stall near
+the end and the recovery fails.
 """
 from __future__ import annotations
 

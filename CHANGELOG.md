@@ -1,66 +1,11 @@
 # Changelog
 
-## v0.22.0b11
-
-### Fixed
-
-- Map restore is fully local by default again: HA serves the backup on the LAN and the robot fetches it directly, no cloud. The earlier failure was a reverse proxy (Cloudflare) in front of HA chunking the response so the robot's HTTP client could not finish the download - serving the robot HA's direct LAN address fixes it. use_cloud_url: true remains as a fallback for when the robot cannot reach HA on the LAN. Verified end to end over the LAN: a map change was reverted to the backed-up state.
-
-
-## v0.22.0b10
+## v0.22.0
 
 ### New
 
-- **Map backup restore now works.** `restore_map_backup` restores one of your cloud map backups to the robot, triggered from Home Assistant - no app needed. The robot fetches the backup from its own TP-Link cloud URL (it will not commit a locally-served copy) and applies it; it works with the robot docked. Verified end to end: a change to the map was reverted back to the backed-up state.
-
-
-## v0.22.0b9
-
-### Fixed
-
-- Local map restore: add use_cloud_url to hand the robot the backup's own TP-Link presigned URL instead of a locally-served copy (diagnostic for whether the robot requires a cloud-signed URL).
-
-## v0.22.0b8
-
-### Fixed
-
-- Local map restore: add a map_id override so a deleted / lost map can be restored (the real recovery case), where name resolution cannot find it.
-
-## v0.22.0b7
-
-### Fixed
-
-- Local map restore: add a `force` option so a restore can run while the robot is awake and off the dock. Recovery reloads the map into the robot's SLAM and relocalises, which it cannot do while charging on the dock, so a successful restore needs the robot able to move. Also declare the `network` dependency.
-
-## v0.22.0b6
-
-### Fixed
-
-- Local map restore: recover the map while it is NOT the active one. Recovering the active map makes the robot reload the live SLAM map and relocalise, which fails when it cannot localise there ("RequestLoadState load map failed"); staging a non-active map applies cleanly. Pass activate: true to force the old live-reload path.
-
-## v0.22.0b5
-
-### Fixed
-
-- Local map restore: pick the real backup file, never the snapshot preview image, and give clear messages when the robot refuses (-3022 pending recovery, -3023 no cloud link).
-
-## v0.22.0b4
-
-### New
-
-- **Local map restore** (`restore_map_backup`). Re-applies a downloaded map backup to the robot without the cloud: HA serves the `.bkmap` it already holds (from `fetch_cloud_map_backups`) on a short-lived LAN URL and the robot fetches and applies it with its own `mapRecovery` call. Works only with backups made by your own account (the robot checks the MD5 and the account binding baked into the file). Writes a whole map, so the robot must be docked and idle and you must pass `confirm: true`.
-
-## v0.22.0b3
-
-### Fixed
-
-- Map editor: furniture now shows as a labelled box that moves as you drag it. (The robot bakes its own furniture picture into the map render, which only refreshes after Save; the labelled box makes the edit clear straight away.)
-
-## v0.22.0b2
-
-### New
-
-- **Map editor** on the sidebar page's new **Edit map** tab. Draw and delete no-go zones and virtual walls, and place furniture, then save them to the robot with its own editing API (no cloud). Carpets and room names are drawn for context (view-only for now). Changes are held locally with undo until you press Save; the robot must be docked and idle to save.
+- **Map editor** on the sidebar page's new **Edit map** tab. Draw and delete no-go zones and virtual walls, and place furniture, directly on the live map, then save them to the robot with its own editing API - no cloud. Each change is held locally with undo until you press Save; the robot must be docked and idle to save. (Carpets and room names are drawn for context but are view-only for now.)
+- **Restore a map backup to the robot** (`restore_map_backup`), fully locally. Home Assistant serves a backup it holds (from `fetch_cloud_map_backups`) on your LAN and the robot fetches and applies it with its own recovery - no app, no cloud round-trip. The robot must be able to reach Home Assistant directly on the LAN (a reverse proxy in front of HA breaks the robot's download, so the service uses HA's direct LAN address); `use_cloud_url: true` falls back to the backup's own TP-Link URL when the robot cannot reach HA. The robot must be docked and idle, and you pass `confirm: true`. Verified end to end: a change to the map was restored back to the backed-up state.
 
 ## v0.21.0
 

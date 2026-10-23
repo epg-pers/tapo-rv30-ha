@@ -41,7 +41,8 @@ Same domain, so your config entry and entities carry over; see
 - **Per-room "last cleaned"**: worked out from the robot's own run maps, shown when you hold a room, and available to automations
 - **Sidebar page**: map, a schedules editor for the robot's own schedules, history and statistics, rooms with freshness, maintenance and settings, no dashboard needed (switch it off in the integration options if you prefer)
 - **Smart cleaning planner**: keeps each room within a target like "every 2 days" and cleans the due rooms when nobody is home, inside your time window, leaving out rooms whose motion sensors say they are in use; starts in preview mode
-- **Map backup and recovery**: save a map's no-go zones, virtual walls, carpets and room names and re-apply them after the robot re-maps the floor, the recovery the Tapo app itself can't do; plus local copies of your cloud map backups so they survive even if TP-Link's are lost
+- **Map editor** on the sidebar page: draw no-go zones and virtual walls and place furniture straight onto the live map and save them to the robot, with undo, no app
+- **Map backup and recovery**: restore a whole map backup to the robot locally (Home Assistant serves it on the LAN and the robot applies it, no cloud); save a map's no-go zones, virtual walls, carpets and room names and re-apply them after the robot re-maps the floor; plus local copies of your cloud map backups so they survive even if TP-Link's are lost
 - **Remote drive**: take control from the sidebar page and steer the robot with arrows or keys, like the Tapo app
 - **Go to a point** from the card: tap the map, press Go
 - **Do Not Disturb aware**: a schedule inside the robot's Do Not Disturb window never runs; the sidebar page and the services flag it before you save, instead of leaving a dead schedule on the robot
@@ -62,13 +63,12 @@ Same domain, so your config entry and entities carry over; see
 
 Several forks of this project exist. The only one still maintained is
 [jan-tdy/TapoVac-ADV](https://github.com/jan-tdy/TapoVac-ADV); the others last changed
-between March and August 2026. Since its 3.0.1 release, TapoVac-ADV includes many of this
-project's features, adapted from here as its README credits. Checked on 2026-10-22 against
-TapoVac-ADV 3.0.2 by reading its code, so this is what shipped on that day, not a promise
-about tomorrow. Its 4.0.0 betas (unreleased as stable, untested on hardware at the time of
-writing) port this project's smart planner and sidebar page from v0.20.0, credited to here.
+between March and August 2026. TapoVac-ADV includes many of this project's features, adapted
+from here as its README credits - its 4.0.0 release ports this project's sidebar page and
+smart planner from v0.20.0. Checked on 2026-10-23 against TapoVac-ADV 4.0.0 by reading its
+code and README, so this is what shipped on that day, not a promise about tomorrow.
 
-| | This project | TapoVac-ADV 3.0.2 |
+| | This project | TapoVac-ADV 4.0.0 |
 |---|:---:|:---:|
 | Local TPAP control, rooms, zones, spot, presets, `run_schedule`, native `vacuum.clean_area`, dock buttons, raw send | yes | yes |
 | Live cleaning path and last clean map | yes | yes, adapted from here |
@@ -78,10 +78,12 @@ writing) port this project's smart planner and sidebar page from v0.20.0, credit
 | Furniture on the map | yes, illustrated and labelled | yes, adapted from here, plain shapes |
 | Go to a point | yes, tap the map or call the service | yes, in the separate VacuumCard-ADV card |
 | Remote drive | yes, joystick on the sidebar page | yes, in the separate VacuumCard-ADV card |
+| Sidebar page (schedules editor, history, drive, maintenance, settings) | yes | yes, ported from here |
+| Smart cleaning planner (room targets, people, motion sensors) | yes | yes, ported from here |
 | Bundled map card (tap rooms, draw zones, floors) | yes | no, separate card project |
-| Sidebar page (schedules editor, history, drive, maintenance, settings) | yes | no in 3.0.2; ported from here in the 4.0.0 betas |
-| Smart cleaning planner (room targets, people, motion sensors) | yes | no in 3.0.2; ported from here in the 4.0.0 betas |
-| Map backup and recovery (local copies of cloud backups; save and re-apply no-go zones, walls, carpets, room names) | yes | no |
+| Map editor on the sidebar page (draw no-go zones, walls, furniture on the live map, save to robot) | yes | no |
+| Restore a whole map backup to the robot, locally | yes | no |
+| Map setup save and re-apply (no-go zones, walls, carpets, room names) and local copies of cloud backups | yes | no |
 | Dashboard strategy (whole dashboard in one line) | yes | no |
 | Tests and CI (hassfest, HACS, lint, unit tests) | yes | yes |
 | Documentation site | [yes](https://epg-pers.github.io/tapo-rv30-ha/) | README |

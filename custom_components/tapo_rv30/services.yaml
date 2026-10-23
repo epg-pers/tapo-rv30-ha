@@ -217,22 +217,14 @@ restore_map_backup:
       example: http://192.168.1.10:8123
       selector:
         text: {}
-    activate:
-      default: false
-      selector:
-        boolean: {}
-    force:
-      default: false
-      selector:
-        boolean: {}
-    map_id:
-      example: 1792705899
-      selector:
-        text: {}
     use_cloud_url:
       default: false
       selector:
         boolean: {}
+    verification_code:
+      example: "123456"
+      selector:
+        text: {}
     confirm:
       required: true
       default: false
