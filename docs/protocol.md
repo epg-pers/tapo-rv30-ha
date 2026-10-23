@@ -102,6 +102,82 @@ The app posts the schedule rule as-is. Verified on an RV30 Max Plus:
   (cells the robot cleaned are 255, skipped rooms keep their ids), overlays, furniture and the
   path (`pos_array`, `pos_len`). This is what the Last Clean Map image renders.
 
+## Maps: backup, restore and setup
+
+The map has two layers with completely different write paths.
+
+**The grid** - the occupancy pixels, i.e. the walls and obstacles the robot sensed - is built
+by SLAM and is not writable by anything, the app included. `getMapData {"map_id"}` returns it
+as an LZ4 block (`map_data`, `pix_len`, `pix_lz4len`, `width`, `height`, `resolution`) with
+`origin_coor`/`real_origin_coor`, `charge_coor`, `vac_coor` and `map_hash`.
+
+**Everything on top** - rooms and their names, no-go zones, virtual walls and carpets - is the
+`area_list`, and it *is* writable (see `setAreaInfo` below).
+
+### Cloud backup and restore (mapBackup / mapRecovery)
+
+"Back up map" in the app is `mapBackup {"map_id": <int>}`: the robot uploads its own map to
+TP-Link storage (an AWS S3 bucket, `prd-iot-as-euw1.s3.eu-west-1.amazonaws.com/<thing>/robotVacMap/<map_id>`).
+`getMapBRProcess {"map_id"}` reports `{type, process, status}` - `type` 1 backup / 2 restore /
+0 idle, `status` 2 running / 3 success / 13 failed, `process` percent. The account's backup
+list is a signed `GET {thingUrl}/v1/things/{thingName}/map/detail` returning
+`[{mapId, mapUrl, mapMd5, snapshotUrl, timestamp}]`. The backup file is the robot's own binary
+format: a short header (`"MZ"` + 16 bytes + `0xAA55`), a gzip tar of the raw map files
+(`map.gridmap`, `map.segmentmap`, `area_info.json`, `area_user.json`, `charger_pose.json`,
+`navmap_bound.json`, `path_record`, `path_map`), then a JSON tail. The 16-byte header is a
+keyed digest, not a plain hash; the rest is plaintext.
+
+Restore is `mapRecovery {"map_id", "map_md5", "url"}`: the robot downloads the file at `url`,
+checks its MD5, and applies it. **It is cloud/account-bound and cannot be driven from a local
+file.** Tested exhaustively on an RV30 Max Plus (fw 1.3.3) with router-side packet captures:
+
+- Served from Home Assistant's own HTTPS (an ordinary public-CA cert), the robot downloads the
+  self-served file without complaint: a full `GET`, User-Agent `SHIP/2.0`, HTTP 200, the
+  complete file whose MD5 equals the S3 ETag. So the robot trusts public-CA certs and the
+  transfer is fine.
+- It then **fails at the apply step**: `getMapBRProcess` climbs to ~92-97% and flips to
+  `status: 13`, even with identical bytes, matching MD5, a trusted cert, and the target map
+  already active. The rejection is therefore not transport, bytes, MD5 or TLS.
+- `mapRecovery` also needs the robot's own cloud link just to *start*: with the device-cloud
+  gateway (MQTT) blocked at the router, `mapRecovery` is refused instantly with `-3023` and
+  never downloads; with the gateway reachable, a normal cloud restore (robot pulling its own
+  backup from S3) succeeds.
+- Error codes: `-3022` the target map is not the active map, `-3016` the map no longer exists,
+  `-3023` the robot has no cloud link.
+
+The commit-accept logic (the registered-backup check and the `-3023` cloud gate) lives in the
+robot firmware, which ships as an AES-encrypted `.scv` image (`ldrobot.scv`; the platform is a
+SigmaStar SSD222 with an LDROBOT nav board) and cannot be read without a flash dump.
+**Conclusion: a map backup can only be restored through TP-Link's cloud, onto a map the account
+has registered. Deleting a map also deletes its cloud backup, so the cloud backup does not
+protect against losing a map.** `tapo_rv30.fetch_cloud_map_backups` keeps a local copy of each
+cloud backup so it survives TP-Link deleting it, but it can still only be restored while TP-Link
+accepts it.
+
+### Writing the editable layers (setAreaInfo)
+
+What the cloud restore gatekeeps, `setAreaInfo` does openly - it is the method the app uses for
+every map edit, and it needs no cloud:
+
+```json
+{"map_id": <int>, "type_list": ["forbid"], "area_list": [ { "type": "forbid", "vertexs": [[x,y], ...] } ]}
+```
+
+`type_list` names which area types the call replaces; the robot swaps all areas of those types
+for `area_list` (an empty list clears them). Types: `room`, `forbid` (no-go zone),
+`virtual_wall`, `carpet_rectangle`, `carpet_round`. Each entry (`RobotAreaData`) carries `type`,
+`id`, `name`, `vertexs` and the finish fields (`color`, `floor_texture`, `floor_material`,
+`carpet_strategy`). **`vertexs` are world-coordinate (mm) polygons**, so they re-apply onto any
+grid whatever its shape - which is why they survive a remap. Verified on an RV30 Max Plus:
+writing and clearing `forbid` and `virtual_wall` round-trips exactly (the robot renumbers ids
+but keeps the polygons). Per-room clean settings (suction/water/passes) are not here; those go
+through `setCleanAttr`, preset-only on 1.3.3 (see Room cleaning).
+
+`tapo_rv30.save_map_setup` / `apply_map_setup` build on this: snapshot the `area_list` to a file
+and write it back, restoring no-go zones, virtual walls, carpets and room names after a remap -
+the practical recovery the cloud restore refuses - entirely over the local API. The grid itself
+the robot re-maps on its own.
+
 ## Other calls verified on the RV30 Max Plus
 
 `gotoPoint {"switch": true, "point": [x, y]}` (status becomes 11, Going To Point; `switch:
