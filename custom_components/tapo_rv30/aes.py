@@ -15,7 +15,7 @@ import asyncio
 import logging
 import threading
 
-from .tpap import AuthError, NotVacuum, TapoVacuumClient, _resend_safe
+from .tpap import AuthError, NotVacuum, TapoVacuumClient, _is_dropout, _resend_safe
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -221,8 +221,8 @@ class AesVacuumClient(TapoVacuumClient):
         for m, p in requests:
             try:
                 out[m] = self.send(m, p)["result"] or {}
-            except AuthError:
-                raise
             except Exception as exc:
+                if _is_dropout(exc):
+                    raise       # login failed or the robot dropped out: do not try every getter
                 _LOGGER.debug("%s failed: %s", m, exc)
         return out

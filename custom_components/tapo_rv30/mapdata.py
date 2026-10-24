@@ -191,20 +191,6 @@ def int_list(value, default: list | None = None) -> list[int]:
     return out or list(default or [])
 
 
-def clean_transition(prev_code, new_code, cleaning: set, paused: set) -> str | None:
-    """'started' when a clean begins, 'finished' when a running or paused clean
-    ends (stopped, docked, idle), else None. Pause/resume is not a transition."""
-    if prev_code is None or new_code is None or prev_code == new_code:
-        return None
-    prev_active = prev_code in cleaning or prev_code in paused
-    new_active = new_code in cleaning or new_code in paused
-    if not prev_active and new_code in cleaning:
-        return "started"
-    if prev_active and not new_active:
-        return "finished"
-    return None
-
-
 def decode_path(pos_array: str, pos_len: int, max_jump_mm: int = 1500) -> list[tuple[int, int]]:
     """getPathData pos_array -> [(x_mm, y_mm), ...] in the map frame.
 
@@ -583,7 +569,7 @@ def room_coverage(record: dict, live: dict, live_pixels: bytes) -> dict[int, tup
                 break
             x_mm, y_mm = rox + (gx + 0.5) * rres, roy + (gy + 0.5) * rres
             lx, ly = mm_to_grid(live, x_mm, y_mm)
-            lx, ly = int(lx), int(ly)
+            lx, ly = math.floor(lx), math.floor(ly)
             if 0 <= lx < lw and 0 <= ly < lh:
                 rid = live_pixels[ly * lw + lx]
                 if rid in totals:

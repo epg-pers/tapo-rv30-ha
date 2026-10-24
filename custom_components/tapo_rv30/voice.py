@@ -217,7 +217,9 @@ def async_setup_voice(hass: HomeAssistant):
         coord = _pick(hass, _robot_text(user_input, result), active=True)
         if coord is None:
             return _which(hass)
-        return await _do(coord, coord.client.stop, "stopped")
+        reply = await _do(coord, coord.client.stop, "stopped")
+        await coord.async_forget_run()
+        return reply
 
     async def on_pause(user_input, result):
         if not _coordinators(hass):

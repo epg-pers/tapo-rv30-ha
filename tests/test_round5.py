@@ -71,3 +71,54 @@ def test_closed_client_saves_no_session(tmp_path):
     c.close()
     c._save_session()
     assert not c._cache.exists()
+
+
+def test_clock_and_name_problems_are_not_a_wrong_certificate():
+    for code in (9, 10):                                    # not yet valid, expired
+        e = ssl.SSLCertVerificationError(1, "certificate time")
+        e.verify_code = code
+        assert not T._cert_rejected(_ssl_error(e))
+
+
+def test_absurd_password_rounds_are_refused(tmp_path, monkeypatch):
+    c = _client(tmp_path)
+    reply = {"error_code": 0, "result": {"iterations": T._MAX_ITERATIONS + 1}}
+    monkeypatch.setattr(c, "_post", lambda *a, **k: reply)
+    with pytest.raises(T.AuthError, match="iterations"):
+        c._handshake("userpw", "secret")
+
+
+def test_reply_numbering_is_counted_and_bounded(tmp_path):
+    c = _client(tmp_path)
+    c._note_rseq(1, 1)
+    c._note_rseq(2, 5)
+    c._note_rseq(3, 5)
+    st = c.rseq_stats
+    assert (st["equal"], st["different"], st["repeated"]) == (1, 2, 1) and st["last_mismatch"] == [3, 5]
+    for n in range(2000):
+        c._note_rseq(n, n)
+    assert len(st["seen"]) <= 1000
+
+
+def test_reserved_sequence_is_on_disk(tmp_path, monkeypatch):
+    c = _client(tmp_path)
+    monkeypatch.setattr(c, "_post", lambda *a, **k: (_ for _ in ()).throw(requests.exceptions.ConnectionError()))
+    with pytest.raises(Exception):
+        c._send_once("getVacStatus", None)
+    assert json.loads(c._cache.read_text())["seq"] == 11
+
+
+def test_failed_session_save_removes_the_old_copy(tmp_path, monkeypatch, caplog):
+    c = _client(tmp_path)
+    c._save_session()
+    assert c._cache.exists()
+    monkeypatch.setattr(T.os, "open", lambda *a, **k: (_ for _ in ()).throw(OSError("disk full")))
+    c._save_session()
+    c._save_session()
+    assert not c._cache.exists()
+    assert sum("could not save" in r.message for r in caplog.records) == 1
+
+
+def test_dropouts_and_device_errors_are_told_apart():
+    assert T._is_dropout(T.AuthError("x")) and T._is_dropout(requests.exceptions.ConnectionError())
+    assert not T._is_dropout(RuntimeError("Device error -1"))

@@ -172,6 +172,7 @@ class TapoVacuumEntity(CoordinatorEntity[TapoCoordinator], StateVacuumEntity):
 
     async def async_stop(self, **kwargs: Any) -> None:
         await self._call(self.coordinator.client.stop)
+        await self.coordinator.async_forget_run()
         await self.coordinator.async_refresh_soon()
 
     async def async_clean_spot(self, **kwargs: Any) -> None:

@@ -290,6 +290,14 @@ def _is_device_error(exc: BaseException) -> bool:
     return "Device error" in str(exc)
 
 
+def _is_dropout(exc: BaseException) -> bool:
+    """A login or transport failure (no answer, session lost), as opposed to the robot saying
+    no or a reply we could not read: the next call would fail the same way."""
+    if isinstance(exc, AuthError):
+        return True
+    return isinstance(exc, (RuntimeError, requests.RequestException, OSError)) and not _is_device_error(exc)
+
+
 class AuthError(Exception):
     """Raised when SPAKE2+ auth fails (wrong credentials, bad attestation)."""
 
@@ -566,6 +574,8 @@ class TapoVacuumClient:
             st["last_mismatch"] = [seq, rseq]
         if rseq in st["seen"]:
             st["repeated"] += 1
+        if len(st["seen"]) >= 1000:     # bounded: a long session must not grow it forever
+            st["seen"].clear()
         st["seen"].add(rseq)
 
     def _save_session(self) -> None:
@@ -585,7 +595,16 @@ class TapoVacuumClient:
             with os.fdopen(fd, "w") as fh:
                 fh.write(payload)
         except Exception as exc:
-            _LOGGER.debug("Session cache write failed: %s", exc)
+            # An older copy left behind would hand a used message number to the next client:
+            # remove it, so the next client makes a new session instead.
+            if not getattr(self, "_save_warned", False):
+                _LOGGER.warning("TPAP: could not save the session for %s (%s); a new one is made after "
+                                "a reload", getattr(self, "host", "?"), exc)
+                self._save_warned = True
+            try:
+                self._cache.unlink()
+            except Exception:
+                pass
 
     def _clear_session(self) -> None:
         try: self._cache.unlink()
@@ -906,9 +925,10 @@ class TapoVacuumClient:
             rseq = struct.unpack(">I", raw[:4])[0]
             try:
                 plain = _decrypt(self._cipher_id, self._key, self._base_nonce, raw[4:], rseq)
-                self._note_rseq(seq, rseq)
             except Exception:
                 plain = None
+            if plain is not None:
+                self._note_rseq(seq, rseq)
         if plain is None:
             # Not an encrypted reply. A plain {"error_code": ...} (an expired session, say) is
             # classified as usual; anything unreadable after a write must not resend the write,
@@ -918,6 +938,10 @@ class TapoVacuumClient:
             except ValueError:
                 body = None
             if isinstance(body, dict) and _opt_int(body.get("error_code")):
+                if _opt_int(body.get("error_code")) in _AUTH_ERRORS:
+                    # Unauthenticated text: let a new handshake decide whether the password is
+                    # really wrong, rather than ask for it on the word of whatever answered.
+                    raise _SessionLost(f"{method}: plain error {body.get('error_code')}")
                 _raise_for_error(body, method)
             if _resend_safe(method, params):
                 raise _SessionLost(f"unreadable reply ({len(raw)} bytes)")
@@ -1078,7 +1102,7 @@ class TapoVacuumClient:
             try:
                 out[key] = bool(self.send(getter)["result"].get(field))
             except Exception as exc:
-                if not _is_device_error(exc):
+                if _is_dropout(exc):
                     raise       # the robot dropped out: do not wait out every getter's timeout
                 _LOGGER.debug("%s failed: %s", getter, exc)
         return out
@@ -1398,7 +1422,7 @@ class TapoVacuumClient:
                 if key == "schedules":
                     out[key] = self._all_schedule_pages(out[key] or {})
             except Exception as exc:
-                if not _is_device_error(exc):
+                if _is_dropout(exc):
                     raise       # the robot dropped out: do not wait out every getter's timeout
                 _LOGGER.debug("%s failed: %s", method, exc)
         return out

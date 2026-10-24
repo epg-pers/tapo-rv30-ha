@@ -60,7 +60,7 @@ _LOGGER = logging.getLogger(__name__)
 
 STATUS_RETRIES = 3          # attempts per poll before the entities go unavailable
 STATUS_RETRY_DELAY = 1.5    # seconds, doubled each retry
-_FRESHNESS_ALGO = 2         # per-room coverage logic; bump to re-fold saved history after a change
+_FRESHNESS_ALGO = 3         # per-room coverage logic; bump to re-fold saved history after a change
 
 
 # ---------------------------------------------------------------------------
@@ -110,7 +110,7 @@ class TapoCoordinator(DataUpdateCoordinator):
         self._map_read_at: float | None = None
         self._frame_key: tuple | None = None
         self._run: dict | None = None                   # {phase, at, recharge, checked}, see _track_run
-        self.presets_read = False                       # presets were read at least once            # what the last live map frame showed          # monotonic time of the last full map + settings read
+        self.presets_read = False                       # presets were read at least once
         self.map_image_bytes: bytes | None = None
         self.last_clean_image_bytes: bytes | None = None   # render of the newest clean record
         self.last_clean_hash: str = "0"
@@ -238,8 +238,14 @@ class TapoCoordinator(DataUpdateCoordinator):
         if self.map_lock.locked():
             return "is having its map written (map setup or editor); try again shortly"
         if self.status_code in DOCKED_CODES and (why := self.busy):
-            return f"is {why}; it carries on by itself (stop it to start another clean)"
+            return f"is {why} and carries on by itself; press Stop first to start a different clean"
         return None
+
+    async def async_forget_run(self) -> None:
+        """Stop pressed while docked part way through a run: the user is done with it, so it no
+        longer holds back other cleans (the robot may still finish it by itself)."""
+        if self._run_phase() in ("recharge", "wash"):
+            await self._end_run(self.data or {})
 
     def _run_phase(self) -> str | None:
         """The run's phase: 'active', docked part way through it ('recharge' / 'wash'), or
@@ -283,13 +289,13 @@ class TapoCoordinator(DataUpdateCoordinator):
             phase = run = self._run = None
         if phase in (None, "over"):
             # After a restart, pick up a run already under way (or docked to recharge).
-            resumed = prev is None and (code in RUN_PAUSED or (code in DOCKED_CODES and sign))
+            resumed = prev is None and (code in RUN_PAUSED or ((code in DOCKED_CODES or code == 4) and sign))
             if code in RUN_CODES or resumed:
                 await self._read_records()      # the baseline: every record written so far
                 newest = max((_ts(r) for r in _records(self.settings.get("records"))), default=0)
                 self._last_record_ts = max(self._last_record_ts or 0, newest)
                 self._run = {"phase": "recharge" if code in DOCKED_CODES else "active", "at": now,
-                             "recharge": sign}
+                             "recharge": sign, "resumed": prev is None}
                 if prev is not None:
                     self.hass.bus.async_fire(EVENT_CLEAN_STARTED, {
                         **self._event_base(), "status_code": code, "current_room": self.current_room})
@@ -316,6 +322,11 @@ class TapoCoordinator(DataUpdateCoordinator):
                 await self._end_run(new)            # washed, not setting off again: done
                 return
             run.update(phase="recharge", at=now)
+        elif run.get("resumed") and code == 6 and not sign:
+            # Picked up after a restart on a recharge sign, now charged and not setting off: there
+            # was no run to finish (a stale notice), so it must not hold off other cleans.
+            self._run = None
+            return
         # Docked or idle with the run not closed: its record closes it, looked for each minute.
         run = self._run
         if run and not active:
@@ -410,6 +421,10 @@ class TapoCoordinator(DataUpdateCoordinator):
                     raise ConfigEntryAuthFailed(str(exc)) from exc
                 except Exception as exc:    # the robot dropped out part way: keep the last values
                     _LOGGER.debug("Settings read failed: %s", exc)
+                    if self._setting_keys is None and self.data is None:
+                        # Setup sees no settings: start from none, so the entities of the ones
+                        # that answer later are still added (by a reload) instead of never.
+                        self._setting_keys = set()
             if full or map_ok:
                 self._check_pending_restore()
                 try:
