@@ -496,6 +496,9 @@ def async_setup_services(hass: HomeAssistant) -> None:
         methods = _raw_methods(method, params)
         blocked = [m for m in methods if _is_blocked(m)]
         if blocked:
+            if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,63}", blocked[0]):
+                raise ServiceValidationError(
+                    f"{call.service}: {blocked[0]!r} is not a plain method name (letters, digits and _ only)")
             raise ServiceValidationError(
                 f"{call.service}: '{blocked[0]}' is an onboarding, system or factory call and is blocked. "
                 "Calls like this have wiped this robot's maps; use the Tapo app for them.")

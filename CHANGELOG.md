@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.30.0b1
+## v0.30.0
 
 A fourth bug hunt, from new angles: upgrades and stored data, the last release's own changes, other models and households, the sidebar page and card in a browser, the service contract, a safety audit of every write to the robot, and performance over weeks. Every finding was argued for and against by separate reviewers; only what held up was fixed.
 
