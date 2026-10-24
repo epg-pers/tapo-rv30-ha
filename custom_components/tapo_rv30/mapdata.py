@@ -53,6 +53,10 @@ def lz4_block_decompress(data: bytes, uncompressed_size: int) -> bytes:
     malformed block raises MapValidationError instead of corrupting or growing
     the output. Cached on the input, since one poll decodes the same map blob for
     the position, the current room and the render."""
+    # LZ4 expands at most ~255x; a claimed size beyond that (or beyond any real map) is a
+    # bad or hostile reply, refused before allocating it.
+    if not 0 <= uncompressed_size <= min(MAX_MAP_CELLS, 255 * len(data) + 16):
+        raise MapValidationError(f"implausible uncompressed size {uncompressed_size}")
     out = bytearray(uncompressed_size)
     src = 0
     dst = 0
@@ -99,6 +103,9 @@ def lz4_block_decompress(data: bytes, uncompressed_size: int) -> bytes:
 
 
 def b64name(s: str) -> str:
+    """Decode a base64 name; anything else (None, a number) is no name."""
+    if not isinstance(s, str) or not s:
+        return ""
     try:
         return base64.b64decode(s).decode(errors="replace").strip()
     except Exception:
@@ -138,7 +145,7 @@ def dnd_active(dnd: dict | None, now_minutes: int) -> bool:
     Windows may cross midnight (22:00 -> 08:00)."""
     if not dnd or not dnd.get("do_not_disturb"):
         return False
-    start, end = int(dnd.get("s_min", 0)), int(dnd.get("e_min", 0))
+    start, end = minutes_of(dnd.get("s_min")), minutes_of(dnd.get("e_min"))
     if start == end:
         return True
     if start < end:
@@ -150,9 +157,37 @@ def dnd_window(dnd: dict | None) -> dict | None:
     """The DND window as the UI shows it: {"enabled", "start": "22:00", "end": "08:00"}."""
     if not dnd:
         return None
-    hhmm = lambda m: f"{int(m) // 60:02d}:{int(m) % 60:02d}"
-    return {"enabled": bool(dnd.get("do_not_disturb")), "start": hhmm(dnd.get("s_min", 0)),
-            "end": hhmm(dnd.get("e_min", 0))}
+    hhmm = lambda m: f"{minutes_of(m) // 60:02d}:{minutes_of(m) % 60:02d}"
+    return {"enabled": bool(dnd.get("do_not_disturb")), "start": hhmm(dnd.get("s_min")),
+            "end": hhmm(dnd.get("e_min"))}
+
+
+def minutes_of(value) -> int:
+    """Minutes after midnight from a robot field (int, float or numeric string; anything
+    else is 0), kept within one day."""
+    try:
+        return int(float(value)) % 1440
+    except (TypeError, ValueError):
+        return 0
+
+
+def as_int(value, default: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def int_list(value, default: list | None = None) -> list[int]:
+    """A robot list field (err_status, prompt, ...) as ints; a bare number becomes a list,
+    anything unusable is dropped."""
+    if isinstance(value, (int, float, str)) and not isinstance(value, bool):
+        value = [value]
+    if not isinstance(value, (list, tuple)):
+        return list(default or [])
+    out = [as_int(v, None) for v in value]
+    out = [v for v in out if v is not None]
+    return out or list(default or [])
 
 
 def clean_transition(prev_code, new_code, cleaning: set, paused: set) -> str | None:
@@ -177,7 +212,11 @@ def decode_path(pos_array: str, pos_len: int, max_jump_mm: int = 1500) -> list[t
     position, and is dropped.
     """
     import struct
-    raw = lz4_block_decompress(base64.b64decode(pos_array), pos_len)
+    try:
+        pos_len = int(pos_len)
+    except (TypeError, ValueError):
+        return []
+    raw = lz4_block_decompress(base64.b64decode(pos_array or ""), pos_len)
     body = raw[8:]
     pts = [tuple(struct.unpack(">hh", body[i:i + 4])) for i in range(0, len(body) - 3, 4)]
     if len(pts) < 3:
@@ -297,14 +336,19 @@ def decode_schedule(rule: dict, room_names: dict[int, str], dnd: dict | None = N
     fire; the Tapo app shows the same warning)."""
     attr = rule.get("clean_attr") or {}
     room_ids = attr.get("room_list") or []
-    s_min = rule.get("s_min", 0)
+    s_min = minutes_of(rule.get("s_min"))
+    once = rule.get("mode") == "once"
+    date = None
+    if once and rule.get("year"):
+        date = f"{as_int(rule.get('year')):04d}-{as_int(rule.get('month')):02d}-{as_int(rule.get('day')):02d}"
     return {
         "id":            rule.get("id"),
         "enabled":       rule.get("enable", False),
         "time":          f"{s_min // 60:02d}:{s_min % 60:02d}",
-        "days":          decode_weekdays(rule.get("week_day", 0)),
+        "days":          decode_weekdays(as_int(rule.get("week_day"))),
         "repeat":        rule.get("mode") == "repeat",
-        "blocked_by_dnd": dnd_active(dnd, int(s_min)),
+        "date":          date,      # a one-off schedule's day (robot-local), else None
+        "blocked_by_dnd": dnd_active(dnd, s_min),
         "rooms":         [room_names.get(rid, f"Room {rid}") for rid in room_ids],
         "room_ids":      room_ids,
         "preset_id":     attr.get("custom_rule_id"),
@@ -552,14 +596,21 @@ def decode_prompt(code) -> dict:
     return {"code": code, "prompt": slug, "description": label}
 
 
+def _keys(value) -> list:
+    """Prompt instance ids: numbers or strings only (anything else cannot be compared)."""
+    if not isinstance(value, (list, tuple)):
+        value = [value] if isinstance(value, (int, str)) else []
+    return [v for v in value if isinstance(v, (int, str)) and not isinstance(v, bool)]
+
+
 def new_prompts(prev: dict | None, new: dict) -> list[dict]:
     """Prompts in the new status that were not in the previous one. The robot keeps a
     prompt in the list while it applies; each instance has an id (promptCode_id), so a
     prompt that clears and comes back fires again. Without ids, compare codes."""
-    codes = list(new.get("prompts") or [])
-    ids = list(new.get("prompt_ids") or [])
-    old_codes = set((prev or {}).get("prompts") or [])
-    old_ids = set((prev or {}).get("prompt_ids") or [])
+    codes = int_list(new.get("prompts"))
+    ids = _keys(new.get("prompt_ids"))
+    old_codes = set(int_list((prev or {}).get("prompts")))
+    old_ids = set(_keys((prev or {}).get("prompt_ids")))
     out = []
     for i, code in enumerate(codes):
         pid = ids[i] if i < len(ids) else None

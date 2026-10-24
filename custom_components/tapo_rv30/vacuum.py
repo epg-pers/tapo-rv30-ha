@@ -102,7 +102,11 @@ class TapoVacuumEntity(CoordinatorEntity[TapoCoordinator], StateVacuumEntity):
         d = self.coordinator.data
         if d is None:
             return None
-        return VacuumActivity(VACUUM_STATES.get(d.get("status_code", 0), "idle"))
+        state = VACUUM_STATES.get(d.get("status_code", 0), "idle")
+        # A stuck robot stops (idle or paused) with an error code; say so, as the app does.
+        if state in ("idle", "paused") and any(c for c in d.get("error_codes") or [] if c not in (0, None)):
+            state = "error"
+        return VacuumActivity(state)
 
     @property
     def fan_speed(self) -> str | None:

@@ -23,6 +23,14 @@ clean_rooms:
       - 4
       selector:
         object: {}
+    map_id:
+      required: false
+      example: 1792568378
+      selector:
+        number:
+          min: 0
+          max: 4294967295
+          mode: box
     suction:
       example: Turbo
       selector:

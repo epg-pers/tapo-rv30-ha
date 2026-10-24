@@ -224,9 +224,9 @@ async def async_setup_entry(
         TapoStatusSensor(coordinator, entry, _WIFI_SENSOR),
         TapoStatusSensor(coordinator, entry, _CURRENT_ROOM_SENSOR),
         TapoStatusSensor(coordinator, entry, _SCHEDULES_SENSOR),
-        TapoStatusSensor(coordinator, entry, _used_h("main_brush_lid_time")),
-        TapoStatusSensor(coordinator, entry, _used_h("rag_time")),
     ]
+    entities += [TapoStatusSensor(coordinator, entry, _used_h(f))
+                 for f in ("main_brush_lid_time", "rag_time") if coordinator.has_part(f)]
     if getattr(coordinator, "planner", None) is not None:
         entities.append(TapoPlannerSensor(coordinator, entry))
     if coordinator.has("matter") and "matter_status" in coordinator.settings:
@@ -235,6 +235,8 @@ async def async_setup_entry(
         entities.append(TapoStatusSensor(coordinator, entry, _MATTER_CODE_SENSOR))
 
     for ckey, clabel in CONSUMABLE_LABELS.items():
+        if not coordinator.has_part(ckey):
+            continue
         entities.append(
             TapoConsumableSensor(coordinator, entry, ckey, clabel)
         )

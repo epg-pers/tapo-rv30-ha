@@ -5,7 +5,9 @@
  *
  * Finds every Tapo robot in this Home Assistant and builds, per robot, an overview view
  * (the bundled card with status, a rooms section, maintenance, settings and schedules).
- * Entities are found through the entity registry by device, so renamed entities still work.
+ * Entities are found through the entity registry by device, then by translation key or the end
+ * of the entity id: a renamed device or friendly name does not matter, but an entity id changed by
+ * hand is not found.
  */
 const DOMAIN = "tapo_rv30";
 
@@ -13,7 +15,24 @@ function entitiesFor(hass, deviceId) {
   return Object.values(hass.entities || {}).filter((e) => e.device_id === deviceId && !e.hidden);
 }
 function byDomain(list, domain) { return list.filter((e) => e.entity_id.startsWith(domain + ".")); }
-function find(list, needle) { return list.find((e) => e.entity_id.includes(needle)); }
+// Translation keys the integration sets, by the entity id suffix they stand in for. A translation
+// key does not depend on the entity id at all (one made in another language too); the rest go by suffix.
+const TRANSLATION_KEYS = { status: "status", error: "error", current_room: "current_room", schedules: "schedules",
+  charging: "charging", problem: "problem" };
+const objectId = (e) => e.entity_id.slice(e.entity_id.indexOf(".") + 1);
+// An id made from a name the way Home Assistant makes entity ids ("Jarvis Robot" -> "jarvis_robot").
+const slug = (n) => String(n || "").normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+// One of the device's entities by its exact suffix ("last_clean" is never "last_clean_area"). An id
+// <base>_<suffix> wins (bases: the vacuum's object id and the device's name), then the shortest, so
+// "status" is the robot's Status and not its Planner Status.
+function find(list, suffix, bases) {
+  const key = TRANSLATION_KEYS[suffix];
+  const byKey = key && list.find((e) => e.translation_key === key);
+  if (byKey) return byKey;
+  const exact = list.find((e) => bases.some((b) => objectId(e) === `${b}_${suffix}`));
+  if (exact) return exact;
+  return list.filter((e) => objectId(e).endsWith(`_${suffix}`)).sort((a, b) => objectId(a).length - objectId(b).length)[0];
+}
 // A URL-safe view path that no other robot's view uses. Accents are dropped ("Café" -> "cafe");
 // names with no Latin letters or digits at all fall back to "robot". A purely numeric path would
 // be read as a view index, so it gets a prefix too.
@@ -37,18 +56,26 @@ function robotViews(hass, device, used) {
   const images = byDomain(ents, "image");
   const rooms = (hass.states[vac.entity_id]?.attributes?.rooms) || [];
   const name = device.name_by_user || device.name || "Robot";
-  const pick = (list, needles) => needles.map((n) => find(list, n)).filter(Boolean).map((e) => e.entity_id);
+  // What the device's entity ids start with: the vacuum's own, or the device name they were made from.
+  const bases = [objectId(vac), slug(device.name_by_user), slug(device.name)].filter(Boolean);
+  const pick = (list, suffixes) => suffixes.map((n) => find(list, n, bases)).filter(Boolean).map((e) => e.entity_id);
 
   const cards = [
     { type: "custom:tapo-rv30-card", entity: vac.entity_id },
   ];
   // The map camera knows each room's id: cleaning by id works for unnamed rooms and for two rooms
   // with the same name. Without it (map not read yet) the vacuum's room names are all there is.
-  const geom = byDomain(ents, "camera").map((e) => hass.states[e.entity_id]?.attributes?.room_geometry)
-    .find((g) => Array.isArray(g) && g.length && g.every((r) => r && r.id != null)) || [];
+  const cams = byDomain(ents, "camera").map((e) => hass.states[e.entity_id]?.attributes).filter(Boolean);
+  const cam = cams.find((a) => Array.isArray(a.room_geometry) && a.room_geometry.length && a.room_geometry.every((r) => r && r.id != null));
+  const geom = cam ? cam.room_geometry : [];
+  // Room ids restart on every map, and this dashboard does not follow a floor switch: sent with the
+  // map they came from, a button left over from another floor fails clearly instead of cleaning
+  // the room with the same id (or name) on this one. The vacuum's room names are the camera's map.
+  const mapId = (cam ? [cam] : cams).map((a) => a.map_id).find(Number.isInteger);
+  const onMap = (data) => (mapId != null ? { ...data, map_id: mapId } : data);
   const roomButtons = geom.length
-    ? geom.map((g) => ({ name: g.name || `Room ${g.id}`, data: { room_ids: [g.id] } }))
-    : rooms.map((r) => ({ name: r, data: { rooms: [r] } }));
+    ? geom.map((g) => ({ name: g.name || `Room ${g.id}`, data: onMap({ room_ids: [g.id] }) }))
+    : rooms.map((r) => ({ name: r, data: onMap({ rooms: [r] }) }));
   if (roomButtons.length) {
     cards.push({
       type: "grid", columns: 2, square: false, title: "Rooms",
@@ -59,13 +86,15 @@ function robotViews(hass, device, used) {
       })),
     });
   }
-  const presets = buttons.filter((e) => e.entity_id.includes("preset")).map((e) => e.entity_id);
+  // Preset buttons are named "Preset <name>", so their ids are <base>_preset_<name>.
+  const presets = buttons.filter((e) => e.translation_key === "preset" || bases.some((b) => objectId(e).startsWith(`${b}_preset_`)))
+    .map((e) => e.entity_id);
   if (presets.length) cards.push({ type: "entities", title: "Presets", entities: presets });
-  const lastClean = find(images, "last_clean");
+  const lastClean = find(images, "last_clean_map", bases);
   if (lastClean) cards.push({ type: "picture-entity", entity: lastClean.entity_id, show_state: false, show_name: true, name: "Last clean" });
   cards.push({
     type: "entities", title: "Status",
-    entities: pick(sensors, ["status", "battery", "error", "current_room", "clean_progress", "area_cleaned", "last_clean"])
+    entities: pick(sensors, ["status", "battery", "error", "current_room", "clean_progress", "last_clean_area", "last_clean"])
       .concat(pick(binaries, ["charging", "problem", "mop_attached", "do_not_disturb_active"])),
   });
   const maint = pick(sensors, ["main_brush_remaining", "side_brush_remaining", "filter_remaining", "sensor_remaining", "charge_contacts_remaining"])
@@ -73,8 +102,8 @@ function robotViews(hass, device, used) {
   if (maint.length) cards.push({ type: "entities", title: "Maintenance", entities: maint });
   const settings = selects.map((e) => e.entity_id).concat(switches.map((e) => e.entity_id)).concat(numbers.map((e) => e.entity_id));
   if (settings.length) cards.push({ type: "entities", title: "Settings", entities: settings });
-  const sched = find(sensors, "schedules");
-  const totals = pick(sensors, ["total_cleans", "total_area", "total_cleaning_time"]);
+  const sched = find(sensors, "schedules", bases);
+  const totals = pick(sensors, ["total_cleans", "total_area_cleaned", "total_cleaning_time"]);
   if (sched || totals.length) cards.push({ type: "entities", title: "Schedules and totals", entities: [sched?.entity_id].filter(Boolean).concat(totals) });
   return [{ title: name, path: viewPath(name, used), icon: "mdi:robot-vacuum",
             type: "sections", max_columns: 3,

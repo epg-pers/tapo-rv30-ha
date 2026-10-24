@@ -17,7 +17,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry,
     c = hass.data[DOMAIN][entry.entry_id]
     entities = [TapoCharging(c, entry, "charging", "Charging"),
                 TapoProblem(c, entry, "problem", "Problem")]
-    entities += [TapoConsumableWarn(c, entry, key, label) for key, label in CONSUMABLE_LABELS.items()]
+    entities += [TapoConsumableWarn(c, entry, key, label) for key, label in CONSUMABLE_LABELS.items()
+                 if c.has_part(key)]
     if c.has("mop"):
         entities.append(TapoMopAttached(c, entry, "mop_attached", "Mop Attached"))
     if "dnd" in c.settings:

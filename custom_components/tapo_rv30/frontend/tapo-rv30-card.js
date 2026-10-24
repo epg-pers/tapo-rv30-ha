@@ -10,7 +10,7 @@
  * the vacuum's device automatically.
  */
 
-const CARD_VERSION = "0.28.0";
+const CARD_VERSION = "0.29.0b1";
 const ROOM_COLORS = ["#ffb3ba", "#bae1ff", "#baffc9", "#ffffba", "#dcbaff", "#ffdcba", "#baffff"];
 
 const ICONS = {
@@ -25,6 +25,9 @@ const ICONS = {
 // Everything from entity state or attributes goes through esc() before it reaches innerHTML.
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const pct = (v) => { const n = Number(v); return isFinite(n) ? Math.max(0, Math.min(100, n)) : 0; };
+// clean_rooms data for rooms read from one map: with map_id the service refuses them once the robot
+// is on another map, instead of cleaning a room there that happens to have the same id.
+const onMap = (data, mapId) => (Number.isInteger(mapId) ? { ...data, map_id: mapId } : data);
 
 const FRESH = (ts) => {
   if (!ts) return null;
@@ -642,8 +645,11 @@ class TapoRV30Card extends HTMLElement {
   }
 
   _openRoomSheet(id) {
-    const g = (this._mapAttrs().room_geometry || []).find((r) => r.id === id); if (!g) return;
-    const cur = { suction: g.suction ?? 3, water_level: g.water_level ?? 0, passes: g.passes ?? 1 };
+    const a = this._mapAttrs(), g = (a.room_geometry || []).find((r) => r.id === id); if (!g) return;
+    const mapId = a.map_id;     // the map this room id was read from
+    // The room's own levels when they are ones the sheet offers, else the defaults.
+    const level = (v, ok, dflt) => (ok.includes(Number(v)) ? Number(v) : dflt);
+    const cur = { suction: level(g.suction, [1, 2, 3, 4, 5], 3), water_level: level(g.water_level, [0, 1, 2, 3], 0), passes: level(g.passes, [1, 2, 3], 1) };
     const sheet = document.createElement("div"); sheet.className = "sheet";
     const seg = (key, opts) => `<div class="opt"><span>${{ suction: "Suction", water_level: "Water", passes: "Passes" }[key]}</span><div class="seg" data-key="${key}">` +
       opts.map(([v, l]) => `<button data-v="${v}" class="${cur[key] === v ? "on" : ""}">${l}</button>`).join("") + `</div></div>`;
@@ -663,7 +669,7 @@ class TapoRV30Card extends HTMLElement {
     const fan = ["", "quiet", "standard", "turbo", "max", "ultra"], water = ["off", "low", "medium", "high"];
     sheet.querySelector(".save").onclick = () => {
       // By id: an unnamed room, or two rooms with the same name, cannot be picked by name.
-      this._call("tapo_rv30", "clean_rooms", { room_ids: [g.id], suction: fan[cur.suction], water: water[cur.water_level], passes: cur.passes }, { entity_id: this._config.entity });
+      this._call("tapo_rv30", "clean_rooms", onMap({ room_ids: [g.id], suction: fan[cur.suction], water: water[cur.water_level], passes: cur.passes }, mapId), { entity_id: this._config.entity });
       sheet.remove();
     };
     this._el.mapwrap.appendChild(sheet);
@@ -745,8 +751,9 @@ class TapoRV30Card extends HTMLElement {
   _go() {
     const target = { entity_id: this._config.entity };
     if (this._mode === "rooms" && this._selected.size) {
-      // By id: an unnamed room, or two rooms with the same name, cannot be picked by name.
-      this._call("tapo_rv30", "clean_rooms", { room_ids: [...this._selected] }, target);
+      // By id: an unnamed room, or two rooms with the same name, cannot be picked by name. A map
+      // change clears the selection (_checkMapChange), so the camera's map_id is the ids' map.
+      this._call("tapo_rv30", "clean_rooms", onMap({ room_ids: [...this._selected] }, this._mapAttrs().map_id), target);
     } else if (this._mode === "zone" && this._zone) {
       const z = this._zone;
       if (z.saved) {

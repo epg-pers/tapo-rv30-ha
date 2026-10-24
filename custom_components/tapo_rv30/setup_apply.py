@@ -98,6 +98,14 @@ async def apply_setup(hass, coord, map_id: int, snap: dict, dry_run: bool = Fals
         "plan": mapsnapshot.summary(plan), "dry_run": dry_run}
     if dry_run:
         return result
+    if coord.map_lock.locked():
+        raise ApplyError(f"another map write to {coord.device_name} is still running; try again shortly", {})
+    async with coord.map_lock:     # one map write per robot at a time (each switches maps)
+        return await _write_plan(hass, coord, map_id, plan, result)
+
+
+async def _write_plan(hass, coord, map_id: int, plan: dict, result: dict) -> dict[str, Any]:
+    client = coord.client
     # setAreaInfo writes the active map; switch to the target first, and back afterwards so
     # the next clean does not start on the wrong floor.
     written: dict[str, int] = {}

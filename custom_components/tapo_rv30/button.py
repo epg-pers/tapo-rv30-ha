@@ -24,7 +24,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry,
     entities: list[ButtonEntity] = []
     if c.has("dust_bucket") and "dust" in c.settings:
         entities.append(TapoEmptyBinButton(c, entry, "empty_bin", "Empty Bin"))
-    entities += [TapoResetButton(c, entry, part, label) for part, label in RESETTABLE.items()]
+    entities += [TapoResetButton(c, entry, part, label) for part, label in RESETTABLE.items()
+                 if c.has_part(f"{part}_time")]
     entities += [TapoDockActionButton(c, entry, key) for key in c.dock_actions if key in DOCK_LABELS]
     if c.has("matter") and "matter_status" in c.settings:
         entities.append(TapoMatterPairingButton(c, entry, "matter_pairing", "Open Matter Pairing Window"))

@@ -7,7 +7,7 @@ robot in it is refused with a clear message. With one vacuum set up the target i
 
 | Service | What it does |
 |---|---|
-| `clean_rooms` | Clean named rooms (partial match; a name that fits several rooms is refused). Or give `room_ids` (room numbers on the map, as the card sends them) for unnamed rooms or rooms that share a name. Optional `map` (else the current map), `suction`, `water`, `passes` for this run. |
+| `clean_rooms` | Clean named rooms (partial match; a name that fits several rooms is refused). Or give `room_ids` (room numbers on the map, as the card sends them) for unnamed rooms or rooms that share a name, with `map_id` (the map they were picked on) so the clean is refused if the robot has since moved to another map. Optional `map` (else the current map), `suction`, `water`, `passes` for this run. |
 | `clean_zone` | Clean rectangles given in map mm, same frame as the `position_mm` attribute. |
 | `set_room_settings` | Per-room suction / water / passes stored on the robot. Rejected by RV30 Max Plus firmware 1.3.3 (see [protocol.md](protocol.md)); use `clean_rooms` with levels, or `create_preset` to keep per-room levels. |
 | `run_schedule` | Replay a saved schedule's rooms and settings now, by its id (like `S1`). The vacuum has no "run schedule by id" call, so the schedule's suction, water and passes become the robot's default levels and the clean is started; if the start fails, the previous levels are put back. |

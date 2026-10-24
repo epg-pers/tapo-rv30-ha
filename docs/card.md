@@ -3,10 +3,8 @@
 The map card is bundled with the integration: add a card, pick **Tapo Vacuum**, done. For a
 whole dashboard in one step, use the [strategy](#whole-dashboard-in-one-line).
 
-<p align="center">
-  <img src="../card.png" width="300" style="vertical-align: top; margin: 4px" alt="The bundled card, rooms mode">
-  <img src="../card-zones.png" width="300" style="vertical-align: top; margin: 4px" alt="The bundled card, zone mode">
-</p>
+![The bundled card, rooms mode](card.png){ width="300" }
+![The bundled card, zone mode](card-zones.png){ width="300" }
 
 *Mock-ups with a made-up house, rendered through the integration's own map code.*
 
@@ -42,11 +40,9 @@ The buttons at the top right of the map switch what a tap does.
 - **Status**: the last clean map, the recent runs and consumable life.
 - **Floors**: with several maps, chips at the bottom switch floors.
 
-<p align="center">
-  <img src="../card-room.png" width="300" style="vertical-align: top; margin: 4px" alt="Room sheet with last cleaned">
-  <img src="../card-status.png" width="300" style="vertical-align: top; margin: 4px" alt="The card's status panel">
-  <img src="../card-goto.png" width="300" style="vertical-align: top; margin: 4px" alt="The go-to tool">
-</p>
+![Room sheet with last cleaned](card-room.png){ width="300" }
+![The card's status panel](card-status.png){ width="300" }
+![The go-to tool](card-goto.png){ width="300" }
 
 *Room sheet, status panel and go-to tool (mock-ups).*
 

@@ -155,6 +155,9 @@ async def _resolve(hass: HomeAssistant, call: ServiceCall, coord: TapoCoordinato
 def _require_idle(call: ServiceCall, coord: TapoCoordinator) -> None:
     """A new clean is refused by the robot (-3002) while one is running or
     paused; say so up front instead of relaying the bare device error."""
+    if coord.map_lock.locked():
+        raise ServiceValidationError(
+            f"{call.service}: {coord.device_name} is having its map written (map setup or editor); try again shortly")
     busy = coord.busy
     if busy == "cleaning":
         raise ServiceValidationError(
@@ -206,9 +209,23 @@ def async_setup_services(hass: HomeAssistant) -> None:
         return
 
     async def handle_clean_rooms(call: ServiceCall) -> None:
+        want = call.data.get("map_id")
+        if want not in (None, ""):
+            try:
+                want = int(want)
+            except (TypeError, ValueError):
+                raise ServiceValidationError(f"{call.service}: 'map_id' must be a map number") from None
+        else:
+            want = None
         for coord in _coordinators(hass, call):
             _require_idle(call, coord)
-            room_ids, map_id = await _resolve(hass, call, coord)
+            # map_id (sent by the card and panel with room_ids): the rooms were picked on that
+            # map. The robot cleans its current map, so refuse if it has moved to another.
+            if want is not None and coord.map_id != want:
+                raise ServiceValidationError(
+                    f"{call.service}: {coord.device_name} is now on another map (the rooms were picked on "
+                    f"map {want}); refresh and pick the rooms again")
+            room_ids, map_id = await _resolve(hass, call, coord, map_id=want)
             await _send(hass, call, coord.client.clean_rooms, room_ids, map_id, True, _levels(call) or None)
             await coord.async_refresh_soon()
 
@@ -254,6 +271,8 @@ def async_setup_services(hass: HomeAssistant) -> None:
     async def handle_go_to(call: ServiceCall) -> None:
         """Drive to a point given in map mm (same frame as position_mm / clean_zone)."""
         coord = _one(hass, call)
+        if coord.map_lock.locked():
+            raise ServiceValidationError(f"{call.service}: {coord.device_name} is having its map written; try again shortly")
         if not coord.has("goto_point"):
             raise ServiceValidationError(f"{call.service}: {coord.device_name} does not support go-to-point")
         _require_idle(call, coord)
@@ -349,11 +368,12 @@ def async_setup_services(hass: HomeAssistant) -> None:
         await coord.async_settings_changed()
         return {"id": new_id}
 
-    def _find_rule(call: ServiceCall, coord: TapoCoordinator) -> dict:
+    def _find_rule(call: ServiceCall, coord: TapoCoordinator, rules: list | None = None) -> dict:
         sid = str(call.data.get("schedule_id", "")).strip()
         if not sid:
             raise ServiceValidationError(f"{call.service}: 'schedule_id' is required (e.g. S1)")
-        rules = (coord.settings.get("schedules") or {}).get("rule_list") or []
+        if rules is None:
+            rules = (coord.settings.get("schedules") or {}).get("rule_list") or []
         rule = next((r for r in rules if str(r.get("id")) == sid), None)
         if rule is None:
             raise ServiceValidationError(f"{call.service}: no schedule {sid!r}; known: {[r.get('id') for r in rules]}")
@@ -361,7 +381,14 @@ def async_setup_services(hass: HomeAssistant) -> None:
 
     async def handle_set_schedule(call: ServiceCall) -> None:
         coord = _one(hass, call)
-        rule = dict(_find_rule(call, coord))
+        # editScheduleRule replaces the whole rule, built from a read of it: two edits at
+        # once (or one against a stale poll) would each put back what the other changed.
+        async with coord.schedule_lock:
+            await _set_schedule(call, coord)
+
+    async def _set_schedule(call: ServiceCall, coord: TapoCoordinator) -> None:
+        fresh = await _read(hass, call, coord.client.get_schedules)
+        rule = dict(_find_rule(call, coord, fresh))
         try:
             minutes = parse_hhmm(call.data["time"]) if "time" in call.data else rule.get("s_min", 0)
             mask = encode_weekdays(call.data["days"]) if "days" in call.data else rule.get("week_day", 0)
@@ -453,9 +480,9 @@ def async_setup_services(hass: HomeAssistant) -> None:
         # clean history (see README, "Protocol notes"). Known-safe status reads are
         # allowed; anything else waits for the robot to be idle unless forced.
         unsafe = [m for m in methods if m not in SAFE_WHILE_BUSY and m != "multipleRequest"]
-        if coord.busy and unsafe and not call.data.get("force"):
+        if coord.map_busy and unsafe and not call.data.get("force"):
             raise ServiceValidationError(
-                f"{call.service}: {coord.device_name} is {coord.busy}; '{unsafe[0]}' is not on the "
+                f"{call.service}: {coord.device_name} is {coord.map_busy}; '{unsafe[0]}' is not on the "
                 f"known-safe list, so it is refused until the robot is idle (pass force: true to override)")
         try:
             resp = await hass.async_add_executor_job(coord.client.send, method, params)
@@ -876,6 +903,9 @@ def async_setup_services(hass: HomeAssistant) -> None:
                 else:
                     await asyncio.sleep(3)  # let a slow fetch finish before the URL stops serving
                     store.pop(token, None)
+        # The restore can take minutes; if the entry was reloaded meanwhile, carry on with its
+        # new coordinator (the old one's client is closed and its pending restore is lost).
+        coord = hass.data.get(DOMAIN, {}).get(coord.entry.entry_id, coord) if coord.entry else coord
         await coord.async_request_map_refresh()
         status = _opt_int(process.get("status"))
         # Where did it land? The robot restores under the backup's own map id; if that id was

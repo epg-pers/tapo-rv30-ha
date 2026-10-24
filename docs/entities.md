@@ -32,16 +32,17 @@ capability flags `goto_point` and `remote_control`.
 
 ## Sensors
 
-Status, Battery, Error, Area Cleaned, Clean Progress, Last Clean (with run totals), Total
+Status, Battery, Error, Last Clean Area, Clean Progress, Last Clean (with run totals), Total
 Cleans, Total Area Cleaned, Total Cleaning Time, Current Room, Schedules (count, decoded list
-as attributes, each with `blocked_by_dnd` when its time falls inside Do Not Disturb), consumable wear (main brush, side brush, filter, sensor, charge contacts,
-main brush lid, mop), Wi-Fi Signal (diagnostic, off by default), Matter and Matter Setup Code
+as attributes, each with `blocked_by_dnd` when its time falls inside Do Not Disturb), consumable
+life (Main Brush / Side Brush / Filter / Sensor / Charge Contacts Remaining, in percent) and use
+(Main Brush Lid Used, Mop Cloth Used, in hours) for the parts the robot reports, Wi-Fi Signal (diagnostic, off by default), Matter and Matter Setup Code
 (diagnostic, off by default; see [matter.md](matter.md)).
 
 ## Binary sensors
 
 Charging, Problem (with code and text), Mop Attached, Do Not Disturb Active, and Replace
-Soon per consumable (on below 10% of service life).
+Soon per consumable the robot reports (on below 10% of service life).
 
 ## Switches
 
@@ -61,7 +62,8 @@ Voice Volume, Poll Interval, Do Not Disturb start and end.
 ## Buttons
 
 Empty Bin (self-empty docks), Wash Mop / Dry Mop / Remove Hair (Omni docks, only when the
-dock answers), one button per preset on the robot, consumable resets (including Mop Cloth), Open Matter
+dock answers), one button per preset on the robot, consumable resets for the parts the robot reports
+(including Mop Cloth), Open Matter
 Pairing Window (diagnostic).
 
 ## Update

@@ -11,7 +11,7 @@
       },
       "reconfigure": {
         "title": "Update Tapo robot vacuum connection",
-        "description": "Change the IP address or the Tapo account used for this vacuum.",
+        "description": "Change the IP address or the Tapo account used for this vacuum. Leave the password blank to keep the current one.",
         "data": {
           "host": "Host (IP address)",
           "username": "Tapo account email",
@@ -37,15 +37,17 @@
     },
     "error": {
       "cannot_connect": "Failed to connect: check the IP address and that the vacuum is on",
-      "invalid_auth": "Invalid credentials: check your Tapo email and password"
+      "invalid_auth": "Invalid credentials: check your Tapo email and password",
+      "not_vacuum": "The device at this address is a Tapo device, but not a robot vacuum: check the IP address"
     },
     "abort": {
       "already_configured": "This device is already configured",
+      "already_in_progress": "This vacuum is already being set up",
       "reconfigure_successful": "Connection settings updated",
       "reauth_successful": "Re-authentication successful",
       "not_tapo_vacuum": "The device at this address does not answer on the robot's port"
     },
-    "flow_title": "Tapo robot vacuum ({host})"
+    "flow_title": "{name}"
   },
   "services": {
     "clean_rooms": {
@@ -75,6 +77,10 @@
         "room_ids": {
           "name": "Room ids",
           "description": "Room numbers on the map instead of names (as the card sends them); works for unnamed rooms and rooms that share a name."
+        },
+        "map_id": {
+          "name": "Map id",
+          "description": "The map the room_ids were picked on (sent by the card). The clean is refused if the vacuum is now on another map."
         }
       }
     },
@@ -84,23 +90,23 @@
       "fields": {
         "rooms": {
           "name": "Rooms",
-          "description": "Rooms"
+          "description": "Room names to store the settings for (as in the Tapo app)."
         },
         "suction": {
           "name": "Suction",
-          "description": "Suction"
+          "description": "Suction to store for these rooms."
         },
         "water": {
           "name": "Water",
-          "description": "Water"
+          "description": "Water level to store for these rooms."
         },
         "passes": {
           "name": "Passes",
-          "description": "Passes"
+          "description": "Passes to store for these rooms, 1 to 3."
         },
         "map": {
           "name": "Map",
-          "description": "Map"
+          "description": "Map the rooms are on (name). Defaults to the current map."
         }
       }
     },
@@ -110,19 +116,19 @@
       "fields": {
         "zones": {
           "name": "Zones",
-          "description": "Zones"
+          "description": "Rectangles to clean as [x1, y1, x2, y2] in map mm (the frame of position_mm), for example [[-500, -500, 500, 500]]."
         },
         "suction": {
           "name": "Suction",
-          "description": "Suction"
+          "description": "Suction for this run (optional; defaults to the current setting)."
         },
         "water": {
           "name": "Water",
-          "description": "Water"
+          "description": "Water level for this run (optional; defaults to the current setting)."
         },
         "passes": {
           "name": "Passes",
-          "description": "Passes"
+          "description": "Passes for this run, 1 to 3 (optional; defaults to 1)."
         }
       }
     },
@@ -132,7 +138,7 @@
       "fields": {
         "schedule_id": {
           "name": "Schedule ID",
-          "description": "Schedule ID"
+          "description": "The schedule's id (S1, S2, ...), as listed in the Schedules sensor's attributes."
         }
       }
     },
@@ -142,11 +148,11 @@
       "fields": {
         "method": {
           "name": "Method",
-          "description": "Method"
+          "description": "Robot API method name, for example getVacStatus. Methods that could brick or reset the robot are refused."
         },
         "params": {
           "name": "Params",
-          "description": "Params"
+          "description": "Parameters for the method as an object (optional)."
         },
         "force": {
           "name": "Force",
@@ -495,10 +501,10 @@
   },
   "device_automation": {
     "trigger_type": {
-      "clean_started": "{entity_name} started cleaning",
-      "clean_finished": "{entity_name} finished cleaning",
-      "error": "{entity_name} reported an error",
-      "prompt": "{entity_name} gave a notice (dust bag full, area unreachable, ...)"
+      "clean_started": "Started cleaning",
+      "clean_finished": "Finished cleaning",
+      "error": "Reported an error",
+      "prompt": "Gave a notice (dust bag full, area unreachable, ...)"
     }
   },
   "options": {
@@ -510,6 +516,28 @@
         },
         "data_description": {
           "show_panel": "The sidebar page has the full map, a schedules editor, history and statistics, maintenance and settings. Turn it off if you only want the card and entities."
+        }
+      }
+    }
+  },
+  "entity": {
+    "select": {
+      "water_level": {
+        "name": "Water Level",
+        "state": {
+          "off": "Off",
+          "low": "Low",
+          "medium": "Medium",
+          "high": "High"
+        }
+      },
+      "auto_empty_mode": {
+        "name": "Auto Empty Mode",
+        "state": {
+          "smart": "Smart",
+          "light": "Light",
+          "balanced": "Balanced",
+          "max": "Max"
         }
       }
     }

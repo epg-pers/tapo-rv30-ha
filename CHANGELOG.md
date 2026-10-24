@@ -1,5 +1,33 @@
 # Changelog
 
+## v0.29.0b1
+
+A third bug hunt, with new angles: hostile and odd robot data, network faults, things happening at the same time, a brand new user, missing tests and a check of the last round's fixes. Every finding was argued for and against by separate reviewers, and only what held up was fixed.
+
+### Security
+
+- **The robot's connection security is remembered.** At setup (or on the first start of this version) the integration stores how the robot secures its local connection. A later answer offering less, such as no TP-Link certificate or the MAC-derived passcode, is refused and Home Assistant asks you to re-authenticate, instead of following whatever answered in the robot's place. See troubleshooting if you reset or replaced the robot.
+- The sidebar page escaped all text, but a few numbers from the robot (room passes, consumable percentages, number limits) reached the page raw. They are now forced to numbers.
+- A corrupt or hostile map reply or backup file can no longer use up Home Assistant's memory (map size and backup unpack size are capped), and a damaged backup file no longer breaks the Backups tab.
+
+### Fixed
+
+- Two actions at once on the same robot (two room cleans, a clean during a map setup write, two schedule edits) no longer mix: each clean start is one step, map writes take turns and cleans wait for them, and `set_schedule` edits a fresh copy of the schedule.
+- After a reload, the old connection sends nothing more (two connections on one session could clash), the planner stops before the entities go, and a restore that was running carries on with the new connection.
+- `run_schedule` switches to the schedule's map first, and only puts the old default levels back when the clean certainly did not start.
+- Odd values from the robot (text where a number belongs, a missing name, a single error code instead of a list, schedules paged oddly) no longer break a poll. Batched reads that the robot refuses part way are read one by one instead of turning batching off.
+- A robot with no map yet no longer re-reads all settings every poll or logs the map warning every poll. A setting that answers only now and then no longer reloads the integration each time.
+- The robot's time zone, if Home Assistant does not know it, no longer stops setup.
+- Map setups: the summary counts only zones actually added; a schedule whose preset is not in the saved setup is skipped; an unnamed saved room never blanks a name; a snapshot is still taken when another map's preset could not be read.
+- Planner: waits when the battery level is not known yet, follows app-made one-off schedules, drops a run from hours ago after a restart, and records a run before the robot answers.
+- The vacuum shows Error when the robot stops with an error code. A switch flipped during a poll no longer flips back for a moment.
+- Voice: robot names with punctuation work ("R2-D2"), a name only counts as a whole word ("Bot" is not in "robot"), the longest name wins, and two robots with the same name are asked about. Registration works on Home Assistant releases that take trigger details.
+- Setup: an RV30C (AES) address that is another Tapo device is refused with a clear message; adding a robot by hand works while its discovery is open; a lease from another integration's device no longer hides a new robot; reconfigure keeps the password when left blank; ignored or disabled entries no longer keep the sidebar page.
+- Actions sent while a robot is still connecting say so instead of "not a Tapo RV30 entity".
+- Robots without a mop or some parts get no entities for them. The water level and auto-empty mode selects have translated states. Device triggers read properly. The repair link points at the right README section.
+- Dashboard strategy and sidebar page: sensors are matched by exact name (Planner Status is no longer taken for Status; Last Clean is shown); presets are not confused with other buttons; entities without a friendly name no longer break the Maintenance and Settings tabs; room buttons send their map, so a button left from another floor fails clearly instead of cleaning a room there. The card's room sheet only sends levels it offers.
+- Docs: entity names, `clean_rooms` `map_id`, card images, service icons and field descriptions.
+
 ## v0.28.0
 
 A second full bug hunt, by five fresh reviewers. Every finding was checked by a separate reviewer trying to disprove it, and by tests on a robot where possible; only what held up was fixed.

@@ -78,6 +78,7 @@ class TapoCleanPassesSelect(_TapoSelectBase):
 
 class TapoWaterLevelSelect(_TapoSelectBase):
     _attr_name    = "Water Level"
+    _attr_translation_key = "water_level"     # for the state names
     _attr_icon    = "mdi:water"
     _attr_options = WATER_OPTIONS
 
@@ -105,6 +106,7 @@ class TapoAutoEmptyModeSelect(TapoEntity, SelectEntity):
     """How often the self-empty dock empties the bin (Smart / Light / Balanced / Max)."""
     _attr_entity_category = EntityCategory.CONFIG
     _attr_icon = "mdi:delete-sweep"
+    _attr_translation_key = "auto_empty_mode"
     _attr_options = list(AUTO_EMPTY_MODES.values())
 
     def __init__(self, coordinator: TapoCoordinator, entry: ConfigEntry) -> None:

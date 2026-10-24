@@ -22,6 +22,14 @@ const inDnd = (dnd, hhmm) => {
 const dndText = (dnd) => `Do Not Disturb (${dnd.start} to ${dnd.end})`;
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 // A .switch toggle that names what it controls and says whether it is on (screen readers see nothing else).
+// clean_rooms data for rooms read from one map: with map_id the service refuses them once the robot
+// is on another map, instead of cleaning a room there that happens to have the same id or name.
+const onMap = (data, mapId) => (Number.isInteger(mapId) ? { ...data, map_id: mapId } : data);
+// A number from entity state for markup (style widths, attribute values): never raw text.
+const toNum = (v, fallback = 0) => { const n = Number(v); return Number.isFinite(n) ? n : fallback; };
+// An id made from a name the way Home Assistant makes entity ids ("Jarvis Robot" -> "jarvis_robot").
+const slug = (n) => String(n || "").normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+const objectId = (id) => id.slice(id.indexOf(".") + 1);
 const toggle = (on, label, attrs = "") => `<button class="switch ${on ? "on" : ""}" aria-pressed="${on ? "true" : "false"}" aria-label="${esc(label)}" ${attrs}></button>`;
 // Local calendar day number (DST-safe), so charts bucket runs by the viewer's own midnight.
 const localDay = (ms) => { const d = new Date(ms); return Math.round(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) / 86400000); };
@@ -247,16 +255,36 @@ class TapoRV30Panel extends HTMLElement {
     const reg = this._hass.entities || {}, dev = reg[vac] && reg[vac].device_id;
     let ids = dev ? Object.keys(reg).filter((id) => reg[id].device_id === dev) : [];
     if (!ids.length) { const base = vac.split(".")[1]; ids = Object.keys(this._hass.states).filter((id) => id.split(".")[1].startsWith(base)); }
-    const find = (prefix, needle) => ids.find((id) => id.startsWith(prefix) && (!needle || id.includes(needle)));
+    // What the device's entity ids start with: the vacuum's own, or the device name they were made from.
+    const device = dev && this._hass.devices ? this._hass.devices[dev] : null;
+    const bases = [objectId(vac), ...(device ? [slug(device.name_by_user), slug(device.name)] : [])].filter(Boolean);
+    // By the registry's translation key where the integration sets one, else by the exact end of the
+    // entity id ("status" is never "planner_status"): <base>_<suffix> first, then the shortest.
+    const find = (prefix, suffix, key) => {
+      const list = ids.filter((id) => id.startsWith(prefix));
+      if (!suffix) return list[0];
+      const byKey = key && list.find((id) => reg[id] && reg[id].translation_key === key);
+      if (byKey) return byKey;
+      return list.find((id) => bases.some((b) => objectId(id) === `${b}_${suffix}`))
+        || list.filter((id) => objectId(id).endsWith(`_${suffix}`)).sort((a, b) => a.length - b.length)[0];
+    };
+    // Preset buttons are named "Preset <name>", so their ids are <base>_preset_<name>.
+    const isPreset = (id) => (reg[id] && reg[id].translation_key === "preset") || bases.some((b) => objectId(id).startsWith(`${b}_preset_`));
     ids = ids.filter((id) => this._hass.states[id]);   // registry entries without a state (not loaded yet)
     const all = (prefix) => ids.filter((id) => id.startsWith(prefix)).sort();
     return {
-      ids, camera: find("camera."), schedules: find("sensor.", "schedules"), status: find("sensor.", "status"),
-      presets: all("button.").filter((id) => id.includes("preset")),
+      ids, camera: find("camera."), schedules: find("sensor.", "schedules", "schedules"), status: find("sensor.", "status", "status"),
+      presets: all("button.").filter(isPreset),
       switches: all("switch."), selects: all("select."), numbers: all("number."), times: all("time."),
-      buttons: all("button.").filter((id) => !id.includes("preset")),
-      totals: { cleans: find("sensor.", "total_cleans"), area: find("sensor.", "total_area"), time: find("sensor.", "total_cleaning_time") },
+      buttons: all("button.").filter((id) => !isPreset(id)),
+      totals: { cleans: find("sensor.", "total_cleans"), area: find("sensor.", "total_area_cleaned"), time: find("sensor.", "total_cleaning_time") },
     };
+  }
+  // An entity's name without the robot's name in front; the entity id when it has no name.
+  _label(id) {
+    const s = this._st(id), vac = this._st(this._robot), n = String((s && s.attributes.friendly_name) || id);
+    const robot = vac && vac.attributes.friendly_name;
+    return robot && n.startsWith(robot + " ") ? n.slice(robot.length + 1) : n;
   }
   _schedules(r) { const s = this._st(r.schedules); return (s && s.attributes.schedules) || []; }
   _dnd(r) { const s = this._st(r.schedules); return (s && s.attributes.dnd) || null; }
@@ -593,19 +621,22 @@ class TapoRV30Panel extends HTMLElement {
   _paneRooms(pane) {
     const r = this._related(this._robot), cam = this._st(r.camera), geom = (cam && cam.attributes.room_geometry) || [];
     const fresh = (cam && cam.attributes.rooms_last_cleaned) || {};
+    // The map these room ids belong to: the service refuses them once the robot is on another map.
+    const mapId = cam ? cam.attributes.map_id : null;
     const rows = geom.map((g) => {
+      const suction = Number(g.suction) || 0, passes = Number(g.passes) || 0;
       // The room's own geometry entry carries its freshness; the name-keyed map is only a fallback
       // (it cannot tell an unnamed room, or two rooms with the same name, apart).
       const f = (g.last_cleaned != null || g.coverage != null ? g : fresh[g.name]) || {}, label = g.name || `Room ${g.id}`, cov = f.coverage || 0, d = f.last_cleaned ? (Date.now() / 1000 - f.last_cleaned) / 86400 : null;
       const cls = d == null ? "bad" : d > 7 ? "warn" : "";
       return `<div class="bar-row ${cls}"><span>${esc(label)}</span><div class="track"><div style="width:${Number(cov) || 0}%"></div></div><span class="r">${esc(ago(f.last_cleaned))}</span></div>
         <div class="actions" style="justify-content:flex-start;margin:-2px 0 6px"><button class="btn" data-room="${esc(g.name)}" data-room-id="${esc(g.id ?? "")}"><ha-icon icon="mdi:play"></ha-icon>Clean ${esc(label)}</button>
-        <span class="s" style="font-size:.8em;color:var(--secondary-text-color);align-self:center">${f.coverage != null ? `${esc(f.coverage)}% covered last time` : "not cleaned since the map was made"}${g.suction ? ` · ${FAN[g.suction - 1]}` : ""}${g.passes ? ` · ${g.passes}x` : ""}</span></div>`;
+        <span class="s" style="font-size:.8em;color:var(--secondary-text-color);align-self:center">${f.coverage != null ? `${esc(f.coverage)}% covered last time` : "not cleaned since the map was made"}${FAN[suction - 1] ? ` · ${FAN[suction - 1]}` : ""}${passes ? ` · ${passes}x` : ""}</span></div>`;
     }).join("");
     pane.innerHTML = `<ha-card><div class="card"><h3><span>Rooms and freshness</span></h3>${rows || `<div class="empty">No rooms on the current map.</div>`}</div></ha-card>`;
     // By id where the map gives one: names cannot pick an unnamed room or one of two same-named rooms.
     pane.querySelectorAll("[data-room]").forEach((b) => b.onclick = () => this._call(DOMAIN, "clean_rooms",
-      b.dataset.roomId !== "" ? { room_ids: [Number(b.dataset.roomId)] } : { rooms: [b.dataset.room] }, { entity_id: this._robot }));
+      onMap(b.dataset.roomId !== "" ? { room_ids: [Number(b.dataset.roomId)] } : { rooms: [b.dataset.room] }, mapId), { entity_id: this._robot }));
   }
 
   // ---- map editor ----------------------------------------------------------------------
@@ -933,7 +964,8 @@ class TapoRV30Panel extends HTMLElement {
     if (!v.config) { pane.innerHTML = `<ha-card><div class="card"><div class="empty">Waiting for the robot's map. The planner appears once the robot has sent it.</div></div></ha-card>`; return; }
     v.rooms = v.rooms || []; v.people = v.people || []; v.sensors = v.sensors || []; v.due = v.due || []; v.unmapped = v.unmapped || [];
     const admin = this._isAdmin();
-    const c = v.config, on = !!c.enabled, targets = v.target_choices || [0, 1, 2, 3, 4, 5, 7, 14];
+    const c = v.config, on = !!c.enabled;
+    const targets = (Array.isArray(v.target_choices) ? v.target_choices : [0, 1, 2, 3, 4, 5, 7, 14]).map(Number).filter(Number.isInteger);
     const tname = (n) => (n === 0 ? "Leave out" : n === 1 ? "every day" : n === 7 ? "every week" : n === 14 ? "every 2 weeks" : `every ${n} days`);
     const home = v.people.filter((p) => p.included && p.home).length;
     const pillCls = (st) => (st === "Overdue" ? "over" : st === "Due today" ? "due" : st === "Fresh" ? "fresh" : st === "Left out" ? "out" : "");
@@ -1115,8 +1147,9 @@ class TapoRV30Panel extends HTMLElement {
 
   _paneMaintenance(pane) {
     const r = this._related(this._robot), vac = this._st(this._robot), cons = vac.attributes.consumables || {};
-    const bars = Object.entries(cons).map(([k, v]) => `<div class="bar-row ${v <= 10 ? "bad" : v <= 30 ? "warn" : ""}"><span>${esc(k)}</span><div class="track"><div style="width:${v}%"></div></div><span class="r">${v}%</span></div>`).join("");
-    const btns = r.buttons.map((id) => { const s = this._st(id); return `<button class="btn" data-btn="${esc(id)}"><ha-icon icon="${esc(s.attributes.icon || "mdi:gesture-tap-button")}"></ha-icon>${esc(s.attributes.friendly_name.replace(vac.attributes.friendly_name + " ", ""))}</button>`; }).join(" ");
+    const bars = Object.entries(cons).map(([k, raw]) => { const v = toNum(raw);
+      return `<div class="bar-row ${v <= 10 ? "bad" : v <= 30 ? "warn" : ""}"><span>${esc(k)}</span><div class="track"><div style="width:${Math.max(0, Math.min(100, v))}%"></div></div><span class="r">${v}%</span></div>`; }).join("");
+    const btns = r.buttons.map((id) => { const s = this._st(id); return `<button class="btn" data-btn="${esc(id)}"><ha-icon icon="${esc(s.attributes.icon || "mdi:gesture-tap-button")}"></ha-icon>${esc(this._label(id))}</button>`; }).join(" ");
     pane.innerHTML = `<ha-card><div class="card"><h3><span>Consumables</span></h3>${bars || `<div class="empty">No consumable data.</div>`}</div></ha-card>
       <ha-card><div class="card"><h3><span>Actions</span></h3><div class="chips">${btns}</div></div></ha-card>
       <ha-card><div class="card"><h3><span>Map setup</span></h3>
@@ -1162,11 +1195,11 @@ class TapoRV30Panel extends HTMLElement {
 
   // ---- settings ------------------------------------------------------------------------
   _paneSettings(pane) {
-    const r = this._related(this._robot), vac = this._st(this._robot), strip = (n) => n.replace(vac.attributes.friendly_name + " ", "");
-    const sw = r.switches.map((id) => { const s = this._st(id); return `<div class="row"><div class="main"><div class="t">${esc(strip(s.attributes.friendly_name))}</div></div>${toggle(s.state === "on", strip(s.attributes.friendly_name), `data-sw="${esc(id)}"`)}</div>`; }).join("");
-    const sel = r.selects.map((id) => { const s = this._st(id); return `<div class="row"><div class="main"><div class="t">${esc(strip(s.attributes.friendly_name))}</div></div><select data-sel="${esc(id)}">${(s.attributes.options || []).map((o) => `<option ${o === s.state ? "selected" : ""}>${esc(o)}</option>`).join("")}</select></div>`; }).join("");
-    const num = r.numbers.map((id) => { const s = this._st(id); return `<div class="row"><div class="main"><div class="t">${esc(strip(s.attributes.friendly_name))}</div><div class="s">${esc(s.state)} ${esc(s.attributes.unit_of_measurement || "")}</div></div><input type="range" data-num="${esc(id)}" min="${s.attributes.min}" max="${s.attributes.max}" step="${s.attributes.step || 1}" value="${esc(s.state)}"></div>`; }).join("");
-    const tim = r.times.map((id) => { const s = this._st(id); return `<div class="row"><div class="main"><div class="t">${esc(strip(s.attributes.friendly_name))}</div></div><input type="time" data-time="${esc(id)}" value="${esc(String(s.state).slice(0, 5))}"></div>`; }).join("");
+    const r = this._related(this._robot), strip = (id) => this._label(id);
+    const sw = r.switches.map((id) => { const s = this._st(id); return `<div class="row"><div class="main"><div class="t">${esc(strip(id))}</div></div>${toggle(s.state === "on", strip(id), `data-sw="${esc(id)}"`)}</div>`; }).join("");
+    const sel = r.selects.map((id) => { const s = this._st(id); return `<div class="row"><div class="main"><div class="t">${esc(strip(id))}</div></div><select data-sel="${esc(id)}">${(s.attributes.options || []).map((o) => `<option ${o === s.state ? "selected" : ""}>${esc(o)}</option>`).join("")}</select></div>`; }).join("");
+    const num = r.numbers.map((id) => { const s = this._st(id); return `<div class="row"><div class="main"><div class="t">${esc(strip(id))}</div><div class="s">${esc(s.state)} ${esc(s.attributes.unit_of_measurement || "")}</div></div><input type="range" data-num="${esc(id)}" min="${toNum(s.attributes.min)}" max="${toNum(s.attributes.max, 100)}" step="${toNum(s.attributes.step, 1) || 1}" value="${esc(s.state)}"></div>`; }).join("");
+    const tim = r.times.map((id) => { const s = this._st(id); return `<div class="row"><div class="main"><div class="t">${esc(strip(id))}</div></div><input type="time" data-time="${esc(id)}" value="${esc(String(s.state).slice(0, 5))}"></div>`; }).join("");
     pane.innerHTML = `<ha-card><div class="card"><h3><span>Settings</span></h3>${sw}${sel}${tim}${num}${(sw || sel || num || tim) ? "" : `<div class="empty">No settings entities.</div>`}</div></ha-card>`;
     pane.querySelectorAll("[data-sw]").forEach((b) => b.onclick = () => this._call("switch", b.classList.contains("on") ? "turn_off" : "turn_on", {}, { entity_id: b.dataset.sw }));
     pane.querySelectorAll("[data-sel]").forEach((e) => e.onchange = () => this._call("select", "select_option", { option: e.value }, { entity_id: e.dataset.sel }));

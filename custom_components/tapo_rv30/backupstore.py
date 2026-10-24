@@ -96,7 +96,7 @@ def facts_for(folder: str, entry: dict) -> dict | None:
     try:
         with open(os.path.join(folder, entry["file"]), "rb") as fh:
             return mapbackup.facts(fh.read())
-    except (OSError, ValueError):
+    except Exception:  # a damaged file must not break the Backups list
         return None
 
 
@@ -123,7 +123,7 @@ def image_png(folder: str, entry: dict) -> tuple[bytes | None, str]:
             png = schematic(mapbackup.facts(fh.read()))
         if png:
             return png, "image/png"
-    except (OSError, ValueError):
+    except Exception:
         pass
     return None, ""
 

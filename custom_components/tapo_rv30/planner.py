@@ -60,6 +60,7 @@ EVENT_PLANNER = f"{DOMAIN}_planner"
 OCCUPANCY_CLASSES = {"motion", "occupancy", "presence"}
 LOG_SIZE = 40
 RETRY_AFTER_FAILURE = 15 * 60
+RUN_STALE_AFTER = 4 * 3600        # a restored run older than this is over
 
 
 def _norm(name: str) -> str:
@@ -102,7 +103,12 @@ class TapoPlanner:
         self.ran_window = data.get("ran_window")
         self.preview_names = list(data.get("preview_names") or [])
         self._preview_window = data.get("preview_window")
-        self._run = data.get("run") or None     # a run in progress survives a restart
+        # A run in progress survives a restart; one from hours ago (Home Assistant was down
+        # while it ended) is over and must not dock the robot or log a stale "Finished".
+        run = data.get("run") or None
+        if run and time.time() - float(run.get("started") or 0) > RUN_STALE_AFTER:
+            run = None
+        self._run = run
 
     def _data(self) -> dict:
         return {"config": self.config, "log": self.log, "skip_today": self.skip_today,
@@ -332,11 +338,22 @@ class TapoPlanner:
         self._notify()
 
     async def _start(self, snap: Snapshot, keys: list[str], names: list[str], chips: list[str], by: str) -> bool:
+        if self.coordinator.map_lock.locked():      # a map write is switching maps right now
+            if by == "user":
+                raise PlannerError("The map is being written (map setup or editor); try again shortly")
+            return False
         map_id = self.coordinator.map_id
         room_ids = [int(k.split(":", 1)[1]) for k in keys]
+        # Recorded before the start is awaited, so an evaluation or unload meanwhile sees the
+        # run; rolled back if the robot refuses.
+        before = (self.ran_window, self._preview_window, self._run)
+        self.ran_window, self._preview_window = window_key(snap.now), None
+        self._run = {"names": names, "started": time.time(), "dock_after": None, "docked": False,
+                     "by": by, "home_at_start": sorted(snap.people_home)}
         try:
             await self.hass.async_add_executor_job(self.coordinator.client.clean_rooms, room_ids, map_id)
         except Exception as exc:
+            self.ran_window, self._preview_window, self._run = before
             if by == "user":     # a press of Clean now: say so, and do not hold off the planner
                 self._log("error", f"Could not start cleaning {self._and(names)}: {exc}.")
             else:
@@ -344,9 +361,6 @@ class TapoPlanner:
                 self._log("error", f"Could not start cleaning {self._and(names)}: {exc}. Trying again in 15 minutes.")
             self._save()
             return False
-        self.ran_window = window_key(snap.now)
-        self._run = {"names": names, "started": time.time(), "dock_after": None, "docked": False,
-                     "by": by, "home_at_start": sorted(snap.people_home)}
         why = (" " + "; ".join(chips) + ".") if chips else ""
         who = "You started" if by == "user" else "Started"
         self._log("start", f"{who} cleaning {self._and(names)}.{why}")

@@ -109,7 +109,7 @@ def plan(snap: dict, target_map_id: int, area_list: list, furniture: list,
     """What to write so the target map matches the snapshot again. Only things the snapshot
     has and the map lacks or has differently; nothing is deleted that the snapshot does not
     replace. presets_now: raw preset details on the robot; schedules_now: raw rules."""
-    out: dict[str, Any] = {"rooms": None, "zones": {}, "furniture": None,
+    out: dict[str, Any] = {"rooms": None, "zones": {}, "zones_added": {}, "furniture": None,
                            "presets": [], "schedules": [], "skipped": []}
     current = {t: [a for a in area_list or [] if a.get("type") == t] for t in AREA_TYPES}
     saved = snap.get("areas") or {}
@@ -123,6 +123,8 @@ def plan(snap: dict, target_map_id: int, area_list: list, furniture: list,
         old = snap_rooms.get(r.get("id"))
         if old:
             for k in _ROOM_KEEP:
+                if k == "name" and not _b64(old.get(k)):
+                    continue        # an unnamed saved room never blanks a name the map has
                 if old.get(k) is not None and old.get(k) != r.get(k):
                     entry[k] = old[k]
                     changed = True
@@ -151,6 +153,7 @@ def plan(snap: dict, target_map_id: int, area_list: list, furniture: list,
             add.append(z)
         if add:
             out["zones"][zt] = have + add
+            out["zones_added"][zt] = len(add)
 
     want_f = [_norm_furn(f) for f in snap.get("furniture") or []]
     if want_f and want_f != [_norm_furn(f) for f in furniture or []]:
@@ -185,6 +188,9 @@ def plan(snap: dict, target_map_id: int, area_list: list, furniture: list,
         if _sched_key(s, target_map_id, names_by_id) in have:
             continue
         attr = dict(s.get("clean_attr") or {})
+        if attr.get("custom_rule_id") is not None and not names_by_id.get(attr["custom_rule_id"]):
+            out["skipped"].append(f"schedule at {_hhmm(s.get('s_min'))}: its preset is not in the saved setup")
+            continue
         gone = [r for r in attr.get("room_list") or [] if r not in room_ids]
         if gone:
             out["skipped"].append(f"schedule at {_hhmm(s.get('s_min'))}: rooms {gone} are not on the "
@@ -249,7 +255,8 @@ def summary(p: dict) -> dict:
     """A short, JSON-safe account of a plan for service responses and dry runs."""
     return {
         "room_names": [_b64(r.get("name")) for r in p["rooms"]] if p["rooms"] else [],
-        "zones": {t: len(v) for t, v in p["zones"].items()},
+        # zones the plan adds (the list it writes also carries the ones already there)
+        "zones": dict(p.get("zones_added") or {t: len(v) for t, v in p["zones"].items()}),
         "furniture": len(p["furniture"]) if p["furniture"] else 0,
         "presets": [_b64(x["rule_name"]) for x in p["presets"]],
         "schedules": [x["rule"].get("s_min") for x in p["schedules"]],

@@ -51,10 +51,22 @@ def _coordinators(hass: HomeAssistant) -> list:
     return list((hass.data.get(DOMAIN) or {}).values())
 
 
+def _name_key(text: str) -> str:
+    """A robot name or sentence as matched: folded, punctuation as spaces ("R2-D2" -> "r2 d2"),
+    the same form the sentence templates are built from."""
+    return " ".join(re.sub(r"[^\w ]+", " ", fold(text or "")).split())
+
+
 def _named(coords: list, text: str):
-    low = fold(text or "")
-    hits = [c for c in coords if fold(c.device_name) and fold(c.device_name) in low]
-    return hits[0] if len(hits) == 1 else None
+    """The robot named in the text: whole words only ("Bot" is not in "robot"), the longest
+    name winning ("Jarvis Two" over "Jarvis"); None if no name, or two robots share it."""
+    low = f" {_name_key(text)} "
+    hits = [(len(n), c) for c in coords if (n := _name_key(c.device_name)) and f" {n} " in low]
+    if not hits:
+        return None
+    longest = max(n for n, _ in hits)
+    best = [c for n, c in hits if n == longest]
+    return best[0] if len(best) == 1 else None
 
 
 def _pick(hass: HomeAssistant, text: str, rooms: list[str] | None = None, active: bool = False):
@@ -119,6 +131,16 @@ async def _clean_rooms(hass: HomeAssistant, coord, phrase: str) -> str:
         return f"{coord.device_name} did not accept that: {exc}"
     await coord.async_refresh_soon()
     return f"{coord.device_name} is cleaning {' and '.join(names)}."
+
+
+def _register(manager, sentences: list[str], cb):
+    """register_trigger takes (sentences, callback) on current Home Assistant and a single
+    TriggerDetails on some releases; use whichever this one has."""
+    try:
+        return manager.register_trigger(sentences, cb)
+    except TypeError:
+        from homeassistant.components.conversation.trigger import TriggerDetails
+        return manager.register_trigger(TriggerDetails(sentences, cb))
 
 
 @callback
@@ -196,8 +218,7 @@ def async_setup_voice(hass: HomeAssistant):
         await coord.async_refresh_soon()
         return f"{coord.device_name} {done}."
 
-    names = sorted({n for n in (re.sub(r"[^\w ]+", " ", c.device_name).strip().lower()
-                                for c in _coordinators(hass)) if n})
+    names = sorted({n for n in (_name_key(c.device_name) for c in _coordinators(hass)) if n})
     named_rooms, named_home, named_all, named_stop, named_pause = [], [], [], [], []
     if names:
         robot = "(" + "|".join(names) + ")"
@@ -212,7 +233,7 @@ def async_setup_voice(hass: HomeAssistant):
         for sentences, cb in ((SENTENCES_ROOMS + named_rooms, on_rooms), (SENTENCES_ALL + named_all, on_all),
                               (SENTENCES_HOME + named_home, on_home), (SENTENCES_STOP + named_stop, on_stop),
                               (SENTENCES_PAUSE + named_pause, on_pause)):
-            unregisters.append(manager.register_trigger(sentences, cb))
+            unregisters.append(_register(manager, sentences, cb))
     except Exception:
         for u in unregisters:     # all or nothing
             u()

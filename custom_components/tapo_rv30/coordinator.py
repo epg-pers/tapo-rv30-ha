@@ -66,6 +66,24 @@ _FRESHNESS_ALGO = 2         # per-room coverage logic; bump to re-fold saved his
 # ---------------------------------------------------------------------------
 # Coordinator
 # ---------------------------------------------------------------------------
+# Settings whose presence at setup decides whether an entity exists.
+_ENTITY_SETTINGS = frozenset({"dust", "dnd", "volume", "auto_update", "matter_status", "matter_setup"})
+
+
+def _ts(record: dict) -> int:
+    """A clean record's timestamp as an int (0 when missing or not a number)."""
+    try:
+        return int(record.get("timestamp") or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _records(raw) -> list[dict]:
+    """getCleanRecords' record_list, keeping only real records."""
+    recs = raw.get("record_list") if isinstance(raw, dict) else None
+    return [r for r in recs if isinstance(r, dict)] if isinstance(recs, list) else []
+
+
 class TapoCoordinator(DataUpdateCoordinator):
     """Polls the vacuum for status, keeps the map image and settings current."""
 
@@ -105,6 +123,10 @@ class TapoCoordinator(DataUpdateCoordinator):
         self._info_fetched = False
         self.settings: dict = {}           # get_settings(), refreshed with the map
         self.settings_read_at: float | None = None
+        self._bool_written: dict[str, float] = {}     # bool setting -> when we last wrote it
+        self.schedule_lock = asyncio.Lock()  # one schedule edit (read, change, write back) at a time
+        self.map_lock = asyncio.Lock()      # held while a map write (setup apply, editor) switches maps
+        self._map_warned = False                       # "Map refresh failed" logged since the last good read
         self.schedules: list[dict] = []
         self.components: dict[str, int] = {}       # getComponentList, read once
         self.bool_settings_supported: list[str] = []   # probed once
@@ -155,6 +177,12 @@ class TapoCoordinator(DataUpdateCoordinator):
     def has(self, component: str) -> bool:
         """True if the robot lists this component (or the list was unavailable)."""
         return component in self.components if self.components else True
+
+    def has_part(self, field: str) -> bool:
+        """True if getConsumablesInfo reports this part's time (or it was not read): a robot
+        without a mop gets no mop cloth entities."""
+        parts = (self.data or {}).get("consumables") or {}
+        return field in parts if parts else True
 
     @property
     def status_code(self) -> int | None:
@@ -222,24 +250,29 @@ class TapoCoordinator(DataUpdateCoordinator):
 
         # Full map render + settings on first load and every MAP_INTERVAL; in
         # between, re-read the map data so position and current room track.
+        # With no map yet (a new robot, or one between maps) the map is tried every poll, but
+        # settings keep their own cycle and the failure is logged once, not every poll.
         self._map_tick += 1
-        full = self._map_base is None or self._map_tick >= self._map_cycles
+        cycle = self._map_tick >= self._map_cycles
+        full = self._map_base is None or cycle
         if full or self._map_retry:
-            if full:
+            if cycle:
                 self._map_tick = 0
             map_ok = False
             try:
                 await self.hass.async_add_executor_job(self._refresh_map)
-                map_ok, self._map_retry = True, False
+                map_ok, self._map_retry, self._map_warned = True, False, False
             except Exception as exc:
                 # The robot refuses map data while manoeuvring (-3016); with a
                 # map already rendered that is routine, so keep it out of the log.
-                if self._map_base is None:
+                if self._map_base is None and not self._map_warned:
                     _LOGGER.warning("Map refresh failed: %s", exc)
+                    self._map_warned = True
                 else:
                     _LOGGER.debug("Map refresh skipped: %s", exc)
-                    self._map_retry = True   # retry the map alone next poll; settings keep their own cycle
-            if full:
+                    if self._map_base is not None:
+                        self._map_retry = True   # retry the map alone next poll; settings keep their own cycle
+            if cycle or self.settings_read_at is None:
                 await self._refresh_settings()
             if full or map_ok:
                 self._check_pending_restore()
@@ -327,7 +360,7 @@ class TapoCoordinator(DataUpdateCoordinator):
         if detail.get("map_id") != self.map_id:
             return True
         names = {r["id"]: b64name(r.get("name", "")) for r in self.rooms}
-        ts = int(record.get("timestamp") or 0)
+        ts = _ts(record)
         for rid, (done, total) in room_coverage(detail, self._live_map, self._live_pixels).items():
             if total == 0 or done == 0:
                 continue
@@ -345,28 +378,27 @@ class TapoCoordinator(DataUpdateCoordinator):
         working, and fold every unseen record into the per-room freshness table
         (a few records per poll, so a long history is backfilled gently)."""
         await self._load_freshness()
-        recs = (self.settings.get("records") or {}).get("record_list") or []
+        recs = _records(self.settings.get("records"))
         if not recs or status_code in CLEANING_CODES or status_code in PAUSED_CODES or status_code == 4:
             return
-        newest = max(recs, key=lambda r: r.get("timestamp", 0))
-        ts = newest.get("timestamp", 0)
+        newest = max(recs, key=_ts)
+        ts = _ts(newest)
         # Records are folded into the active map's rooms. Runs on another map wait (unmarked)
         # until that map is active again, and nothing is folded while no map is loaded, so
         # their details are not downloaded again on every poll.
-        pending = sorted((r for r in recs if int(r.get("timestamp") or 0) not in self._processed_records
-                          and r.get("map_id") in (None, self.map_id)),
-                         key=lambda r: r.get("timestamp", 0))
+        pending = sorted((r for r in recs if _ts(r) not in self._processed_records
+                          and r.get("map_id") in (None, self.map_id)), key=_ts)
         if self._live_pixels is None:
             pending = []
         if ts == self._record_rendered_ts and not pending:
             return
         changed = False
         todo = pending[:3]
-        render_only = ts != self._record_rendered_ts and all(int(r.get("timestamp") or 0) != ts for r in todo)
+        render_only = ts != self._record_rendered_ts and all(_ts(r) != ts for r in todo)
         if render_only:
             todo = todo + [newest]      # already folded in (e.g. after a restart): just redraw it
         for rec in todo:
-            rts = int(rec.get("timestamp") or 0)
+            rts = _ts(rec)
             already = rts in self._processed_records
             done = False        # folded in (or not foldable): do not try this record again
             try:
@@ -434,11 +466,18 @@ class TapoCoordinator(DataUpdateCoordinator):
         if self._reload_asked or self.entry is None:
             return
         self._reload_asked = True
+        # Once per entry per Home Assistant run: a getter that answers only now and then must
+        # not reload the entry every time it comes back.
+        done = self.hass.data.setdefault(f"{DOMAIN}_reloaded", set())
+        if self.entry.entry_id in done:
+            return
+        done.add(self.entry.entry_id)
         _LOGGER.info("%s: %s; reloading to add their entities", self.device_name, why)
         self.hass.config_entries.async_schedule_reload(self.entry.entry_id)
 
     def _note_setting_keys(self) -> None:
-        keys = {k for k, v in self.settings.items() if v not in (None, {}, [])}
+        # Only settings an entity is created for; others (records, clock...) add nothing.
+        keys = {k for k, v in self.settings.items() if k in _ENTITY_SETTINGS and v not in (None, {}, [])}
         if self._setting_keys is None:
             if self.data is None:       # first read, during setup: what the platforms will see
                 self._setting_keys = keys
@@ -464,6 +503,12 @@ class TapoCoordinator(DataUpdateCoordinator):
         Kept across restarts: the user may take a while to save it in the app."""
         self.pending_restore = {"map_id": map_id, "name": name, "carrier": carrier}
         self._save_restore()
+
+    def _drop_restore(self, pend: dict) -> None:
+        """Clear the pending restore it finished, unless a newer restore replaced it meanwhile."""
+        if self.pending_restore is pend:
+            self.pending_restore = None
+            self._save_restore()
 
     def _check_pending_restore(self) -> None:
         pend = self.pending_restore
@@ -494,7 +539,7 @@ class TapoCoordinator(DataUpdateCoordinator):
             if snap is None:
                 msg = (f"{name} is restored and saved. There was no saved map setup for it, so put room names "
                        "and zones back by hand.")
-            elif self.map_busy or await self._robot_working():
+            elif self.map_busy or self.map_lock.locked() or await self._robot_working():
                 return None   # try again on a later poll, once docked
             else:
                 result = await setup_apply.apply_setup(self.hass, self, pend["map_id"], snap)
@@ -509,12 +554,10 @@ class TapoCoordinator(DataUpdateCoordinator):
                        + (f" Skipped: {'; '.join(result['skipped'])}." if result.get("skipped") else ""))
             if carrier and pend["carrier"] != pend["map_id"]:
                 msg += f" You can now delete the map \"{carrier}\" that carried the restore."
-            self.pending_restore = None
-            self._save_restore()
+            self._drop_restore(pend)
         except setup_apply.ApplyError as exc:
             msg = f"{name} is restored, but putting its setup back failed: {exc}. Run apply_map_setup to retry."
-            self.pending_restore = None
-            self._save_restore()
+            self._drop_restore(pend)
         finally:
             self._finishing = False
         persistent_notification.async_create(self.hass, msg, title=f"{self.device_name}: map restored",
@@ -533,9 +576,9 @@ class TapoCoordinator(DataUpdateCoordinator):
         return out
 
     def _note_latest_record(self) -> None:
-        recs = (self.settings.get("records") or {}).get("record_list") or []
+        recs = _records(self.settings.get("records"))
         if recs:
-            self._last_record_ts = max(r.get("timestamp", 0) for r in recs)
+            self._last_record_ts = max(_ts(r) for r in recs)
 
     async def _fetch_new_record(self) -> dict | None:
         """The clean record the robot just wrote, if it is newer than any seen."""
@@ -545,11 +588,11 @@ class TapoCoordinator(DataUpdateCoordinator):
             _LOGGER.debug("Records fetch after clean failed: %s", exc)
             return None
         self.settings["records"] = raw
-        recs = raw.get("record_list") or []
+        recs = _records(raw)
         if not recs:
             return None
-        newest = max(recs, key=lambda r: r.get("timestamp", 0))
-        ts = newest.get("timestamp", 0)
+        newest = max(recs, key=_ts)
+        ts = _ts(newest)
         if self._last_record_ts is not None and ts <= self._last_record_ts:
             return None
         self._last_record_ts = ts
@@ -613,15 +656,22 @@ class TapoCoordinator(DataUpdateCoordinator):
         region = (self.settings.get("clock") or {}).get("region")
         if region and region != self._robot_region:
             self._robot_region = region
-            self._robot_tz = await dt_util.async_get_time_zone(region)
+            try:
+                self._robot_tz = await dt_util.async_get_time_zone(region)
+            except (ValueError, TypeError) as exc:     # a name zoneinfo rejects outright
+                _LOGGER.debug("Robot time zone %r not usable: %s", region, exc)
+                self._robot_tz = None
         self._note_setting_keys()
         other_maps = await self.hass.async_add_executor_job(self._schedule_map_names)
         self._decode_schedules(other_maps)
         if self._last_record_ts is None:
             self._note_latest_record()
         if self.bool_settings_supported:
-            self.bool_settings = {**self.bool_settings, **await self.hass.async_add_executor_job(
-                self.client.get_bool_settings, self.bool_settings_supported)}
+            started = time.monotonic()
+            read = await self.hass.async_add_executor_job(self.client.get_bool_settings, self.bool_settings_supported)
+            # A switch flipped while this read was under way: the read may predate it.
+            read = {k: v for k, v in read.items() if self._bool_written.get(k, 0) < started}
+            self.bool_settings = {**self.bool_settings, **read}
         try:
             self.presets = await self.hass.async_add_executor_job(self._read_presets)
         except Exception as exc:
@@ -636,6 +686,8 @@ class TapoCoordinator(DataUpdateCoordinator):
         names = self.map_names()
         out, raw, complete = [], [], True
         for rule in rules:
+            if not isinstance(rule, dict) or rule.get("rule_id") is None:
+                continue
             map_id = rule.get("map_id")
             try:
                 detail = self.client.get_preset_detail(map_id, rule["rule_id"])
@@ -643,7 +695,10 @@ class TapoCoordinator(DataUpdateCoordinator):
             except Exception as exc:
                 _LOGGER.debug("Preset %s detail failed: %s", rule.get("rule_id"), exc)
                 detail = None
-                complete = False
+                # Only this map's presets go into its setup snapshot; another map's preset
+                # failing to read must not stop that snapshot.
+                if map_id == self.map_id:
+                    complete = False
             room_names = ({r["id"]: b64name(r.get("name", "")) for r in self.rooms}
                           if map_id == self.map_id else self._room_names_for(map_id))
             out.append(decode_preset(rule, detail, room_names, names.get(map_id)))
@@ -788,7 +843,7 @@ class TapoCoordinator(DataUpdateCoordinator):
                 self.hass, DOMAIN, f"{ISSUE_UNREACHABLE}_{self.entry.entry_id if self.entry else self.client.host}",
                 is_fixable=False, severity=ir.IssueSeverity.WARNING, translation_key=ISSUE_UNREACHABLE,
                 translation_placeholders={"name": self.device_name, "host": self.client.host},
-                learn_more_url="https://github.com/epg-pers/tapo-rv30-ha#known-issue-firmware-updates-and-local-access",
+                learn_more_url="https://github.com/epg-pers/tapo-rv30-ha#two-things-to-know",
             )
             self._issue_open = True
 
@@ -816,6 +871,7 @@ class TapoCoordinator(DataUpdateCoordinator):
     def set_bool_setting_local(self, key: str, value: bool) -> None:
         """Reflect a successful write immediately, before the re-read confirms it."""
         self.bool_settings[key] = value
+        self._bool_written[key] = time.monotonic()
         if self.data is not None:
             self.data["bool_settings"] = self.bool_settings
         self.async_update_listeners()

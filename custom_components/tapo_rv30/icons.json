@@ -74,6 +74,30 @@
     },
     "remove_matter_fabric": {
       "service": "mdi:link-off"
+    },
+    "save_map_setup": {
+      "service": "mdi:content-save-cog"
+    },
+    "apply_map_setup": {
+      "service": "mdi:map-check"
+    },
+    "fetch_cloud_map_backups": {
+      "service": "mdi:cloud-download"
+    },
+    "restore_map_backup": {
+      "service": "mdi:backup-restore"
+    },
+    "remote_drive": {
+      "service": "mdi:gamepad-variant"
+    },
+    "create_preset": {
+      "service": "mdi:playlist-plus"
+    },
+    "update_preset": {
+      "service": "mdi:playlist-edit"
+    },
+    "delete_preset": {
+      "service": "mdi:playlist-remove"
     }
   }
 }

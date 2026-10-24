@@ -16,17 +16,18 @@ from homeassistant.helpers.service_info.dhcp import DhcpServiceInfo
 
 from .aes import AesVacuumClient
 from .const import CONF_TRANSPORT, DEFAULT_PORT, DOMAIN, OPT_SHOW_PANEL, TRANSPORT_AES, TRANSPORT_TPAP
-from .tpap import AuthError, TapoVacuumClient
+from .tpap import AuthError, NotVacuum, TapoVacuumClient
 
 _LOGGER = logging.getLogger(__name__)
 
 
-def _schema(defaults: Mapping[str, Any] | None = None) -> vol.Schema:
+def _schema(defaults: Mapping[str, Any] | None = None, password_optional: bool = False) -> vol.Schema:
     d = defaults or {}
+    pw = vol.Optional(CONF_PASSWORD, default="") if password_optional else vol.Required(CONF_PASSWORD, default="")
     return vol.Schema({
         vol.Required(CONF_HOST, default=d.get(CONF_HOST, "")): str,
         vol.Required(CONF_USERNAME, default=d.get(CONF_USERNAME, "")): str,
-        vol.Required(CONF_PASSWORD, default=""): str,
+        pw: str,
     })
 
 
@@ -61,6 +62,9 @@ async def _test_connection(
         return TRANSPORT_AES, None
     except AuthError:
         return None, "invalid_auth"
+    except NotVacuum as exc:
+        _LOGGER.info("%s", exc)
+        return None, "not_vacuum"
     except Exception as exc:
         _LOGGER.info("Could not connect to %s: TPAP: %r; AES: %r", host, tpap_exc, exc)
         return None, "cannot_connect"
@@ -98,7 +102,8 @@ class TapoRV30ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_user(self, user_input: dict[str, Any] | None = None):
         errors: dict[str, str] = {}
         if user_input is not None:
-            await self.async_set_unique_id(user_input[CONF_HOST].strip())
+            # A discovery flow for the same address may be open: adding by hand still works.
+            await self.async_set_unique_id(user_input[CONF_HOST].strip(), raise_on_progress=False)
             self._abort_if_unique_id_configured()
             data, errors = await self._validate(user_input)
             if data:
@@ -115,10 +120,12 @@ class TapoRV30ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         # that had it before (two robots swapping leases).
         dev_reg = dr.async_get(self.hass)
         device = dev_reg.async_get_device(connections={(dr.CONNECTION_NETWORK_MAC, mac)})
-        if device:
-            for entry_id in device.config_entries:
-                entry = self.hass.config_entries.async_get_entry(entry_id)
-                if entry and entry.domain == DOMAIN and entry.data.get(CONF_HOST) != ip:
+        # Only our own entries count: the same MAC can be a device of another integration.
+        ours = [e for e in (self.hass.config_entries.async_get_entry(i) for i in (device.config_entries if device else ()))
+                if e is not None and e.domain == DOMAIN]
+        if ours:
+            for entry in ours:
+                if entry.data.get(CONF_HOST) != ip:
                     for other in self._async_current_entries(include_ignore=False):
                         if other.entry_id != entry.entry_id and other.unique_id == ip:
                             # Its robot has moved too; its own lease update will set this.
@@ -137,7 +144,7 @@ class TapoRV30ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         await self.async_set_unique_id(ip)
         self._abort_if_unique_id_configured()
         self._discovered_host = ip
-        self.context["title_placeholders"] = {"host": ip}
+        self.context["title_placeholders"] = {"name": f"Tapo robot vacuum ({ip})", "host": ip}
         return await self.async_step_discovery_confirm()
 
     async def async_step_discovery_confirm(self, user_input: dict[str, Any] | None = None):
@@ -158,16 +165,20 @@ class TapoRV30ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         entry = self._get_reconfigure_entry()
         errors: dict[str, str] = {}
         if user_input is not None:
+            # A blank password keeps the stored one (the form never shows it).
+            if not user_input.get(CONF_PASSWORD):
+                user_input = {**user_input, CONF_PASSWORD: entry.data.get(CONF_PASSWORD, "")}
             data, errors = await self._validate(user_input)
             if data:
-                await self.async_set_unique_id(data[CONF_HOST])
+                await self.async_set_unique_id(data[CONF_HOST], raise_on_progress=False)
                 if any(e.unique_id == data[CONF_HOST] and e.entry_id != entry.entry_id
                        for e in self._async_current_entries(include_ignore=False)):
                     return self.async_abort(reason="already_configured")
                 return self.async_update_reload_and_abort(
                     entry, data=data, title=f"Tapo Vacuum ({data[CONF_HOST]})", unique_id=data[CONF_HOST])
         return self.async_show_form(
-            step_id="reconfigure", data_schema=_schema(user_input or entry.data), errors=errors)
+            step_id="reconfigure", data_schema=_schema(user_input or entry.data, password_optional=True),
+            errors=errors)
 
     async def async_step_reauth(self, entry_data: Mapping[str, Any]):
         return await self.async_step_reauth_confirm()

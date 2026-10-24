@@ -28,6 +28,22 @@ builds.
 uses 2FA, try the password only (the local protocol does not use the second factor); if
 that fails, report the model and firmware on issue #25.
 
+## Asked to re-authenticate: "weaker security" or "pinned certificate"
+
+**Symptom.** The integration asks you to re-authenticate, and the log says the robot "now
+offers weaker security than when it was set up" or "no longer presents the pinned TP-Link
+certificate".
+
+**Cause.** At setup the integration remembers how the robot secures its local connection
+(certificate mode, passcode types, device attestation). Discovery itself is not
+authenticated, so a device answering in the robot's place could offer less; the integration
+refuses rather than follow it. A factory reset, a new robot at the same address or some
+firmware updates can change it legitimately.
+
+**Fix.** If you reset or replaced the robot (or updated its firmware), re-authenticate from
+the integration page: that stores what the robot offers now. If nothing changed on your side,
+check that the address really is the robot before you do.
+
 ## "Device error -1002" in a service response
 
 **Symptom.** A service or `send_raw` call answers "-1002".

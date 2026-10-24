@@ -138,17 +138,30 @@ def schedule_soon(now: datetime, schedules: list[dict], minutes: int = 60) -> di
         except (ValueError, AttributeError):
             continue
         days = s.get("days") or []
-        if (today in days and 0 <= start - m_now <= minutes) or \
-                (tomorrow in days and 0 <= start + 1440 - m_now <= minutes):
+        if s.get("date"):       # a one-off schedule runs on its date only
+            day = now.date().isoformat()
+            next_day = (now + timedelta(days=1)).date().isoformat()
+            today_on, tomorrow_on = s["date"] == day, s["date"] == next_day
+        else:
+            today_on, tomorrow_on = today in days, tomorrow in days
+        if (today_on and 0 <= start - m_now <= minutes) or \
+                (tomorrow_on and 0 <= start + 1440 - m_now <= minutes):
             return s
     return None
+
+
+def _minutes(value) -> int:
+    try:
+        return int(float(value)) % 1440
+    except (TypeError, ValueError):
+        return 0
 
 
 def dnd_until(dnd: dict | None, now: datetime) -> str | None:
     """The end time of the robot's Do Not Disturb if it covers now, else None."""
     if not dnd or not dnd.get("do_not_disturb"):
         return None
-    start, end = int(dnd.get("s_min", 0)), int(dnd.get("e_min", 0))
+    start, end = _minutes(dnd.get("s_min")), _minutes(dnd.get("e_min"))
     m = now.hour * 60 + now.minute
     inside = (start == end) or (start <= m < end if start < end else (m >= start or m < end))
     return fmt_hhmm(end) if inside else None
@@ -239,8 +252,11 @@ def decide(snap: Snapshot, cfg: dict) -> Decision:
     until = dnd_until(snap.dnd, snap.robot_now or snap.now)
     if until:
         return wait(f"Do Not Disturb until {until}", "dnd")
-    if snap.battery is not None and snap.battery < int(cfg.get("min_battery", 0)):
-        return wait(f"Battery at {snap.battery}%, waiting for {cfg['min_battery']}%", "battery")
+    if int(cfg.get("min_battery", 0)) > 0:
+        if snap.battery is None:        # not read yet: do not start on a battery that may be flat
+            return wait("Battery level not known yet", "battery")
+        if snap.battery < int(cfg.get("min_battery", 0)):
+            return wait(f"Battery at {snap.battery}%, waiting for {cfg['min_battery']}%", "battery")
     if cfg.get("require_away") and snap.people_home:
         n = len(snap.people_home)
         return wait(f"Waiting: {_names(snap.people_home)} {'is' if n == 1 else 'are'} home", "people")

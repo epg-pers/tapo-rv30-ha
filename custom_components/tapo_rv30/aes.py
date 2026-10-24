@@ -15,7 +15,7 @@ import asyncio
 import logging
 import threading
 
-from .tpap import AuthError, TapoVacuumClient, _resend_safe
+from .tpap import AuthError, NotVacuum, TapoVacuumClient, _resend_safe
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -86,6 +86,16 @@ class AesVacuumClient(TapoVacuumClient):
             await dev.update()
         except AuthenticationError as exc:
             raise AuthError(str(exc)) from exc
+        # Same address, same account: a Tapo plug or bulb also logs in. Only a robot (or a
+        # device python-kasa cannot classify) is accepted.
+        from kasa import DeviceType
+        kind = getattr(dev, "device_type", None)
+        if kind not in (getattr(DeviceType, "Vacuum", None), DeviceType.Unknown, None):
+            try:
+                await dev.disconnect()
+            except Exception:
+                pass
+            raise NotVacuum(f"{self.host} is a {getattr(kind, 'value', kind)}, not a robot vacuum")
         self._device = dev
         _LOGGER.debug("AES session established with %s (%s)", self.host, dev.model)
         return dev
@@ -106,11 +116,19 @@ class AesVacuumClient(TapoVacuumClient):
                 _LOGGER.debug("Disconnect failed: %s", exc)
 
     def close(self) -> None:
+        # Nothing more is sent after this; a send in flight finishes first (briefly), so its
+        # network session is not torn down underneath it.
+        self._closed = True
+        got = self._lock.acquire(timeout=15)
         try:
-            self._loopthread.run(self._drop(), timeout=10)
-        except Exception:
-            pass
-        self._loopthread.close()
+            try:
+                self._loopthread.run(self._drop(), timeout=10)
+            except Exception:
+                pass
+            self._loopthread.close()
+        finally:
+            if got:
+                self._lock.release()
 
     # ---- send ----------------------------------------------------------------
     async def _query(self, method: str, params: dict | None) -> dict:
@@ -156,6 +174,8 @@ class AesVacuumClient(TapoVacuumClient):
     def send(self, method: str, params: dict | None = None) -> dict:
         """Same return shape as the TPAP client: {"error_code": 0, "result": ...}."""
         with self._lock:
+            if self._closed:
+                raise RuntimeError("the connection to the robot is closed (entry unloaded)")
             return self._loopthread.run(self._query(method, params))
 
     async def _query_many(self, requests: list[tuple[str, dict | None]]) -> dict[str, dict]:
@@ -168,6 +188,8 @@ class AesVacuumClient(TapoVacuumClient):
     def send_multi(self, requests: list[tuple[str, dict | None]]) -> dict[str, dict]:
         """python-kasa batches a multi-key query into multipleRequest itself."""
         with self._lock:
+            if self._closed:
+                raise RuntimeError("the connection to the robot is closed (entry unloaded)")
             try:
                 return self._loopthread.run(self._query_many(requests))
             except Exception as exc:

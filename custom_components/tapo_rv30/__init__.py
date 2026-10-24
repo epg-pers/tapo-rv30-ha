@@ -13,7 +13,7 @@ from homeassistant.loader import async_get_integration
 
 from .aes import AesVacuumClient
 from .backup_ws import async_setup_backup_ws
-from .const import CONF_TRANSPORT, DEFAULT_PORT, DOMAIN, OPT_SHOW_PANEL, TRANSPORT_AES
+from .const import CONF_SECURITY, CONF_TRANSPORT, DEFAULT_PORT, DOMAIN, OPT_SHOW_PANEL, TRANSPORT_AES
 from .coordinator import TapoCoordinator
 from .frontend import async_remove_panel_if_present, async_setup_frontend, async_setup_panel
 from .map_edit_ws import async_setup_map_edit_ws
@@ -54,6 +54,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         port=DEFAULT_PORT,
         cache_dir=hass.config.path(".storage", "tapo_rv30"),
     ))
+    if client_cls is TapoVacuumClient:
+        client.expected_security = entry.data.get(CONF_SECURITY)
     coordinator = TapoCoordinator(hass, client, entry)
     try:
         await coordinator.async_config_entry_first_refresh()
@@ -61,6 +63,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # Setup is retried with a new client; release this one (the AES client owns a thread).
         await hass.async_add_executor_job(client.close)
         raise
+    # Trust on first use: remember what the robot offered, so a later impostor offering less
+    # is refused (a reauth or reconfigure stores what the robot offers then).
+    learned = getattr(client, "security", None) if client_cls is TapoVacuumClient else None
+    if learned and not entry.data.get(CONF_SECURITY):
+        hass.config_entries.async_update_entry(entry, data={**entry.data, CONF_SECURITY: learned})
     forwarded = False
     try:
         coordinator.planner = TapoPlanner(hass, coordinator, entry)
@@ -95,7 +102,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 def _panel_wanted(hass: HomeAssistant) -> bool:
     """The sidebar panel is shown unless every entry has turned it off."""
-    entries = hass.config_entries.async_entries(DOMAIN)
+    # Ignored (discovered and dismissed) and disabled entries have no robot to show.
+    entries = hass.config_entries.async_entries(DOMAIN, include_ignore=False, include_disabled=False)
     return any(e.options.get(OPT_SHOW_PANEL, True) for e in entries) if entries else False
 
 
@@ -112,17 +120,22 @@ async def _async_options_updated(hass: HomeAssistant, entry: ConfigEntry) -> Non
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    # Stop the planner first, so it cannot start a clean while the entities go away.
+    planner = getattr((hass.data.get(DOMAIN) or {}).get(entry.entry_id), "planner", None)
+    if planner is not None:
+        planner.async_stop()
     ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if ok:
-        coordinator = hass.data[DOMAIN].pop(entry.entry_id, None)
+        coordinator = hass.data.get(DOMAIN, {}).pop(entry.entry_id, None)
         if coordinator is not None:
-            planner = getattr(coordinator, "planner", None)
             if planner is not None:
                 await planner.async_flush()
             await hass.async_add_executor_job(coordinator.client.close)
-        if not hass.data[DOMAIN]:
+        if not hass.data.get(DOMAIN):
             async_remove_panel_if_present(hass)
         _async_register_voice(hass)
+    elif planner is not None:
+        planner.async_start()       # still loaded: keep planning
     return ok
 
 

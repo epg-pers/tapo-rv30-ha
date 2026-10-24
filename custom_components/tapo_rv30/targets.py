@@ -42,12 +42,17 @@ def resolve(loaded: dict[str, Any], explicit: list[str], indirect: list[str],
             raise TargetError("no Tapo robot vacuum in the targeted device, area, floor or label")
         if len(loaded) == 1:
             return list(loaded.values())
+        if not loaded:
+            raise TargetError("no Tapo vacuum is connected yet (still starting up or retrying)")
         raise TargetError(f"pick a target vacuum entity ({len(loaded)} Tapo vacuums are set up)")
     found: dict[str, Any] = {}
     for eid in explicit:
         info = entry_of(eid)
         coord = loaded.get(info[1]) if info and info[0] == domain and info[1] else None
         if coord is None:
+            if info and info[0] == domain:
+                raise TargetError(f"{eid}: its vacuum is not connected yet (Home Assistant is still "
+                                  "retrying to reach it); try again shortly")
             raise TargetError(f"{eid} is not a Tapo RV30 entity")
         found.setdefault(info[1], coord)
     for eid in indirect:

@@ -127,7 +127,7 @@ def test_describe_shows_the_safety_net():
 def test_summary_is_readable():
     s = ms.summary(ms.plan(good(), MAP, LOST_AREAS, [], [], []))
     assert s["room_names"] == ["Hallway", "Lounge"]
-    assert s["zones"] == {"forbid": 2} and s["furniture"] == 1
+    assert s["zones"] == {"forbid": 1} and s["furniture"] == 1   # Z1 is still on the map: only one is added
     assert s["presets"] == ["All downstairs"] and s["schedules"] == [510]
 
 

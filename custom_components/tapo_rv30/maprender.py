@@ -270,8 +270,8 @@ def render_map(map_data: dict) -> tuple[Image.Image, list[dict], dict]:
         x1, y1 = _grid_px(max(xs), min(ys), height)
         name = b64name(room.get("name", ""))
         geometry.append({"id": rid, "name": name, "bbox": [x0, y0, x1, y1], "centre": [cx, cy],
-                         "cells": len(pts), "suction": room.get("suction"), "water_level": room.get("cistern"),
-                         "passes": room.get("clean_number")})
+                         "cells": len(pts), "suction": _num(room.get("suction")),
+                         "water_level": _num(room.get("cistern")), "passes": _num(room.get("clean_number"))})
         draw.text((cx + 1, cy + 1), name, fill=(0, 0, 0), font=font, anchor="mm")
         draw.text((cx, cy), name, fill=(255, 255, 255), font=font, anchor="mm")
 
@@ -341,6 +341,14 @@ def render_record(rec: dict) -> Image.Image:
     if charge:
         _dot(draw, *map(int, to_px(charge[0], charge[1])), (255, 200, 0), 5)
     return img
+
+
+def _num(value) -> int | None:
+    """A robot level field as an int (or None): it reaches the page, so never a string."""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _dot(draw: ImageDraw.ImageDraw, sx: int, sy: int, color, radius: int = 6) -> None:

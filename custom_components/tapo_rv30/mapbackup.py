@@ -28,6 +28,9 @@ from typing import Any
 _GZIP_MAGIC = b"\x1f\x8b\x08"
 
 
+MAX_UNPACKED = 64 * 1024 * 1024   # bytes a backup may unpack to
+
+
 def parse_bkmap(data: bytes) -> dict[str, Any]:
     """Return {"md5", "members": {name: bytes}, "tail": dict|None}.
 
@@ -51,15 +54,26 @@ def parse_bkmap(data: bytes) -> dict[str, Any]:
                 break
     dec = zlib.decompressobj(16 + zlib.MAX_WBITS)
     try:
-        raw = dec.decompress(data[gz:]) + dec.flush()
+        # Capped: a real map backup unpacks to a few MB; a corrupt or hostile file must not
+        # take Home Assistant's memory with it.
+        raw = dec.decompress(data[gz:], MAX_UNPACKED)
+        if dec.unconsumed_tail:
+            raise ValueError("not a .bkmap: unpacks to more than "
+                             f"{MAX_UNPACKED // (1024 * 1024)} MB")
+        raw += dec.flush()
     except zlib.error as exc:
         raise ValueError(f"not a .bkmap: bad gzip ({exc})") from exc
     members: dict[str, bytes] = {}
-    with tarfile.open(fileobj=io.BytesIO(raw)) as tf:
-        for m in tf.getmembers():
-            if m.isfile():
-                f = tf.extractfile(m)
-                members[m.name.lstrip("./")] = f.read() if f else b""
+    try:
+        with tarfile.open(fileobj=io.BytesIO(raw)) as tf:
+            for i, m in enumerate(tf):
+                if i >= 256:
+                    raise ValueError("not a .bkmap: too many files")
+                if m.isfile():
+                    f = tf.extractfile(m)
+                    members[m.name.lstrip("./")] = f.read() if f else b""
+    except (tarfile.TarError, EOFError) as exc:
+        raise ValueError(f"not a .bkmap: bad archive ({exc})") from exc
     tail = None
     tail_start = len(data) - len(dec.unused_data)
     rest = data[tail_start:]
