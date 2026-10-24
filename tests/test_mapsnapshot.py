@@ -118,6 +118,12 @@ def test_restore_target_explains_when_the_robot_has_no_maps():
         ms.restore_target({}, 0, MAP)
 
 
+def test_describe_shows_the_safety_net():
+    d = ms.describe(good())
+    assert d["rooms"] == ["Hallway", "Lounge"] and d["zones"] == {"forbid": 2}
+    assert d["furniture"] == 1 and d["presets"] == ["All downstairs"] and d["schedules"] == 1
+
+
 def test_summary_is_readable():
     s = ms.summary(ms.plan(good(), MAP, LOST_AREAS, [], [], []))
     assert s["room_names"] == ["Hallway", "Lounge"]

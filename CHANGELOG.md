@@ -1,12 +1,12 @@
 # Changelog
 
-## v0.25.0b1
+## v0.25.0b2
 
 ### New
 
 - **Recover from losing every map.** `restore_map_backup` now works when the map is gone from the robot: pass the lost map's name (from its saved setup) or id, and any map on the robot - even a throwaway quick mapping run - carries the restore. The robot brings the backup back under the map's original id, so presets, schedules and history line up again. The response says where it landed and whether it needs saving in the Tapo app, and gives a clear message if the robot has no maps at all. The Backups tab's Restore button works the same way.
 - **Automatic map setup snapshots.** Each map's room names, no-go zones, virtual walls, carpets, furniture, presets and schedules are saved to `config/tapo_rv30/map_setups` whenever they change, from data already polled (no extra robot calls). A snapshot that looks like a lost or freshly restored map never replaces a good one, and the last 30 versions are kept in `map_setups/history`.
-- **`apply_map_setup` puts everything back**, not just zones and names: furniture, plus any missing presets (recreated) and schedules (re-pointed at the recreated presets). Only what is missing or different is written; `dry_run: true` reports what it would do.
+- **`apply_map_setup` puts everything back**, not just zones and names: furniture, plus any missing presets (recreated) and schedules (re-pointed at the recreated presets). Only what is missing or different is written; `dry_run: true` reports what it would do. The response also lists what the saved snapshot holds, so the safety net can be checked.
 
 ### Fixed
 

@@ -552,7 +552,7 @@ def async_setup_services(hass: HomeAssistant) -> None:
                                 presets, schedules)
         result = {"map_id": map_id, "map_name": names.get(map_id),
                   "from_setup": snap.get("map_name") or snap.get("map_id"), "saved_at": snap.get("saved_at"),
-                  "plan": mapsnapshot.summary(plan), "dry_run": dry_run}
+                  "snapshot": mapsnapshot.describe(snap), "plan": mapsnapshot.summary(plan), "dry_run": dry_run}
         if dry_run:
             return result
         # setAreaInfo writes the active map; switch to the target first.

@@ -186,6 +186,19 @@ def restore_target(maps: dict, current_id, backup_id: int) -> tuple[int, bool]:
     return (current_id if current_id in maps else next(iter(maps))), True
 
 
+def describe(snap: dict) -> dict:
+    """What a snapshot holds, so the safety net can be checked at a glance."""
+    areas = snap.get("areas") or {}
+    return {
+        "saved_at": snap.get("saved_at"),
+        "rooms": [_b64(r.get("name")) or f"Room {r.get('id')}" for r in areas.get("room", [])],
+        "zones": {t: len(areas[t]) for t in ZONE_TYPES if areas.get(t)},
+        "furniture": len(snap.get("furniture") or []),
+        "presets": [_b64(p.get("rule_name")) for p in snap.get("presets") or []],
+        "schedules": len(snap.get("schedules") or []),
+    }
+
+
 def summary(p: dict) -> dict:
     """A short, JSON-safe account of a plan for service responses and dry runs."""
     return {
