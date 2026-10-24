@@ -8,6 +8,8 @@ import re
 import unicodedata
 from typing import Any, Callable
 
+from .const import PROMPT_CODES
+
 
 class MapNotFound(ValueError):
     """The requested map could not be resolved on the vacuum."""
@@ -517,3 +519,48 @@ def room_coverage(record: dict, live: dict, live_pixels: bytes) -> dict[int, tup
                 if rid in totals:
                     cleaned[rid] = cleaned.get(rid, 0) + 1
     return {rid: (cleaned.get(rid, 0), total) for rid, total in totals.items()}
+
+
+def decode_prompt(code) -> dict:
+    """One getVacStatus prompt code as {code, prompt, description}."""
+    try:
+        code = int(code)
+    except (TypeError, ValueError):
+        return {"code": code, "prompt": "unknown", "description": f"Prompt {code}"}
+    slug, label = PROMPT_CODES.get(code, ("unknown", f"Prompt {code}"))
+    return {"code": code, "prompt": slug, "description": label}
+
+
+def new_prompts(prev: dict | None, new: dict) -> list[dict]:
+    """Prompts in the new status that were not in the previous one. The robot keeps a
+    prompt in the list while it applies; each instance has an id (promptCode_id), so a
+    prompt that clears and comes back fires again. Without ids, compare codes."""
+    codes = list(new.get("prompts") or [])
+    ids = list(new.get("prompt_ids") or [])
+    old_codes = set((prev or {}).get("prompts") or [])
+    old_ids = set((prev or {}).get("prompt_ids") or [])
+    out = []
+    for i, code in enumerate(codes):
+        pid = ids[i] if i < len(ids) else None
+        seen = (pid in old_ids) if pid is not None and old_ids else (code in old_codes)
+        if not seen:
+            out.append({**decode_prompt(code), "prompt_id": pid})
+    return out
+
+
+def preset_body(name: str, map_id: int, rooms: list[dict], clean_order: bool = True,
+                rule_id: int | None = None) -> dict:
+    """The addCustomizationRule body the app sends (create, or edit when rule_id is given).
+    rooms: [{id, suction, cistern, clean_number, carpet_strategy?}] in cleaning order."""
+    items = []
+    for r in rooms:
+        item = {"id": int(r["id"]), "type": "room", "suction": int(r["suction"]),
+                "cistern": int(r["cistern"]), "clean_number": int(r["clean_number"])}
+        if r.get("carpet_strategy") is not None:
+            item["carpet_strategy"] = r["carpet_strategy"]
+        items.append(item)
+    body = {"rule_name": base64.b64encode(str(name).encode()).decode(), "mode": "room",
+            "map_id": int(map_id), "clean_order": bool(clean_order), "area_list": items}
+    if rule_id is not None:
+        body["rule_id"] = int(rule_id)
+    return body

@@ -749,6 +749,8 @@ class TapoVacuumClient:
         return {
             "status_code":  vac["status"],
             "error_codes":  vac.get("err_status") or [0],
+            "prompts":      list(vac.get("prompt") or []),
+            "prompt_ids":   list(vac.get("promptCode_id") or []),
             "battery":      batt.get("battery_percentage", 0),
             "suction":      attr.get("suction", 4),
             "cistern":      attr.get("cistern", 0),
@@ -858,8 +860,13 @@ class TapoVacuumClient:
 
     def add_preset(self, body: dict) -> int:
         """Create a preset ({rule_name (b64), mode, map_id, clean_order, area_list}); the same
-        body getCustomizationRuleData returns, without rule_id. Returns the error_code."""
+        body getCustomizationRuleData returns, without rule_id. With rule_id it edits that
+        preset instead - the app uses this one call for both. Returns the error_code."""
         return self.send("addCustomizationRule", body).get("error_code", 0)
+
+    def delete_preset(self, map_id: int, rule_id: int) -> int:
+        """Delete one preset (delCustomizationRule, as the app). Returns the error_code."""
+        return self.send("delCustomizationRule", {"map_id": int(map_id), "rule_id": int(rule_id)}).get("error_code", 0)
 
     def run_preset(self, rule_id: int, map_id: int, clean_order: bool = True) -> None:
         """Start a preset exactly as the app does (clean_mode 5); switches map first if needed."""
@@ -1080,10 +1087,12 @@ class TapoVacuumClient:
 
     # Omni-dock actions (getter used to detect support, setter to trigger). From
     # cavefire/tapo-vacuum-ha and jan-tdy/TapoVac-ADV, confirmed on an RV50 Pro Omni there.
+    # The app sends {"switch": true} to all three (BaseStationSwitchCommandParams /
+    # RobotCutHairStatus both serialise their one field as "switch").
     DOCK_ACTIONS = {
-        "wash_mop":    ("getBackWashMode", "setWashMopSwitch", "switch_wash_mop"),
-        "dry_mop":     ("getDryMopMode", "setDryMopSwitch", "switch_dry_mop"),
-        "remove_hair": ("getCutHairMode", "setCutHairSwitch", "switch_cut_hair"),
+        "wash_mop":    ("getBackWashMode", "setWashMopSwitch", "switch"),
+        "dry_mop":     ("getDryMopMode", "setDryMopSwitch", "switch"),
+        "remove_hair": ("getCutHairMode", "setCutHairSwitch", "switch"),
     }
 
     def probe_dock_actions(self) -> tuple[list[str], bool]:

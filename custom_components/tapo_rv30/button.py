@@ -14,6 +14,7 @@ from .entity import TapoEntity
 RESETTABLE = {
     "roll_brush": "Main Brush", "edge_brush": "Side Brush", "filter": "Filter",
     "sensor": "Sensor", "charge_contact": "Charge Contacts", "main_brush_lid": "Main Brush Lid",
+    "rag": "Mop Cloth",
 }
 
 

@@ -169,6 +169,40 @@ FURNITURE_TYPES = {
 EVENT_CLEAN_STARTED  = "tapo_rv30_clean_started"
 EVENT_CLEAN_FINISHED = "tapo_rv30_clean_finished"
 EVENT_ERROR          = "tapo_rv30_error"
+EVENT_PROMPT         = "tapo_rv30_prompt"
+
+# getVacStatus "prompt" codes: the robot's spoken/app notices. Names follow the app's
+# RobotPromptType enum; 32 and 36 come from the firmware's event table.
+PROMPT_CODES: dict[int, tuple[str, str]] = {
+    1:  ("low_battery_start", "Battery too low to start"),
+    2:  ("low_battery_start", "Battery too low to start"),
+    3:  ("mop_installed", "Mop installed"),
+    4:  ("mop_removed", "Mop removed"),
+    5:  ("emptying_started", "Emptying the dustbin"),
+    6:  ("clean_finished", "Cleaning finished"),
+    7:  ("low_battery_recharging", "Low battery, returning to recharge"),
+    8:  ("updating", "Updating firmware, cannot clean"),
+    9:  ("charged_resuming", "Charged, resuming the clean"),
+    10: ("charge_unknown", "Charging state unknown"),
+    11: ("dust_bag_full", "Dust bag full"),
+    12: ("dust_bag_missing", "Dust bag missing"),
+    13: ("dust_duct_blocked", "Dust duct blocked"),
+    14: ("emptying_too_often", "Emptying too often"),
+    15: ("low_battery_shutdown", "Battery too low, shutting down"),
+    16: ("update_failed", "Firmware update failed"),
+    17: ("update_succeeded", "Firmware update succeeded"),
+    18: ("returning_to_start", "Recharged, returning to where it stopped"),
+    19: ("charging_stopped", "Charging stopped"),
+    20: ("emptying_done", "Dustbin emptied"),
+    21: ("area_unreachable", "Some of the area is unreachable"),
+    22: ("rebuilding_map", "Could not relocate, building a new map"),
+    23: ("started_in_no_go_zone", "Started inside a no-go zone"),
+    30: ("stuck_too_long", "Stuck for too long"),
+    31: ("paused_to_recharge", "Paused to recharge"),
+    32: ("clean_charging_contacts", "Clean the charging contacts"),
+    33: ("water_run_out", "Water tank empty"),
+    36: ("dock_busy", "Dock busy"),
+}
 CONSUMABLE_WARN_FRACTION = 0.10   # "replace soon" below this fraction of life left
 
 ACTIVE_POLL_INTERVAL = 10   # seconds while cleaning / returning (adaptive polling)

@@ -26,7 +26,7 @@ from .const import (
 )
 from .coordinator import TapoCoordinator
 from .frontend import STATIC_URL
-from .mapdata import b64name
+from .mapdata import b64name, decode_prompt
 from .tpap import AuthError
 
 _LOGGER = logging.getLogger(__name__)
@@ -131,6 +131,7 @@ class TapoVacuumEntity(CoordinatorEntity[TapoCoordinator], StateVacuumEntity):
             "clean_area":    d.get("clean_area", 0),
             "clean_time_min":d.get("clean_time", 0),
             "clean_percent": d.get("clean_percent", 0),
+            "prompts":       [decode_prompt(c)["prompt"] for c in d.get("prompts") or []],
             "rooms":         rooms,
             "consumables":   self.coordinator.consumables_percent(),
             "position_mm":   (self.coordinator.vac_pos or [None, None])[:2],

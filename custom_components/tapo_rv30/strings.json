@@ -365,6 +365,88 @@
           "description": "Only report what would be written; change nothing."
         }
       }
+    },
+    "create_preset": {
+      "name": "Create a preset",
+      "description": "Save a new cleaning preset on the robot, the same as making one in the Tapo app. It then shows up as a preset button and in run_preset, schedules and the app.",
+      "fields": {
+        "name": {
+          "name": "Name",
+          "description": "Name for the preset."
+        },
+        "rooms": {
+          "name": "Rooms",
+          "description": "Rooms to clean, in cleaning order (partial names are fine)."
+        },
+        "map": {
+          "name": "Map",
+          "description": "Map the rooms are on. Defaults to the current map."
+        },
+        "suction": {
+          "name": "Suction",
+          "description": "Suction for every room in the preset. Defaults to the robot's current setting."
+        },
+        "water": {
+          "name": "Water",
+          "description": "Water level for every room in the preset. Defaults to the robot's current setting."
+        },
+        "passes": {
+          "name": "Passes",
+          "description": "Passes for every room, 1 to 3. Defaults to the robot's current setting."
+        },
+        "clean_order": {
+          "name": "Clean in this order",
+          "description": "Clean the rooms in the order given (default on)."
+        }
+      }
+    },
+    "update_preset": {
+      "name": "Edit a preset",
+      "description": "Change an existing preset: rename it, change its rooms, or change the suction, water or passes for all its rooms. Anything left out stays as it is.",
+      "fields": {
+        "preset": {
+          "name": "Preset",
+          "description": "The preset to edit, by name or id."
+        },
+        "name": {
+          "name": "New name",
+          "description": "Rename the preset (optional)."
+        },
+        "rooms": {
+          "name": "Rooms",
+          "description": "Replace its rooms with these, in cleaning order (optional)."
+        },
+        "suction": {
+          "name": "Suction",
+          "description": "Suction for every room in the preset."
+        },
+        "water": {
+          "name": "Water",
+          "description": "Water level for every room in the preset."
+        },
+        "passes": {
+          "name": "Passes",
+          "description": "Passes for every room, 1 to 3."
+        },
+        "clean_order": {
+          "name": "Clean in this order",
+          "description": "Clean the rooms in the listed order."
+        }
+      }
+    },
+    "delete_preset": {
+      "name": "Delete a preset",
+      "description": "Delete a preset from the robot. Schedules that use it stop working, so check them first.",
+      "fields": {
+        "preset": {
+          "name": "Preset",
+          "description": "The preset to delete, by name or id."
+        },
+        "confirm": {
+          "name": "Confirm",
+          "description": "Required: this deletes the preset."
+        }
+      }
     }
   },
   "issues": {
@@ -377,7 +459,8 @@
     "trigger_type": {
       "clean_started": "{entity_name} started cleaning",
       "clean_finished": "{entity_name} finished cleaning",
-      "error": "{entity_name} reported an error"
+      "error": "{entity_name} reported an error",
+      "prompt": "{entity_name} gave a notice (dust bag full, area unreachable, ...)"
     }
   },
   "options": {

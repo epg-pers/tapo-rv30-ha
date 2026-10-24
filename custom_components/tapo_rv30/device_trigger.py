@@ -11,12 +11,13 @@ from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.trigger import TriggerActionType, TriggerInfo
 from homeassistant.helpers.typing import ConfigType
 
-from .const import DOMAIN, EVENT_CLEAN_FINISHED, EVENT_CLEAN_STARTED, EVENT_ERROR
+from .const import DOMAIN, EVENT_CLEAN_FINISHED, EVENT_CLEAN_STARTED, EVENT_ERROR, EVENT_PROMPT
 
 TRIGGER_TYPES = {
     "clean_started": EVENT_CLEAN_STARTED,
     "clean_finished": EVENT_CLEAN_FINISHED,
     "error": EVENT_ERROR,
+    "prompt": EVENT_PROMPT,
 }
 
 TRIGGER_SCHEMA = DEVICE_TRIGGER_BASE_SCHEMA.extend({vol.Required(CONF_TYPE): vol.In(TRIGGER_TYPES)})

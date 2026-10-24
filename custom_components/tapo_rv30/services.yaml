@@ -448,3 +448,115 @@ remove_matter_fabric:
           min: 1
           max: 255
           mode: box
+
+create_preset:
+  target:
+    entity:
+      domain: vacuum
+      integration: tapo_rv30
+  fields:
+    name:
+      required: true
+      example: Kitchen and hall
+      selector:
+        text: {}
+    rooms:
+      required: true
+      example:
+      - Kitchen
+      - Hallway
+      selector:
+        object: {}
+    map:
+      example: Downstairs
+      selector:
+        text: {}
+    suction:
+      selector:
+        select:
+          options:
+          - Quiet
+          - Standard
+          - Turbo
+          - Max
+          - Ultra
+    water:
+      selector:
+        select:
+          options:
+          - 'off'
+          - low
+          - medium
+          - high
+    passes:
+      selector:
+        number:
+          min: 1
+          max: 3
+    clean_order:
+      default: true
+      selector:
+        boolean: {}
+
+update_preset:
+  target:
+    entity:
+      domain: vacuum
+      integration: tapo_rv30
+  fields:
+    preset:
+      required: true
+      example: Kitchen and hall
+      selector:
+        text: {}
+    name:
+      example: Kitchen and hall (deep)
+      selector:
+        text: {}
+    rooms:
+      example:
+      - Kitchen
+      selector:
+        object: {}
+    suction:
+      selector:
+        select:
+          options:
+          - Quiet
+          - Standard
+          - Turbo
+          - Max
+          - Ultra
+    water:
+      selector:
+        select:
+          options:
+          - 'off'
+          - low
+          - medium
+          - high
+    passes:
+      selector:
+        number:
+          min: 1
+          max: 3
+    clean_order:
+      selector:
+        boolean: {}
+
+delete_preset:
+  target:
+    entity:
+      domain: vacuum
+      integration: tapo_rv30
+  fields:
+    preset:
+      required: true
+      example: Kitchen and hall
+      selector:
+        text: {}
+    confirm:
+      required: true
+      default: false
+      selector:
+        boolean: {}

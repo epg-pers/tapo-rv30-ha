@@ -17,7 +17,8 @@ _LOGGER = logging.getLogger(__name__)
 SERVICES = ("clean_rooms", "set_room_settings", "clean_zone", "run_schedule", "send_raw",
             "get_clean_records", "run_preset", "set_map", "go_to",
             "add_schedule", "set_schedule", "remove_schedule", "remove_matter_fabric",
-            "fetch_cloud_map_backups", "save_map_setup", "apply_map_setup", "restore_map_backup")
+            "fetch_cloud_map_backups", "save_map_setup", "apply_map_setup", "restore_map_backup",
+            "create_preset", "update_preset", "delete_preset")
 
 
 # Methods the integration itself calls while the robot is working.
@@ -158,8 +159,8 @@ def async_setup_services(hass: HomeAssistant) -> None:
                     raise ServiceValidationError(
                         f"{call.service}: {coord.device_name}'s firmware does not store per-room settings "
                         "(it rejects setCleanAttr type custom). Give suction / water / passes to "
-                        "tapo_rv30.clean_rooms for a single run, or save a preset in the Tapo app and use "
-                        "tapo_rv30.run_preset.") from exc
+                        "tapo_rv30.clean_rooms for a single run, or make a preset with per-room levels "
+                        "(tapo_rv30.create_preset) and run it with tapo_rv30.run_preset.") from exc
                 raise HomeAssistantError(f"{call.service}: vacuum rejected the command: {exc}") from exc
             await coord.async_request_refresh()
 
@@ -409,6 +410,97 @@ def async_setup_services(hass: HomeAssistant) -> None:
         await _send(hass, call, coord.client.run_preset, preset["id"], preset["map_id"],
                     preset.get("clean_order", True))
         await coord.async_refresh_soon()
+
+    # ---- presets (the robot's own "customisation rules", as the Tapo app edits them) ----
+    def _preset_rooms(coord: TapoCoordinator, map_id: int, room_ids: list[int], lv: dict,
+                      keep: dict[int, dict] | None = None) -> list[dict]:
+        """Preset room items in cleaning order. Levels: the call's, else the room's existing
+        ones in this preset, else the robot's current settings. Carpet handling is copied from
+        the map's room, as the app does. Blocking."""
+        g = coord.data or {}
+        data = coord.client.get_map_data(map_id)
+        carpet = {a["id"]: a.get("carpet_strategy") for a in data.get("area_list", []) if a.get("type") == "room"}
+        out = []
+        for rid in room_ids:
+            old = (keep or {}).get(rid, {})
+            out.append({"id": rid,
+                        "suction": lv.get("suction", old.get("suction", g.get("suction", 2))),
+                        "cistern": lv.get("cistern", old.get("cistern", g.get("cistern", 1))),
+                        "clean_number": lv.get("clean_number", old.get("clean_number", 1)),
+                        "carpet_strategy": old.get("carpet_strategy", carpet.get(rid))})
+        return out
+
+    def _preset_for(call: ServiceCall, coord: TapoCoordinator) -> dict:
+        ref = call.data.get("preset")
+        if ref in (None, ""):
+            raise ServiceValidationError(f"{call.service}: 'preset' (name or id) is required")
+        preset = coord.find_preset(ref)
+        if preset is None:
+            raise ServiceValidationError(
+                f"{call.service}: no unique preset matching '{ref}'. Available: {[p['name'] for p in coord.presets]}")
+        return preset
+
+    async def _write_preset(call: ServiceCall, coord: TapoCoordinator, body: dict) -> None:
+        try:
+            code = await hass.async_add_executor_job(coord.client.add_preset, body)
+        except Exception as exc:
+            raise HomeAssistantError(f"{call.service}: vacuum rejected the preset: {exc}") from exc
+        if code:
+            raise HomeAssistantError(f"{call.service}: vacuum rejected the preset (error {code})")
+
+    async def handle_create_preset(call: ServiceCall) -> ServiceResponse:
+        from .mapdata import fold, preset_body
+        coord = _one(hass, call)
+        name = str(call.data.get("name", "")).strip()
+        if not name:
+            raise ServiceValidationError(f"{call.service}: 'name' is required")
+        room_ids, map_id = await _resolve(hass, call, coord)
+        if any(fold(p["name"]) == fold(name) and p["map_id"] == map_id for p in coord.presets):
+            raise ServiceValidationError(f"{call.service}: a preset called '{name}' already exists on that map")
+        rooms = await hass.async_add_executor_job(_preset_rooms, coord, map_id, room_ids, _levels(call))
+        await _write_preset(call, coord, preset_body(name, map_id, rooms, call.data.get("clean_order", True)))
+        await coord.async_settings_changed()
+        made = next((p for p in coord.presets if fold(p["name"]) == fold(name) and p["map_id"] == map_id), None)
+        return {"preset_id": made and made["id"], "name": name, "map_id": map_id, "rooms": made and made["rooms"]}
+
+    async def handle_update_preset(call: ServiceCall) -> ServiceResponse:
+        from .mapdata import b64name, preset_body
+        coord = _one(hass, call)
+        preset = _preset_for(call, coord)
+        map_id, rule_id = preset["map_id"], preset["id"]
+        try:
+            detail = await hass.async_add_executor_job(coord.client.get_preset_detail, map_id, rule_id)
+        except Exception as exc:
+            raise HomeAssistantError(f"{call.service}: could not read the preset: {exc}") from exc
+        keep = {a["id"]: a for a in detail.get("area_list") or [] if a.get("type") == "room"}
+        if "rooms" in call.data:
+            room_ids, rmap = await _resolve(hass, call, coord)
+            if rmap != map_id:
+                raise ServiceValidationError(f"{call.service}: the rooms must be on the preset's own map")
+        else:
+            room_ids = list(keep)
+        rooms = await hass.async_add_executor_job(_preset_rooms, coord, map_id, room_ids, _levels(call), keep)
+        name = str(call.data.get("name") or b64name(detail.get("rule_name", ""))).strip()
+        order = call.data.get("clean_order", detail.get("clean_order", True))
+        await _write_preset(call, coord, preset_body(name, map_id, rooms, order, rule_id=rule_id))
+        await coord.async_settings_changed()
+        now = coord.find_preset(rule_id)
+        return {"preset_id": rule_id, "name": now and now["name"], "rooms": now and now["room_settings"]}
+
+    async def handle_delete_preset(call: ServiceCall) -> ServiceResponse:
+        coord = _one(hass, call)
+        if not call.data.get("confirm"):
+            raise ServiceValidationError(f"{call.service}: this deletes the preset; set confirm: true")
+        preset = _preset_for(call, coord)
+        try:
+            code = await hass.async_add_executor_job(coord.client.delete_preset, preset["map_id"], preset["id"])
+        except Exception as exc:
+            raise HomeAssistantError(f"{call.service}: vacuum rejected the delete: {exc}") from exc
+        if code:
+            raise HomeAssistantError(f"{call.service}: vacuum rejected the delete (error {code})")
+        await coord.async_settings_changed()
+        return {"deleted": preset["name"], "preset_id": preset["id"],
+                "remaining": [p["name"] for p in coord.presets]}
 
     async def handle_set_map(call: ServiceCall) -> None:
         coord = _one(hass, call)
@@ -708,6 +800,9 @@ def async_setup_services(hass: HomeAssistant) -> None:
                                  supports_response=SupportsResponse.ONLY)
     hass.services.async_register(DOMAIN, "clean_rooms", handle_clean_rooms)
     hass.services.async_register(DOMAIN, "run_preset", handle_run_preset)
+    for name, fn in (("create_preset", handle_create_preset), ("update_preset", handle_update_preset),
+                     ("delete_preset", handle_delete_preset)):
+        hass.services.async_register(DOMAIN, name, fn, supports_response=SupportsResponse.OPTIONAL)
     hass.services.async_register(DOMAIN, "set_map", handle_set_map)
     hass.services.async_register(DOMAIN, "go_to", handle_go_to)
     hass.services.async_register(DOMAIN, "remote_drive", handle_remote_drive,

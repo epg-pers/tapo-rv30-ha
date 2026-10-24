@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.26.0b1
+
+### New
+
+- **Make, edit and delete presets from Home Assistant.** `create_preset` (name, rooms, optional suction / water / passes / clean order), `update_preset` (rename, change rooms or levels; anything not given is kept) and `delete_preset` (needs `confirm: true`). They use the same robot calls as the Tapo app, so presets show up in the app and run with `run_preset`. This is also the way to keep per-room levels on firmware that rejects `set_room_settings`.
+- **Robot notices as events.** The robot's prompts (dust bag full, area unreachable, cleaning finished, emptying done, water tank empty and others) fire `tapo_rv30_prompt` once each time they appear, with `prompt`, `description` and `code`. Also available as a "gave a notice" device trigger, and the active ones are on the vacuum's `prompts` attribute.
+- **Reset Mop Cloth** button, next to the other consumable resets (the usage sensor already existed).
+- A restore of a deleted map now finishes on its own: once the restored map is saved in the Tapo app, its room names, zones, furniture, presets and schedules are put back from the saved setup and a notification says so.
+
+### Fixed
+
+- Omni dock wash, dry and hair-cut buttons send `{"switch": true}`, the parameter the Tapo app uses. The old per-action keys were taken from other integrations and may have been ignored.
+
 ## v0.25.0
 
 ### New

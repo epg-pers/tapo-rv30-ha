@@ -29,6 +29,7 @@ from .const import (
     EVENT_CLEAN_FINISHED,
     EVENT_CLEAN_STARTED,
     EVENT_ERROR,
+    EVENT_PROMPT,
     FAST_INTERVAL,
     ISSUE_UNREACHABLE,
     MAP_INTERVAL,
@@ -46,6 +47,7 @@ from .mapdata import (
     decode_schedule,
     fold,
     grid_pixels,
+    new_prompts,
     resolve_rooms,
     room_at_vac,
     room_coverage,
@@ -262,6 +264,9 @@ class TapoCoordinator(DataUpdateCoordinator):
             self.hass.bus.async_fire(EVENT_ERROR, {**self._event_base(), "code": new_err,
                                                    "error": ERROR_CODES.get(new_err, f"Code({new_err})"),
                                                    "current_room": self.current_room})
+        for prompt in new_prompts(prev, new):
+            self.hass.bus.async_fire(EVENT_PROMPT, {**self._event_base(), **prompt,
+                                                    "current_room": self.current_room})
 
     async def _load_freshness(self) -> None:
         if self._freshness_loaded or self._freshness_store is None:
