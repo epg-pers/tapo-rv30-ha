@@ -42,7 +42,6 @@ from .const import (
 )
 from .mapdata import (
     b64name,
-    clean_transition,
     decode_clean_record,
     decode_path,
     decode_preset,
@@ -71,8 +70,15 @@ _FRESHNESS_ALGO = 2         # per-room coverage logic; bump to re-fold saved his
 _ENTITY_SETTINGS = frozenset({"dust", "dnd", "volume", "auto_update", "matter_status", "matter_setup"})
 
 
-RUN_OPEN_MAX = 8 * 3600     # a run with no record after this long is taken as over
-RECHARGE_PROMPTS = frozenset({7, 31})   # "returning to recharge" / "paused to recharge", mid-run
+# Run tracking, see _track_run. Only a real clean opens a run: a drive home, a go-to or a
+# remote drive write no record and are not runs.
+RUN_CODES = frozenset({1, 2, 13})           # cleaning, mapping, exploring
+RUN_PAUSED = frozenset({7, 10, 14})         # one of those paused (12 is a paused go-to)
+WASH_CODES = frozenset({15, 17, 18})        # washing / attaching / removing the mop at the dock
+RECHARGE_PROMPTS = frozenset({7, 31})       # "returning to recharge" / "paused to recharge"
+RECHARGE_ERROR = 22                         # "Low Battery, Recharging"
+RUN_GRACE = 15 * 60         # after a run, map writes wait this long for its record
+RUN_OPEN_MAX = 8 * 3600     # docked part way through a run for longer than this: taken as over
 
 
 def _ts(record: dict) -> int:
@@ -103,7 +109,7 @@ class TapoCoordinator(DataUpdateCoordinator):
         self.poll_interval = interval
         self._map_read_at: float | None = None
         self._frame_key: tuple | None = None
-        self._run: dict | None = None                   # the robot's current run, see _track_run
+        self._run: dict | None = None                   # {phase, at, recharge, checked}, see _track_run
         self.presets_read = False                       # presets were read at least once            # what the last live map frame showed          # monotonic time of the last full map + settings read
         self.map_image_bytes: bytes | None = None
         self.last_clean_image_bytes: bytes | None = None   # render of the newest clean record
@@ -204,65 +210,136 @@ class TapoCoordinator(DataUpdateCoordinator):
     @property
     def map_busy(self) -> str | None:
         """Like busy, but for writes to the robot's maps: also refused while it drives home, and
-        while a run is not over yet. A robot that docks to recharge part way through a clean
-        reports plain charging, and only writes the run's record once it has finished."""
+        for a short while after a run, until the robot has recorded it."""
         if self.busy or self.status_code == 4:
             return self.busy or "returning"
-        if not self._run_open():
-            return None
-        if self._run.get("recharge"):
-            return "part way through a clean (back at the dock to recharge)"
-        return "finishing a clean (it has not recorded the run yet)"
+        if self._run_phase() == "over":
+            return "finishing a clean (it has not recorded the run yet)"
+        return None
 
     @property
     def busy(self) -> str | None:
-        """'cleaning' / 'paused' when a new clean would be refused, else None."""
+        """Why a new clean would be refused: cleaning, paused, or docked part way through a
+        run (recharging, washing the mop). None when the robot is free."""
         code = self.status_code
         if code in CLEANING_CODES:
             return "cleaning"
         if code in PAUSED_CODES:
             return "paused"
-        if code in DOCKED_CODES and self._run_open() and self._run.get("recharge"):
-            return "recharging to finish its clean"
+        if code in DOCKED_CODES:
+            return {"recharge": "recharging to finish its clean",
+                    "wash": "washing its mop part way through a clean"}.get(self._run_phase())
         return None
 
     def start_refused(self) -> str | None:
-        """Why a clean must not start now, for paths outside the services (vacuum entity, voice,
-        buttons): a map write switches maps and writes layers, and must not run under a robot."""
+        """Why a clean must not start now, for every start path (services, vacuum entity, voice,
+        buttons): a map write is switching maps, or the robot is docked part way through a run
+        that it carries on by itself."""
         if self.map_lock.locked():
             return "is having its map written (map setup or editor); try again shortly"
+        if self.status_code in DOCKED_CODES and (why := self.busy):
+            return f"is {why}; it carries on by itself (stop it to start another clean)"
         return None
 
-    def _run_open(self) -> bool:
+    def _run_phase(self) -> str | None:
+        """The run's phase: 'active', docked part way through it ('recharge' / 'wash'), or
+        'over' (its record not seen yet). None when there is no run, or it timed out."""
         run = self._run
-        return bool(run) and time.monotonic() - run["since"] < RUN_OPEN_MAX
+        if not run:
+            return None
+        limit = {"active": None, "over": RUN_GRACE}.get(run["phase"], RUN_OPEN_MAX)
+        if limit and time.monotonic() - run["at"] >= limit:
+            return None
+        return run["phase"]
 
-    def _track_run(self, new: dict) -> None:
-        """A run is open from the first cleaning status until the robot writes a record newer
-        than the ones it had (or RUN_OPEN_MAX passes, or it stops away from the dock). The
-        recharge notices mark one that will carry on after charging."""
+    def _run_open(self) -> bool:
+        return self._run_phase() is not None
+
+    async def _track_run(self, prev: dict | None, new: dict) -> None:
+        """Follow the robot's run; one clean_started and one clean_finished per run.
+
+        Only a real clean (RUN_CODES) opens a run; returning and the paused codes keep it going.
+        Docked part way through, to recharge (prompt 7/31, error 22) or to wash its mop (an
+        Omni dock), it is still on and busy says so. Docked otherwise, or stopped, its clean is
+        over: clean_finished fires and map writes wait for its record, RUN_GRACE at most. A
+        record newer than the newest seen when it opened closes it at any point."""
         code = new.get("status_code")
-        newest = max((_ts(r) for r in _records(self.settings.get("records"))), default=0)
-        if code in CLEANING_CODES or code in PAUSED_CODES or code == 4:
-            if not self._run:
-                self._run = {"since": time.monotonic(), "record": newest, "recharge": False, "docked": False}
-            elif code in CLEANING_CODES and self._run["docked"]:
-                self._run.update(recharge=False, docked=False, finish_held=False)   # charged, set off again
-            if set(new.get("prompts") or []) & RECHARGE_PROMPTS:
-                self._run["recharge"] = True
+        now = time.monotonic()
+        sign = (bool(set(new.get("prompts") or []) & RECHARGE_PROMPTS)
+                or RECHARGE_ERROR in (new.get("error_codes") or []))
+        active = code in CLEANING_CODES or code in PAUSED_CODES or code == 4
+        phase = self._run_phase()
+        if phase is None:
+            self._run = None
+        run = self._run
+        if phase in ("recharge", "wash") and code in RUN_CODES:
+            # Setting off again, unless the robot recorded the run meanwhile (it was ended at
+            # the dock): then this is a new clean.
+            record = await self._fetch_new_record()
+            if record is None:
+                run.update(phase="active", at=now, recharge=sign)
+                return
+            self._fire_finished(new, record)
+            phase = run = self._run = None
+        if phase in (None, "over"):
+            # After a restart, pick up a run already under way (or docked to recharge).
+            resumed = prev is None and (code in RUN_PAUSED or (code in DOCKED_CODES and sign))
+            if code in RUN_CODES or resumed:
+                await self._read_records()      # the baseline: every record written so far
+                newest = max((_ts(r) for r in _records(self.settings.get("records"))), default=0)
+                self._last_record_ts = max(self._last_record_ts or 0, newest)
+                self._run = {"phase": "recharge" if code in DOCKED_CODES else "active", "at": now,
+                             "recharge": sign}
+                if prev is not None:
+                    self.hass.bus.async_fire(EVENT_CLEAN_STARTED, {
+                        **self._event_base(), "status_code": code, "current_room": self.current_room})
+                return
+        elif phase == "active":
+            run["recharge"] = run["recharge"] or sign
+            if code in CLEANING_CODES or code in PAUSED_CODES:
+                return
+            if code == 4 and (run["recharge"] or "wash_mop" in self.dock_actions):
+                return      # heading home: finished or not is known once it is docked
+            if code in DOCKED_CODES and (run["recharge"] or code in WASH_CODES):
+                run.update(phase="recharge" if run["recharge"] else "wash", at=now)
+            else:
+                await self._end_run(new)
+                return
+        elif active:
+            run.update(phase="active", at=now)      # left the dock again
             return
-        if not self._run:
+        elif code not in DOCKED_CODES:
+            await self._end_run(new)                # stopped at the dock
             return
-        if code in DOCKED_CODES:
-            self._run["docked"] = True
-        if (newest > self._run["record"] or not self._run_open()
-                or (code in (0, 8) and not self._run["recharge"])):
-            held, self._run = self._run.get("finish_held"), None
-            if held:    # it ended without setting off again (stopped while charging)
-                recs = _records(self.settings.get("records"))
-                record = decode_clean_record(max(recs, key=_ts)) if newest > 0 and recs else None
-                self.hass.bus.async_fire(EVENT_CLEAN_FINISHED, {**self._event_base(), "status_code": code,
-                                                                **({"record": record} if record else {})})
+        elif phase == "wash" and code not in WASH_CODES:
+            if not (sign or run["recharge"]):
+                await self._end_run(new)            # washed, not setting off again: done
+                return
+            run.update(phase="recharge", at=now)
+        # Docked or idle with the run not closed: its record closes it, looked for each minute.
+        run = self._run
+        if run and not active:
+            if now - run.get("checked", 0) >= 60:
+                run["checked"] = now
+                await self._read_records()
+            record = self._new_record()
+            if record is not None:
+                if run["phase"] != "over":
+                    self._fire_finished(new, record)
+                self._run = None
+
+    async def _end_run(self, new: dict) -> None:
+        """The run's clean is over: clean_finished, with its record if the robot wrote one.
+        Home without a record yet, map writes wait for it (RUN_GRACE at most)."""
+        record = await self._fetch_new_record()
+        self._fire_finished(new, record)
+        code, now = new.get("status_code"), time.monotonic()
+        home = code == 4 or code in DOCKED_CODES
+        self._run = {"phase": "over", "at": now, "checked": now} if home and record is None else None
+
+    def _fire_finished(self, new: dict, record: dict | None) -> None:
+        self.hass.bus.async_fire(EVENT_CLEAN_FINISHED, {**self._event_base(), "status_code": new.get("status_code"),
+                                                        **({"record": record} if record else {})})
 
     async def async_set_poll_interval(self, seconds: int) -> None:
         seconds = max(MIN_POLL_INTERVAL, min(MAX_POLL_INTERVAL, int(seconds)))
@@ -327,7 +404,12 @@ class TapoCoordinator(DataUpdateCoordinator):
                     if self._map_base is not None:
                         self._map_retry = True   # retry the map alone next poll; settings keep their own cycle
             if cycle or self.settings_read_at is None:
-                await self._refresh_settings()
+                try:
+                    await self._refresh_settings()
+                except AuthError as exc:
+                    raise ConfigEntryAuthFailed(str(exc)) from exc
+                except Exception as exc:    # the robot dropped out part way: keep the last values
+                    _LOGGER.debug("Settings read failed: %s", exc)
             if full or map_ok:
                 self._check_pending_restore()
                 try:
@@ -355,14 +437,6 @@ class TapoCoordinator(DataUpdateCoordinator):
         data["signal_level"] = dev.get("signal_level")
         data["firmware"] = self.settings.get("firmware") or {}
         await self._fire_events(self.data, data)
-        self._track_run(data)
-        if (self._run and data.get("status_code") in DOCKED_CODES and not self._run.get("recharge")
-                and time.monotonic() - self._run.get("checked", 0) >= 60):
-            # Docked after a run: look for its record each minute rather than at the next full
-            # read, so map writes are not held back for minutes.
-            self._run["checked"] = time.monotonic()
-            await self._fetch_new_record()
-            self._track_run(data)
         return data
 
     # ---- events ------------------------------------------------------------------
@@ -375,28 +449,12 @@ class TapoCoordinator(DataUpdateCoordinator):
                 "device": self.device_name, "model": self.device_model}
 
     async def _fire_events(self, prev: dict | None, new: dict) -> None:
-        """Fire HA events on clean start/finish and on a new error."""
+        """Fire HA events on clean start/finish (see _track_run) and on a new error or prompt."""
         if prev is None:
             self._note_latest_record()
+        await self._track_run(prev, new)
+        if prev is None:
             return
-        change = clean_transition(prev.get("status_code"), new.get("status_code"), CLEANING_CODES, PAUSED_CODES)
-        # Docking to recharge part way through, and setting off again after, are one run.
-        recharging = bool(set(new.get("prompts") or []) & RECHARGE_PROMPTS) or bool(
-            self._run and self._run.get("recharge"))
-        if change == "finished" and recharging:
-            _LOGGER.debug("%s: docking to recharge part way through a clean", self.device_name)
-            if self._run:
-                self._run["finish_held"] = True     # fired when the run really ends
-            change = None
-        elif change == "started" and self._run_open() and self._run.get("recharge"):
-            change = None
-        if change == "started":
-            self.hass.bus.async_fire(EVENT_CLEAN_STARTED, {**self._event_base(), "status_code": new.get("status_code"),
-                                                           "current_room": self.current_room})
-        elif change == "finished":
-            record = await self._fetch_new_record()
-            self.hass.bus.async_fire(EVENT_CLEAN_FINISHED, {**self._event_base(), "status_code": new.get("status_code"),
-                                                            **({"record": record} if record else {})})
         prev_err = (prev.get("error_codes") or [0])[0]
         new_err = (new.get("error_codes") or [0])[0]
         if new_err and new_err != prev_err:
@@ -661,15 +719,16 @@ class TapoCoordinator(DataUpdateCoordinator):
         if recs:
             self._last_record_ts = max(_ts(r) for r in recs)
 
-    async def _fetch_new_record(self) -> dict | None:
-        """The clean record the robot just wrote, if it is newer than any seen."""
+    async def _read_records(self) -> None:
+        """Re-read getCleanRecords into settings (kept as they were when the read fails)."""
         try:
-            raw = await self.hass.async_add_executor_job(self.client.get_clean_records)
+            self.settings["records"] = await self.hass.async_add_executor_job(self.client.get_clean_records)
         except Exception as exc:
-            _LOGGER.debug("Records fetch after clean failed: %s", exc)
-            return None
-        self.settings["records"] = raw
-        recs = _records(raw)
+            _LOGGER.debug("Records fetch failed: %s", exc)
+
+    def _new_record(self) -> dict | None:
+        """The newest known record if it is newer than any seen (it then counts as seen)."""
+        recs = _records(self.settings.get("records"))
         if not recs:
             return None
         newest = max(recs, key=_ts)
@@ -678,6 +737,11 @@ class TapoCoordinator(DataUpdateCoordinator):
             return None
         self._last_record_ts = ts
         return decode_clean_record(newest)
+
+    async def _fetch_new_record(self) -> dict | None:
+        """The clean record the robot just wrote, if it is newer than any seen."""
+        await self._read_records()
+        return self._new_record()
 
     CAPS_ATTEMPTS = 5
 
@@ -965,7 +1029,11 @@ class TapoCoordinator(DataUpdateCoordinator):
 
     async def async_settings_changed(self) -> None:
         """Re-read settings right after a write so switches don't wait for the slow cycle."""
-        await self._refresh_settings()
+        try:
+            await self._refresh_settings()
+        except Exception as exc:    # the write itself worked; the next full read catches up
+            _LOGGER.debug("Settings re-read after a write failed: %s", exc)
+            return
         if self.data is not None:
             self.data["settings"] = self.settings
             self.data["schedules"] = self.schedules

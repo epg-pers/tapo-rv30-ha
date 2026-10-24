@@ -1,5 +1,34 @@
 # Changelog
 
+## v0.31.0b1
+
+A fifth bug hunt: the last release's own changes, the protocol and transport line by line, time and state machines, map geometry (including the map editor problem reported with a screenshot), what happens when things go wrong, and the docs and packaging. Every finding was checked by separate reviewers trying to disprove it.
+
+### Fixed
+
+- **A passing TLS hiccup no longer asks you to re-authenticate.** On a robot with the pinned certificate, a robot reboot or Wi-Fi drop during a new handshake was taken for a wrong certificate: Home Assistant asked for the password again and stopped polling until you did. Only a certificate that is really refused counts now (a wrong clock does not either); anything else is retried, and the "stopped answering" repair appears if it lasts.
+- **Run tracking rebuilt.** 0.30 could treat a plain "return to dock" from standby (or after go-to or remote drive) as a clean and refuse map writes for 8 hours. Now only a real clean opens a run, a robot docked part way through to recharge or (Omni docks) to wash its mop stays busy, one run gives one `clean_started` and one `clean_finished`, a run in progress is picked up after a restart, and after a run map writes wait at most 15 minutes for its record. Go-to and remote drive no longer fire clean events. Start, presets and `clean_area` are refused while the robot is docked part way through a run, and the planner no longer logs "Finished" then.
+- **Map editor furniture.**
+  - New items get the real-world size of their type instead of all being 700 x 500 mm, and can be resized with a handle.
+  - They are saved with their corners in the robot's own order (they would have drawn upside down) and with their own ids.
+  - Furniture is drawn under the zones, lighter, so a no-go zone inside a piece of furniture can be seen and selected.
+  - The type list matches the integration's (all 19 types).
+- Everything drawn on the map from millimetres (zones, furniture, path, robot, go-to and zone taps, calibration points) sat half a cell (25 mm) off. The robot dot and live path between full map reads are drawn in the map image's own frame, and a rare spike to the map origin is gone.
+- The card's room sheet shows the robot's current levels for a room with none of its own, so what is highlighted is what the clean uses.
+- A password change now asks for re-authentication on RV30C (AES) robots and on firmware without batched requests, instead of trying to log in dozens of times a minute.
+- A reply that cannot be read after a write is no longer answered by sending the write again (a schedule or preset could be added twice). Message numbers are reserved before sending, so a reload or crash can never send two messages under the same key and number, and a used-up counter starts a new session instead of stopping the integration. A robot asking for an absurd number of password rounds is refused.
+- A robot that drops off Wi-Fi part way through a poll no longer holds it for minutes.
+- The automatic restore finish retries after a failed read instead of failing silently; `apply_map_setup` reports a failed read clearly.
+- The planner does not try to start a clean while the robot is not answering (it filled its history with errors).
+- The TP-Link cloud token can no longer appear in an error message.
+- The "stopped answering" repair is removed when the integration is unloaded or deleted.
+- Diagnostics show how the robot numbers its replies, to decide later whether replies that do not match their request can be refused.
+
+### Docs and packaging
+
+- Consumable sensors are documented as hours left; the idle poll default is 30 seconds; entities a fork leaves behind have to be deleted by hand; entity names, the Drive tab and device trigger labels corrected; the missing 0.12 to 0.17 sections are back in this changelog.
+- The docs site is rebuilt when a release changes the changelog. Debug logging includes python-kasa (RV30C), the integration is listed as a device, and a missing python-kasa internal no longer breaks RV30C robots. CI tool versions are pinned.
+
 ## v0.30.0
 
 A fourth bug hunt, from new angles: upgrades and stored data, the last release's own changes, other models and households, the sidebar page and card in a browser, the service contract, a safety audit of every write to the robot, and performance over weeks. Every finding was argued for and against by separate reviewers; only what held up was fixed.

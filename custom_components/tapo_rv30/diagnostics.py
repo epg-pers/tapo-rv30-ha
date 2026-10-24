@@ -34,6 +34,10 @@ async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: ConfigE
     out["device"] = async_redact_data(
         {k: v for k, v in info.items() if k in ("model", "fw_ver", "hw_ver", "type", "device_on", "rssi", "signal_level")}
         | {"client": type(coord.client).__name__}, TO_REDACT)
+    # How the robot numbers its replies (counts only), to decide whether mismatches can be refused.
+    st = getattr(coord.client, "rseq_stats", None)
+    if isinstance(st, dict):
+        out["reply_numbering"] = {k: st.get(k) for k in ("equal", "different", "repeated", "last_mismatch")}
     # The raw status and settings carry the device info (MAC, IP, Wi-Fi, location) and the
     # Matter setup code, so they are redacted like everything else.
     out["status"] = async_redact_data(coord.data, TO_REDACT) if coord.data else None

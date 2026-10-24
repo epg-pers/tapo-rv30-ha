@@ -363,6 +363,27 @@ def _opt_int(value) -> int | None:
         return None
 
 
+_MAX_ITERATIONS = 5_000_000
+
+
+def _cert_rejected(exc: BaseException) -> bool:
+    """The certificate itself was refused (not one of ours): an SSLCertVerificationError
+    somewhere in the chain. Not yet valid / expired (9, 10) mean a wrong clock, as only a
+    certificate that chains to the pin gets that far; a reauth would not help either."""
+    seen, todo = set(), [exc]
+    while todo:
+        e = todo.pop()
+        if e is None or id(e) in seen:
+            continue
+        seen.add(id(e))
+        if isinstance(e, ssl.SSLCertVerificationError):
+            return getattr(e, "verify_code", None) not in (9, 10)
+        if isinstance(e, BaseException):
+            todo += [e.__cause__, e.__context__, getattr(e, "reason", None),
+                     *[a for a in e.args if isinstance(a, BaseException)]]
+    return False
+
+
 def _raise_for_error(response: dict, action: str) -> None:
     """Classify a device error code so callers know whether retrying helps."""
     code = _opt_int(response.get("error_code")) or 0
@@ -428,6 +449,7 @@ class TapoVacuumClient:
         # seq/nonce is shared state, so one request at a time.
         self._lock    = threading.RLock()
         self._closed  = False      # set by close(): an unloaded entry's client sends nothing more
+        self.rseq_stats: dict = {"equal": 0, "different": 0, "repeated": 0, "last_mismatch": None}
         # None = untried, then True/False once the firmware has answered multipleRequest.
         self._multi_supported: bool | None = None
 
@@ -528,7 +550,27 @@ class TapoVacuumClient:
         except Exception:
             return False
 
+    def _note_rseq(self, seq: int, rseq: int) -> None:
+        """Count how the robot numbers its replies (diagnostics), to decide later whether a
+        reply that does not match its request can be refused. Nothing is refused yet."""
+        st = self.__dict__.setdefault("rseq_stats", {"equal": 0, "different": 0, "repeated": 0,
+                                                     "last_mismatch": None})
+        if st.get("session") != self._session_id:
+            st.update(session=self._session_id, seen=set())
+        if rseq == seq:
+            st["equal"] += 1
+        else:
+            st["different"] += 1
+            if st["last_mismatch"] is None:
+                _LOGGER.info("TPAP: %s answered request %d with reply number %d", self.host, seq, rseq)
+            st["last_mismatch"] = [seq, rseq]
+        if rseq in st["seen"]:
+            st["repeated"] += 1
+        st["seen"].add(rseq)
+
     def _save_session(self) -> None:
+        if self._closed:      # a closed client's session belongs to its successor now
+            return
         try:
             payload = json.dumps({
                 "host": self.host, "user": self.username,
@@ -564,8 +606,8 @@ class TapoVacuumClient:
         try:
             d = self._post("/", {"method": "login", "params": {"sub_method": "discover"}})
         except requests.exceptions.SSLError as exc:
-            if not was_pinned:
-                raise
+            if not was_pinned or not _cert_rejected(exc):
+                raise   # a dropped or reset handshake (robot rebooting, Wi-Fi): try again later
             # Fail closed: whatever answers without the TP-Link certificate may not be the robot.
             raise AuthError(f"{self.host} no longer presents the pinned TP-Link certificate; "
                             "re-authenticate the integration only if the robot was replaced or "
@@ -674,6 +716,8 @@ class TapoVacuumClient:
 
         st    = int(r.get("cipher_suites") or 2)
         iters = int(r.get("iterations") or 10000)
+        if iters > _MAX_ITERATIONS:     # whatever answers must not tie up Home Assistant for minutes
+            raise AuthError(f"pake_register asked for {iters} iterations; refusing more than {_MAX_ITERATIONS}")
         if iters <= 0:
             raise AuthError("pake_register returned invalid iterations")
         self._cipher_id = (r.get("encryption") or "aes_128_ccm").lower().replace("-", "_")
@@ -831,11 +875,20 @@ class TapoVacuumClient:
         raise RuntimeError("unreachable")
 
     def _send_once(self, method: str, params: dict | None) -> dict:
-        payload = (struct.pack(">I", self._seq)
+        if self._closed:
+            raise RuntimeError("the connection to the robot is closed (entry unloaded)")
+        seq = self._seq
+        if not 0 <= seq < 0xFFFFFFFF:       # the 4-byte counter is used up: a new session
+            raise _SessionLost(f"sequence number {seq} out of range")
+        # Reserved (and saved) before sending: a crash or reload after this point can never
+        # send another message under the same key and nonce.
+        self._seq = seq + 1
+        self._save_session()
+        payload = (struct.pack(">I", seq)
                    + _encrypt(self._cipher_id, self._key, self._base_nonce,
                               json.dumps({"method": method,
                                           "params": params or {}}).encode(),
-                              self._seq))
+                              seq))
         try:
             raw = self._post(f"/stok={self._session_id}/ds", payload, binary=True)
         except requests.RequestException as exc:
@@ -848,15 +901,29 @@ class TapoVacuumClient:
             self._clear_session()
             raise RuntimeError(f"no reply to {method}; not sent again in case the robot already "
                                "acted on it, check its state") from exc
-        if len(raw) < 4 + _TAG_LEN:
-            raise _SessionLost(f"response too short ({len(raw)} bytes)")
-        rseq = struct.unpack(">I", raw[:4])[0]
-        try:
-            plain = _decrypt(self._cipher_id, self._key, self._base_nonce, raw[4:], rseq)
-        except Exception as exc:
-            raise _SessionLost(f"decrypt failed: {exc}") from exc
-        self._seq += 1
-        self._save_session()
+        plain = None
+        if len(raw) >= 4 + _TAG_LEN:
+            rseq = struct.unpack(">I", raw[:4])[0]
+            try:
+                plain = _decrypt(self._cipher_id, self._key, self._base_nonce, raw[4:], rseq)
+                self._note_rseq(seq, rseq)
+            except Exception:
+                plain = None
+        if plain is None:
+            # Not an encrypted reply. A plain {"error_code": ...} (an expired session, say) is
+            # classified as usual; anything unreadable after a write must not resend the write,
+            # as the robot may have carried it out.
+            try:
+                body = json.loads(raw)
+            except ValueError:
+                body = None
+            if isinstance(body, dict) and _opt_int(body.get("error_code")):
+                _raise_for_error(body, method)
+            if _resend_safe(method, params):
+                raise _SessionLost(f"unreadable reply ({len(raw)} bytes)")
+            self._clear_session()
+            raise RuntimeError(f"unreadable reply to {method}; not sent again in case the robot already "
+                               "acted on it, check its state")
         resp = json.loads(plain.decode())
         _raise_for_error(resp, method)
         return resp
@@ -904,6 +971,8 @@ class TapoVacuumClient:
         for m, p in singles:
             try:
                 out[m] = self.send(m, p)["result"] or {}
+            except AuthError:
+                raise           # the password changed: ask for it, do not try every getter
             except Exception as exc:
                 _LOGGER.debug("%s failed: %s", m, exc)
         return out
@@ -1009,6 +1078,8 @@ class TapoVacuumClient:
             try:
                 out[key] = bool(self.send(getter)["result"].get(field))
             except Exception as exc:
+                if not _is_device_error(exc):
+                    raise       # the robot dropped out: do not wait out every getter's timeout
                 _LOGGER.debug("%s failed: %s", getter, exc)
         return out
 
@@ -1327,6 +1398,8 @@ class TapoVacuumClient:
                 if key == "schedules":
                     out[key] = self._all_schedule_pages(out[key] or {})
             except Exception as exc:
+                if not _is_device_error(exc):
+                    raise       # the robot dropped out: do not wait out every getter's timeout
                 _LOGGER.debug("%s failed: %s", method, exc)
         return out
 

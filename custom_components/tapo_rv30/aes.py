@@ -188,8 +188,14 @@ class AesVacuumClient(TapoVacuumClient):
             return self._loopthread.run(self._query(method, params))
 
     async def _query_many(self, requests: list[tuple[str, dict | None]]) -> dict[str, dict]:
+        from kasa.exceptions import AuthenticationError
+
         dev = await self._connect()
-        resp = await dev.protocol.query({m: (p or {}) for m, p in requests})
+        try:
+            resp = await dev.protocol.query({m: (p or {}) for m, p in requests})
+        except AuthenticationError as exc:
+            await self._drop()
+            raise AuthError(str(exc)) from exc
         # A getter the robot does not support comes back as a SmartErrorCode in its slot,
         # not as an exception: leave it out, like the TPAP batch does.
         return {m: resp[m] for m, _ in requests if isinstance(resp.get(m), dict)}
@@ -204,6 +210,8 @@ class AesVacuumClient(TapoVacuumClient):
                     out = self._loopthread.run(self._query_many(requests))
                     self._multi_supported = True
                     return out
+                except AuthError:
+                    raise       # the password changed: ask for it, do not log in for every getter
                 except Exception as exc:
                     from kasa.exceptions import DeviceError
                     if isinstance(exc, DeviceError) and self._multi_supported is None:
@@ -213,6 +221,8 @@ class AesVacuumClient(TapoVacuumClient):
         for m, p in requests:
             try:
                 out[m] = self.send(m, p)["result"] or {}
+            except AuthError:
+                raise
             except Exception as exc:
                 _LOGGER.debug("%s failed: %s", m, exc)
         return out

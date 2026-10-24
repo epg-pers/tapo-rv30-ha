@@ -3,6 +3,7 @@ batching, map setup plans, the planner and voice names."""
 import base64
 import gzip
 import io
+import ssl
 import tarfile
 import types
 from datetime import datetime
@@ -138,10 +139,18 @@ def test_pinned_robot_failing_the_pin_fails_closed(tmp_path, monkeypatch):
     c = _client(tmp_path)
     c.expected_security = {"tls": 2, "pake": [2], "dac": False}
 
-    def post(*a, **k):
-        raise requests.exceptions.SSLError("bad cert")
-    monkeypatch.setattr(c, "_post", post)
+    def wrong_cert(*a, **k):
+        err = ssl.SSLCertVerificationError(1, "certificate verify failed")
+        err.verify_code = 20
+        raise requests.exceptions.SSLError(err)
+    monkeypatch.setattr(c, "_post", wrong_cert)
     with pytest.raises(T.AuthError, match="pinned"):
+        c._discover()
+
+    def dropped(*a, **k):     # the robot rebooting mid-handshake is not a wrong certificate
+        raise requests.exceptions.SSLError(ssl.SSLEOFError(8, "EOF occurred in violation of protocol"))
+    monkeypatch.setattr(c, "_post", dropped)
+    with pytest.raises(requests.exceptions.SSLError):
         c._discover()
 
 

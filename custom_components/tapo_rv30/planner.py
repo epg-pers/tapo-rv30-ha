@@ -403,7 +403,8 @@ class TapoPlanner:
         if not run:
             return
         code = (self.coordinator.data or {}).get("status_code")
-        if code in DOCKED_CODES and time.time() - run["started"] > 120:
+        # Docked part way through (recharging, washing the mop) the run is not over: busy says so.
+        if code in DOCKED_CODES and not self.coordinator.busy and time.time() - run["started"] > 120:
             if not run["docked"]:
                 self._log("done", f"Finished cleaning {self._and(run['names'])}.")
             self._run = None
