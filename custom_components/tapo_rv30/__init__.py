@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+from functools import partial
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_HOST, CONF_PASSWORD, CONF_USERNAME, Platform
@@ -34,13 +35,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await async_setup_frontend(hass, integration.version or "0")
     # Entries created before transport detection have no CONF_TRANSPORT: TPAP.
     client_cls = AesVacuumClient if entry.data.get(CONF_TRANSPORT) == TRANSPORT_AES else TapoVacuumClient
-    client = client_cls(
+    # The constructor creates the session cache directory: file I/O, so off the event loop.
+    client = await hass.async_add_executor_job(partial(
+        client_cls,
         host=entry.data[CONF_HOST],
         username=entry.data[CONF_USERNAME],
         password=entry.data[CONF_PASSWORD],
         port=DEFAULT_PORT,
         cache_dir=hass.config.path(".storage", "tapo_rv30"),
-    )
+    ))
     coordinator = TapoCoordinator(hass, client, entry)
     await coordinator.async_config_entry_first_refresh()
     coordinator.planner = TapoPlanner(hass, coordinator, entry)

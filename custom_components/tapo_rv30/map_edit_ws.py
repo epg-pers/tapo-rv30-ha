@@ -81,6 +81,7 @@ async def ws_edit_get(hass: HomeAssistant, connection: websocket_api.ActiveConne
     vol.Optional("rooms"): list,
     vol.Optional("order"): list,
 })
+@websocket_api.require_admin
 @websocket_api.async_response
 async def ws_edit_apply(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
     coord = _coord(hass, msg["entity_id"])

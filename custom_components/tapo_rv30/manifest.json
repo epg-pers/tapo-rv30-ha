@@ -31,5 +31,5 @@
     "ecdsa>=0.18",
     "python-kasa>=0.10.0"
   ],
-  "version": "0.26.1"
+  "version": "0.26.2b1"
 }

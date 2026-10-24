@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.26.2b1
+
+### Fixed
+
+- The websocket commands that change things (planner settings and actions, including matching areas, and applying map edits) now need an admin user. Reading stays open to every user.
+- The vacuum client is created off the event loop (its constructor makes the session cache folder).
+- The last clean map is PNG-encoded in the executor instead of on the event loop.
+
 ## v0.26.1
 
 ### Fixed

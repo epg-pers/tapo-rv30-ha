@@ -66,6 +66,7 @@ def ws_subscribe(hass: HomeAssistant, connection: websocket_api.ActiveConnection
 
 @websocket_api.websocket_command({vol.Required("type"): "tapo_rv30/planner/set", vol.Required("entity_id"): str,
                                   vol.Required("config"): dict})
+@websocket_api.require_admin
 @websocket_api.async_response
 async def ws_set(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
     planner = _planner(hass, msg["entity_id"])
@@ -85,6 +86,7 @@ async def ws_set(hass: HomeAssistant, connection: websocket_api.ActiveConnection
     vol.Required("action"): vol.In(["clean_now", "skip_today", "skip_room", "match_areas"]),
     vol.Optional("room"): str, vol.Optional("on", default=True): bool,
 })
+@websocket_api.require_admin
 @websocket_api.async_response
 async def ws_action(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
     planner = _planner(hass, msg["entity_id"])

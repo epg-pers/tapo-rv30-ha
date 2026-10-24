@@ -330,8 +330,9 @@ class TapoCoordinator(DataUpdateCoordinator):
                 if not already:
                     await self.hass.async_add_executor_job(self._fold_coverage, rec, detail)
                 if rts == ts:
-                    img = await self.hass.async_add_executor_job(render_record, detail)
-                    self.last_clean_image_bytes = _png(img)
+                    # Drawing and PNG encoding are both CPU-heavy: keep them off the event loop.
+                    self.last_clean_image_bytes = await self.hass.async_add_executor_job(
+                        lambda d=detail: _png(render_record(d)))
                     self.last_clean_hash = str(rts)
                     self.last_clean_info = {**decode_clean_record(rec),
                                             "map_name": b64name(detail.get("map_name", "")),
