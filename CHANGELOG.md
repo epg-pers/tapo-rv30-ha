@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.28.0b1
+## v0.28.0
 
 A second full bug hunt, by five fresh reviewers. Every finding was checked by a separate reviewer trying to disprove it, and by tests on a robot where possible; only what held up was fixed.
 
