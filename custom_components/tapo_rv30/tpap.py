@@ -856,6 +856,11 @@ class TapoVacuumClient:
         """Rooms and per-room settings of one preset."""
         return self.send("getCustomizationRuleData", {"map_id": int(map_id), "rule_id": int(rule_id)})["result"]
 
+    def add_preset(self, body: dict) -> int:
+        """Create a preset ({rule_name (b64), mode, map_id, clean_order, area_list}); the same
+        body getCustomizationRuleData returns, without rule_id. Returns the error_code."""
+        return self.send("addCustomizationRule", body).get("error_code", 0)
+
     def run_preset(self, rule_id: int, map_id: int, clean_order: bool = True) -> None:
         """Start a preset exactly as the app does (clean_mode 5); switches map first if needed."""
         current, _ = self.get_map_info()

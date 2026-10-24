@@ -930,7 +930,7 @@ class TapoRV30Panel extends HTMLElement {
     this._hass.callService(DOMAIN, "restore_map_backup", { map: String(b.map_id), file: b.file, confirm: true }, { entity_id: this._robot }, false, true)
       .then((res) => {
         const r = (res && res.response) ? res.response : res;
-        if (r && r.applied) status.textContent = `Restored "${b.map_name}".`;
+        if (r && r.applied) status.textContent = `Restored "${b.map_name}". ${r.next_steps || ""}`;
         else status.textContent = `Restore ended without confirmation: ${r && r.note ? r.note : "check the robot"}.`;
       })
       .catch((e) => { status.textContent = "Restore failed: " + (e.message || e); });
@@ -958,7 +958,7 @@ class TapoRV30Panel extends HTMLElement {
     pane.innerHTML = `<ha-card><div class="card"><h3><span>Consumables</span></h3>${bars || `<div class="empty">No consumable data.</div>`}</div></ha-card>
       <ha-card><div class="card"><h3><span>Actions</span></h3><div class="chips">${btns}</div></div></ha-card>
       <ha-card><div class="card"><h3><span>Map setup</span></h3>
-        <div class="s">Save the current map's no-go zones, virtual walls, carpets and room names, then re-apply them after the robot re-maps the floor. The map shape itself is rebuilt by the robot.</div>
+        <div class="s">The map's room names, no-go zones, walls, carpets, furniture, presets and schedules are saved automatically as they change. After a backup restore or a re-map, Restore setup puts back whatever is missing. Save setup takes a snapshot right now.</div>
         <div class="chips" style="margin-top:8px">
           <button class="btn" data-mapsetup="save"><ha-icon icon="mdi:content-save-cog"></ha-icon>Save setup</button>
           <button class="btn" data-mapsetup="apply"><ha-icon icon="mdi:backup-restore"></ha-icon>Restore setup</button>
@@ -976,13 +976,20 @@ class TapoRV30Panel extends HTMLElement {
         if (service === "save_map_setup") {
           const n = counts(r2.saved); status.textContent = n ? `Saved: ${n}.` : "Saved (nothing on this map to save yet).";
         } else {
-          const n = counts(r2.counts_after); status.textContent = n ? `Restored: ${n}.` : "Applied (the saved setup had nothing to restore).";
+          const p = r2.plan || {}, bits = [];
+          if ((p.room_names || []).length) bits.push(`${p.room_names.length} room names`);
+          Object.entries(p.zones || {}).forEach(([k, v]) => bits.push(`${v} ${k.replace(/_/g, " ")}`));
+          if (p.furniture) bits.push(`${p.furniture} furniture`);
+          if ((p.presets || []).length) bits.push(`presets: ${p.presets.join(", ")}`);
+          if ((p.schedules || []).length) bits.push(`${p.schedules.length} schedule(s)`);
+          const skip = (r2.skipped || []).length ? ` Skipped: ${r2.skipped.join("; ")}.` : "";
+          status.textContent = (bits.length ? `Put back: ${bits.join(", ")}.` : "Nothing to put back; the map already matches its saved setup.") + skip;
         }
       } catch (e) { status.textContent = "Error: " + (e.message || e); }
     };
     pane.querySelector('[data-mapsetup="save"]').onclick = () => run("save_map_setup", {}, "Saving...");
     pane.querySelector('[data-mapsetup="apply"]').onclick = () => {
-      if (!window.confirm("Restore the saved map setup? This writes the saved no-go zones, virtual walls, carpets and room names to the current map.")) return;
+      if (!window.confirm("Restore the saved map setup? This puts back the saved room names, no-go zones, virtual walls, carpets and furniture on the current map, and recreates any missing presets and schedules.")) return;
       run("apply_map_setup", { confirm: true }, "Restoring...");
     };
   }

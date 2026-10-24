@@ -21,10 +21,10 @@ robot in it is refused with a clear message. With one vacuum set up the target i
 | `go_to` | Drive to a point (x, y in map mm) on robots with go-to-point; `vacuum.stop` cancels it. |
 | `get_clean_records` | Cleaning history and lifetime totals as a service response. |
 | `send_raw` | Send any device method with params and get the response back (use with "Return response" in Developer Tools). Refused while the robot is working unless `force: true`; see [protocol.md](protocol.md) for why. |
-| `save_map_setup` | Snapshot a map's no-go zones, virtual walls, carpets and room names to `config/tapo_rv30/map_setups`. See [map-recovery.md](map-recovery.md). |
-| `apply_map_setup` | Write a saved map setup back onto the map (robot docked and idle, `confirm: true`). `source_map` applies another map's setup, for a re-mapped floor. See [map-recovery.md](map-recovery.md). |
+| `save_map_setup` | Snapshot a map's room names, no-go zones, virtual walls, carpets, furniture, presets and schedules to `config/tapo_rv30/map_setups` now (this also happens automatically as the map changes). See [map-recovery.md](map-recovery.md). |
+| `apply_map_setup` | Put back whatever the map is missing from its saved setup: room names, zones, walls, carpets, furniture, presets and schedules (robot docked and idle, `confirm: true`; `dry_run: true` only reports). `source_map` applies another map's setup, for a re-mapped floor. See [map-recovery.md](map-recovery.md). |
 | `fetch_cloud_map_backups` | Download your TP-Link cloud map backups to `config/tapo_rv30/map_backups` for safe keeping. See [map-recovery.md](map-recovery.md). |
-| `restore_map_backup` | Restore a whole map backup to the robot, locally - Home Assistant serves it on the LAN and the robot fetches and applies it (robot docked and idle, `confirm: true`). See [map-recovery.md](map-recovery.md). |
+| `restore_map_backup` | Restore a whole map backup to the robot, locally - Home Assistant serves it on the LAN and the robot fetches and applies it (robot docked and idle, `confirm: true`). Works even when the map is gone from the robot: `map` can be the lost map's name or id, and any existing map carries the restore. See [map-recovery.md](map-recovery.md). |
 
 Bad input (unknown room, map, option) raises an error with the available
 names in it, so it shows in the UI and in automation traces.

@@ -161,6 +161,18 @@ AES-encrypted, but the recovery path does not live there.)
 has downloaded. Note that deleting a map in the app deletes its cloud backup too, and recovery
 overwrites a map the robot still has - so fetch backups ahead of time and keep the map around.
 
+**Restoring a map that no longer exists.** `mapRecovery` only accepts a `map_id` the robot
+currently has (otherwise -3016, the same "no such map" code `getMapData` uses). But the backup
+lands under the map id it was taken from, not the one passed: with the original map gone it is
+recreated under its old id as the current map, unnamed and with `is_saved: false` in
+`getMapInfo`, and saving it in the app keeps that id. So after a total loss, any map (even a
+throwaway quick mapping run) can carry the restore. The grid and room segmentation come back;
+room names, some no-go zones and the furniture did not, and presets
+(`getCustomizationRulesInfo`) and schedules had gone with the map, which is why the integration
+keeps its own map setup snapshots (`addCustomizationRule` with the same body
+`getCustomizationRuleData` returns, minus `rule_id`, recreates a preset; the robot assigns a new
+id).
+
 ### Writing the editable layers (setAreaInfo)
 
 `setAreaInfo` is the method the app uses for

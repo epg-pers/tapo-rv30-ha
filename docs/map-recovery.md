@@ -60,18 +60,27 @@ Each backup is pictured from the best source it has: the robot's own snapshot im
 there isn't one - the saved map drawn exactly like the live map. The `.bkmap` file itself is
 also decoded, so each backup shows its explored floor area, dock position and room count.
 
-## Save and re-apply your map setup
+## Your map setup is saved automatically
 
-A lighter-weight recovery for the common case - you re-mapped a floor and just want your zones
-and room names back - without touching the map shape at all.
+A backup restore brings back the map's shape and room boundaries, but not everything layered on
+top: in a real recovery the room names, one of two no-go zones and the furniture came back
+missing, and the presets and schedules pointing at the map had gone with it. So the integration
+keeps a **map setup snapshot** of each map: room names, no-go zones, virtual walls, carpets,
+furniture, and the presets and schedules for that map.
 
-- **Save:** `tapo_rv30.save_map_setup` (or the **Save setup** button on the sidebar page's
-  **Maintenance** tab) snapshots the current map's no-go zones, virtual walls, carpets and room
-  names to `config/tapo_rv30/map_setups/<map_id>.json`. A good habit is an automation that
-  saves after any map edit.
-- **Restore:** `tapo_rv30.apply_map_setup` (or **Restore setup**) writes the saved setup back
-  onto the map. The robot must be docked and idle. Because zones and walls are stored in
-  real-world coordinates, they drop back into exactly the right places.
+- It is written to `config/tapo_rv30/map_setups/<map_id>.json` **automatically** whenever any of
+  that changes, from data the integration already reads. No extra calls to the robot.
+- A snapshot that looks like a lost or freshly restored map (no rooms, or fewer named rooms)
+  **never replaces a good one**; a warning is logged instead. Every distinct snapshot is also
+  kept in `map_setups/history/` (the last 30 per map).
+- **Save setup** (`tapo_rv30.save_map_setup`) on the sidebar page's **Maintenance** tab takes one
+  right now.
+
+**Put it back:** `tapo_rv30.apply_map_setup` (or **Restore setup** on the Maintenance tab) compares
+the map with its snapshot and writes only what is missing or different: room names, zones, walls,
+carpets, furniture, and any preset or schedule that no longer exists (schedules are re-pointed at
+the recreated presets, which get new ids). Run it with `dry_run: true` first to see exactly what
+it would do. The robot must be docked and idle.
 
 ### Recovering a floor the robot re-mapped
 
@@ -87,9 +96,39 @@ target:
   entity_id: vacuum.jarvis
 ```
 
-What transfers: no-go zones, virtual walls, carpets, room names. What doesn't: the exact room
-*boundaries* (the robot re-segments the new shape) and per-room suction/water/passes (those are
-preset-only on RV30 1.3.3 firmware).
+On a re-mapped floor the rooms are segmented afresh with new ids, so room names and presets only
+transfer where the room ids still line up; anything that cannot be placed is listed under
+`skipped`. Zones, walls, carpets and furniture are in real-world coordinates and drop back into
+exactly the right places.
+
+## If the robot has lost every map
+
+This is the recovery that has been done for real on an RV30 Max Plus, step by step:
+
+1. **Check the Tapo app.** If it still has the map or a cloud backup, restoring there is simplest.
+2. **Give the robot any map.** It only accepts a restore onto a map it already has. In the Tapo
+   app, run a quick mapping pass (it does not need to be good) and let it dock.
+3. **Restore the backup** from the Backups tab, or:
+   ```yaml
+   service: tapo_rv30.restore_map_backup
+   data:
+     map: Downstairs        # the lost map's name (from its saved setup) or its id
+     confirm: true
+   target:
+     entity_id: vacuum.jarvis
+   ```
+   The service uses the throwaway map as the carrier. The robot brings the backup back under the
+   lost map's **original id**, so presets, schedules and history that referred to it line up
+   again. The response says where it landed and what to do next.
+4. **Save it in the Tapo app.** The restored map arrives *unsaved* and unnamed; open it in the
+   app, save it with its old name.
+5. **Put the layers back:** `apply_map_setup` on that map (`dry_run: true` first if you like).
+6. **Delete the throwaway map** in the app.
+
+**What causes it:** this robot has lost every map twice. The second time came minutes after calls
+from the robot's first-time setup family (`setInheritInfo`, which decides whether the robot keeps
+its previous data, and friends). That is not proven to be the cause, but `send_raw` now refuses
+those, and other system and factory calls, outright.
 
 ## Keep local copies of your cloud backups
 
@@ -108,7 +147,8 @@ So fetch your backups ahead of time, and keep the map around.
 | Layer | Lost when | Put back by |
 | --- | --- | --- |
 | Map shape (walls) | re-map, map delete | `restore_map_backup` (from a backup), or the robot re-mapping |
-| Rooms' names | re-map, edit | `restore_map_backup`, or `apply_map_setup` |
-| No-go zones, virtual walls, carpets | re-map, edit, delete | `restore_map_backup`, or `apply_map_setup` (exact positions) |
+| Rooms' names | re-map, edit, restore | `apply_map_setup` (from the automatic snapshot) |
+| No-go zones, virtual walls, carpets, furniture | re-map, edit, delete, restore | `restore_map_backup` and `apply_map_setup` (exact positions) |
+| Presets and schedules | map loss | `apply_map_setup` (recreated, schedules re-pointed) |
 | Room boundaries | re-map | `restore_map_backup`; approximate via `apply_map_setup` |
 | Per-room suction/water/passes | - | preset-only on 1.3.3 firmware |

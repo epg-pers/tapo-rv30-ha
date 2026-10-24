@@ -184,8 +184,11 @@ apply_map_setup:
       example: Downstairs
       selector:
         text: {}
+    dry_run:
+      default: false
+      selector:
+        boolean: {}
     confirm:
-      required: true
       default: false
       selector:
         boolean: {}

@@ -17,6 +17,7 @@ from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from PIL import Image, ImageDraw
 
+from . import mapsnapshot
 from .const import (
     ACTIVE_POLL_INTERVAL,
     CLEANING_CODES,
@@ -107,6 +108,9 @@ class TapoCoordinator(DataUpdateCoordinator):
         self.dock_actions: list[str] = []              # probed once (Omni docks)
         self.bool_settings: dict[str, bool] = {}
         self.presets: list[dict] = []
+        self._presets_raw: list[dict] | None = None    # getCustomizationRuleData bodies; None = last read failed
+        self._map_layers: dict | None = None           # {map_id, map_name, area_list, furniture_list}
+        self._snapshot_hash: dict[int, str] = {}       # map_id -> content hash last written
         self._caps_fetched = False
         self._caps_attempts = 0
         self._last_record_ts: int | None = None   # newest getCleanRecords timestamp seen
@@ -200,6 +204,10 @@ class TapoCoordinator(DataUpdateCoordinator):
                     _LOGGER.debug("Map refresh skipped: %s", exc)
                     self._map_tick = self._map_cycles - 1   # try again next poll
             await self._refresh_settings()
+            try:
+                await self._auto_snapshot()
+            except Exception as exc:   # never let snapshotting break polling
+                _LOGGER.debug("Map snapshot failed: %s", exc)
         elif self.map_id is not None:
             try:
                 await self.hass.async_add_executor_job(self._refresh_position)
@@ -433,22 +441,84 @@ class TapoCoordinator(DataUpdateCoordinator):
             _LOGGER.debug("Preset read failed: %s", exc)
 
     def _read_presets(self) -> list[dict]:
+        self._presets_raw = None
         rules = self.client.get_presets()
         if not rules:
+            self._presets_raw = []
             return []
         names = self.map_names()
-        out = []
+        out, raw, complete = [], [], True
         for rule in rules:
             map_id = rule.get("map_id")
             try:
                 detail = self.client.get_preset_detail(map_id, rule["rule_id"])
+                raw.append({**detail, "rule_id": rule["rule_id"], "map_id": map_id})
             except Exception as exc:
                 _LOGGER.debug("Preset %s detail failed: %s", rule.get("rule_id"), exc)
                 detail = None
+                complete = False
             room_names = ({r["id"]: b64name(r.get("name", "")) for r in self.rooms}
                           if map_id == self.map_id else self._room_names_for(map_id))
             out.append(decode_preset(rule, detail, room_names, names.get(map_id)))
+        self._presets_raw = raw if complete else None
         return out
+
+    async def _auto_snapshot(self) -> None:
+        """Keep config/tapo_rv30/map_setups/<map_id>.json in step with the map's layers,
+        presets and schedules, from data already polled (no extra robot calls). A snapshot that
+        looks like a lost or freshly restored map (no rooms, or fewer named rooms) never
+        replaces a good one; every distinct snapshot is also kept in map_setups/history."""
+        layers = self._map_layers
+        if not layers or self._presets_raw is None or layers.get("map_id") != self.map_id:
+            return
+        rules = (self.settings.get("schedules") or {}).get("rule_list")
+        if rules is None:
+            return
+        snap = mapsnapshot.build(layers["map_id"], layers.get("map_name"), layers["area_list"],
+                                 layers["furniture_list"], self._presets_raw, rules,
+                                 time.strftime("%Y-%m-%dT%H:%M:%S"))
+        digest = mapsnapshot.content_hash(snap)
+        if self._snapshot_hash.get(snap["map_id"]) == digest:
+            return
+        folder = self.hass.config.path(DOMAIN, "map_setups")
+
+        def _write() -> str:
+            import json
+            import os
+            os.makedirs(os.path.join(folder, "history"), exist_ok=True)
+            latest = os.path.join(folder, f"{snap['map_id']}.json")
+            old = None
+            if os.path.exists(latest):
+                try:
+                    with open(latest) as fh:
+                        old = json.load(fh)
+                except (OSError, ValueError):
+                    old = None
+            if old is not None and mapsnapshot.content_hash(old) == digest:
+                return "unchanged"
+            stamp = time.strftime("%Y%m%d-%H%M%S")
+            with open(os.path.join(folder, "history", f"{snap['map_id']}_{stamp}.json"), "w") as fh:
+                json.dump(snap, fh)
+            hist = sorted(f for f in os.listdir(os.path.join(folder, "history"))
+                          if f.startswith(f"{snap['map_id']}_"))
+            for f in hist[:-30]:
+                os.remove(os.path.join(folder, "history", f))
+            if mapsnapshot.is_degraded(old, snap):
+                return "degraded"
+            with open(latest, "w") as fh:
+                json.dump(snap, fh)
+            return "written"
+
+        try:
+            outcome = await self.hass.async_add_executor_job(_write)
+        except OSError as exc:
+            _LOGGER.debug("Map snapshot not written: %s", exc)
+            return
+        self._snapshot_hash[snap["map_id"]] = digest
+        if outcome == "degraded":
+            _LOGGER.warning("%s: map %s looks degraded (rooms missing or unnamed); kept the previous "
+                            "map setup snapshot. Run apply_map_setup to put the layers back.",
+                            self.device_name, snap["map_id"])
 
     _room_name_cache: dict[int, dict[int, str]] = {}
 
@@ -622,6 +692,9 @@ class TapoCoordinator(DataUpdateCoordinator):
         self.map_id = current_id
         self.map_name = b64name(map_data.get("map_name", ""))
         self.rooms = [a for a in map_data.get("area_list", []) if a.get("type") == "room"]
+        self._map_layers = {"map_id": current_id, "map_name": self.map_name,
+                            "area_list": list(map_data.get("area_list") or []),
+                            "furniture_list": list(map_data.get("furniture_list") or [])}
         self._map_base, self.room_geometry, self.map_geometry = render_map(map_data)
         self._live_map = {k: map_data.get(k) for k in ("width", "height", "pix_len", "map_data", "resolution", "real_origin_coor", "area_list", "map_id")}
         try:

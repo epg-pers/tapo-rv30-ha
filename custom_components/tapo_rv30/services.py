@@ -28,6 +28,19 @@ SAFE_WHILE_BUSY = frozenset({
     "setSwitchClean", "setRobotPause", "setSwitchCharge", "playSelectAudio",
 })
 
+# Onboarding, system and factory calls from the robot's dispatcher. Never sent from HA, even
+# with force: setInheritInfo belongs to first-time setup (keep the old maps or start fresh) and
+# is the prime suspect for a total map wipe on this robot.
+BLOCKED_METHODS = frozenset({
+    "setInheritInfo", "setQuickSetupInfo", "setQuickSetupExtraInfo", "setIotCheckFlag",
+    "deviceReset", "deviceReboot", "firmwareUpgrade", "setWifiInfo", "unbindDevice",
+    "setDeviceInfo", "setLidarEnabled", "closeDeviceBLE",
+    "set_inherit_info", "set_quick_setup_info", "set_wifi_info", "set_wireless_info",
+    "set_factory_mode", "exec_atcmd", "erase_flash", "fw_download", "account_sync",
+    "connect_cloud", "device_reset", "device_reboot", "unbind_device", "set_lidar_enabled",
+    "set_forwarding", "debug_nbus", "test",
+})
+
 
 def _coordinators(hass: HomeAssistant, call: ServiceCall) -> list[TapoCoordinator]:
     """The coordinator(s) a call targets: named vacuum entities, or a device, area, floor or
@@ -347,6 +360,10 @@ def async_setup_services(hass: HomeAssistant) -> None:
         params = call.data.get("params") or {}
         if not isinstance(params, dict):
             raise ServiceValidationError(f"{call.service}: 'params' must be a mapping")
+        if method in BLOCKED_METHODS or method.lower() in BLOCKED_METHODS:
+            raise ServiceValidationError(
+                f"{call.service}: '{method}' is an onboarding, system or factory call and is blocked. "
+                "Calls like this have wiped this robot's maps; use the Tapo app for them.")
         # Probing a robot mid-run is how the author lost a map set and the robot's
         # clean history (see README, "Protocol notes"). Known-safe status reads are
         # allowed; anything else waits for the robot to be idle unless forced.
@@ -447,74 +464,130 @@ def async_setup_services(hass: HomeAssistant) -> None:
                 f"{call.service}: no unique map matching '{ref}'. Available: {sorted(names.values())}")
         return hits[0], names
 
+    def _robot_state(coord: TapoCoordinator, map_id: int) -> tuple[dict, list, list]:
+        """(map data, raw preset details, raw schedules) as the robot has them now. Blocking."""
+        data = coord.client.get_map_data(map_id)
+        presets = []
+        for rule in coord.client.get_presets():
+            if rule.get("map_id") == map_id:
+                detail = coord.client.get_preset_detail(map_id, rule["rule_id"])
+                presets.append({**detail, "rule_id": rule["rule_id"], "map_id": map_id})
+        return data, presets, coord.client.get_schedules()
+
+    def _snapshots_folder() -> str:
+        return hass.config.path(DOMAIN, "map_setups")
+
+    def _find_snapshot(map_id: int | None, ref) -> dict | None:
+        """The saved snapshot for map_id, or (ref given) the one whose saved id or name matches."""
+        import glob
+        import json
+        import os
+
+        from .mapdata import fold
+        folder = _snapshots_folder()
+        if ref in (None, ""):
+            p = os.path.join(folder, f"{map_id}.json")
+            if not os.path.exists(p):
+                return None
+            with open(p) as fh:
+                return json.load(fh)
+        want = fold(str(ref).strip())
+        for p in sorted(glob.glob(os.path.join(folder, "*.json"))):
+            try:
+                with open(p) as fh:
+                    d = json.load(fh)
+            except (OSError, ValueError):
+                continue
+            if str(d.get("map_id")) == want or fold(d.get("map_name") or "") == want:
+                return d
+        return None
+
     async def handle_save_map_setup(call: ServiceCall) -> ServiceResponse:
         import json
         import os
         import time
+
+        from . import mapsnapshot
         coord = _one(hass, call)
         map_id, names = await _setup_map_id(call, coord)
-        setup = await hass.async_add_executor_job(coord.client.get_area_setup, map_id)
-        setup["map_name"] = names.get(map_id)
-        setup["saved_at"] = time.strftime("%Y-%m-%dT%H:%M:%S")
-        folder = hass.config.path(DOMAIN, "map_setups")
-        await hass.async_add_executor_job(lambda: os.makedirs(folder, exist_ok=True))
-        path = os.path.join(folder, f"{map_id}.json")
-        await hass.async_add_executor_job(lambda: json.dump(setup, open(path, "w")))  # noqa: SIM115
-        return {"map_id": map_id, "map_name": names.get(map_id), "saved": setup["counts"],
-                "file": f"map_setups/{map_id}.json"}
+        data, presets, schedules = await hass.async_add_executor_job(_robot_state, coord, map_id)
+        snap = mapsnapshot.build(map_id, names.get(map_id), data.get("area_list", []),
+                                 data.get("furniture_list", []), presets, schedules,
+                                 time.strftime("%Y-%m-%dT%H:%M:%S"))
+        folder = _snapshots_folder()
+
+        def _write() -> None:
+            os.makedirs(os.path.join(folder, "history"), exist_ok=True)
+            stamp = time.strftime("%Y%m%d-%H%M%S")
+            for path in (os.path.join(folder, f"{map_id}.json"),
+                         os.path.join(folder, "history", f"{map_id}_{stamp}.json")):
+                with open(path, "w") as fh:
+                    json.dump(snap, fh)
+
+        await hass.async_add_executor_job(_write)
+        return {"map_id": map_id, "map_name": names.get(map_id), "saved": snap["counts"],
+                "furniture": len(snap["furniture"]), "presets": len(snap["presets"]),
+                "schedules": len(snap["schedules"]), "file": f"map_setups/{map_id}.json"}
 
     async def handle_apply_map_setup(call: ServiceCall) -> ServiceResponse:
         import asyncio
-        import json
-        import os
+
+        from . import mapsnapshot
         coord = _one(hass, call)
-        if not call.data.get("confirm"):
-            raise ServiceValidationError(f"{call.service}: this writes rooms/zones to the map; set confirm: true")
-        if coord.busy:
+        dry_run = bool(call.data.get("dry_run"))
+        if not dry_run and not call.data.get("confirm"):
+            raise ServiceValidationError(
+                f"{call.service}: this writes rooms, zones, furniture, presets and schedules; "
+                "set confirm: true (or dry_run: true to see what it would do)")
+        if coord.busy and not dry_run:
             raise ServiceValidationError(f"{call.service}: {coord.device_name} must be docked and idle")
         map_id, names = await _setup_map_id(call, coord)
-        folder = hass.config.path(DOMAIN, "map_setups")
         src = call.data.get("source_map")
-
-        def _load_setup() -> dict | None:
-            # source_map: apply a snapshot saved under a DIFFERENT map (the lost-and-remapped
-            # case - the new map has a new id). Match by saved id or saved map name. Default:
-            # this map's own snapshot.
-            if src in (None, ""):
-                p = os.path.join(folder, f"{map_id}.json")
-                return json.load(open(p)) if os.path.exists(p) else None
-            import glob
-
-            from .mapdata import fold
-            want = fold(str(src).strip())
-            for p in sorted(glob.glob(os.path.join(folder, "*.json"))):
-                try:
-                    d = json.load(open(p))  # noqa: SIM115
-                except (OSError, ValueError):
-                    continue
-                if str(d.get("map_id")) == want or fold(d.get("map_name") or "") == want:
-                    return d
-            return None
-
-        setup = await hass.async_add_executor_job(_load_setup)
-        if setup is None:
+        snap = await hass.async_add_executor_job(_find_snapshot, map_id, src)
+        if snap is None:
             where = f"matching source_map '{src}'" if src else f"for map {map_id}"
             raise ServiceValidationError(f"{call.service}: no saved setup {where}; run save_map_setup first")
+        data, presets, schedules = await hass.async_add_executor_job(_robot_state, coord, map_id)
+        plan = mapsnapshot.plan(snap, map_id, data.get("area_list", []), data.get("furniture_list", []),
+                                presets, schedules)
+        result = {"map_id": map_id, "map_name": names.get(map_id),
+                  "from_setup": snap.get("map_name") or snap.get("map_id"), "saved_at": snap.get("saved_at"),
+                  "plan": mapsnapshot.summary(plan), "dry_run": dry_run}
+        if dry_run:
+            return result
         # setAreaInfo writes the active map; switch to the target first.
         info = await hass.async_add_executor_job(coord.client.send, "getMapInfo")
         if (info.get("result") or {}).get("current_map_id") != map_id:
             await hass.async_add_executor_job(coord.client.set_current_map, map_id)
             await asyncio.sleep(5)
-        before = (await hass.async_add_executor_job(coord.client.get_area_setup, map_id))["counts"]
+        written: dict[str, int] = {}
+        skipped = list(plan["skipped"])
         try:
-            applied = await hass.async_add_executor_job(coord.client.set_area_setup, map_id, setup)
+            if plan["rooms"]:
+                written["room"] = await hass.async_add_executor_job(
+                    coord.client.set_areas, map_id, "room", plan["rooms"])
+            for t, items in plan["zones"].items():
+                written[t] = await hass.async_add_executor_job(coord.client.set_areas, map_id, t, items)
+            if plan["furniture"]:
+                written["furniture"] = await hass.async_add_executor_job(
+                    coord.client.set_furniture, map_id, plan["furniture"])
+            for body in plan["presets"]:
+                written.setdefault("presets", 0)
+                if await hass.async_add_executor_job(coord.client.add_preset, body) == 0:
+                    written["presets"] += 1
+            if plan["schedules"]:
+                _, presets_now, _ = await hass.async_add_executor_job(_robot_state, coord, map_id)
+                ready, why = mapsnapshot.resolve_schedules(plan["schedules"], presets_now, map_id)
+                skipped += why
+                for rule in ready:
+                    await hass.async_add_executor_job(coord.client.add_schedule, rule)
+                written["schedules"] = len(ready)
         except Exception as exc:
-            raise HomeAssistantError(f"{call.service}: {exc}") from exc
-        after = (await hass.async_add_executor_job(coord.client.get_area_setup, map_id))["counts"]
+            raise HomeAssistantError(f"{call.service}: {exc} (written so far: {written})") from exc
+        await coord.async_settings_changed()
         await coord.async_request_map_refresh()
-        return {"map_id": map_id, "map_name": names.get(map_id),
-                "from_setup": setup.get("map_name") or setup.get("map_id"), "saved_at": setup.get("saved_at"),
-                "applied": applied, "counts_before": before, "counts_after": after}
+        result.update(written=written, skipped=skipped)
+        return result
 
     async def handle_restore_map_backup(call: ServiceCall) -> ServiceResponse:
         """Restore a map backup to the robot. By default HA serves the backup it already holds
@@ -534,17 +607,52 @@ def async_setup_services(hass: HomeAssistant) -> None:
             raise ServiceValidationError(f"{call.service}: this overwrites a map on the robot; set confirm: true")
         if coord.busy:
             raise ServiceValidationError(f"{call.service}: {coord.device_name} must be docked and idle")
-        map_id, names = await _setup_map_id(call, coord)
+        import re
+
+        from . import mapsnapshot
+        from .mapdata import fold
         folder = hass.config.path(DOMAIN, "map_backups")
+        names = await hass.async_add_executor_job(coord.map_names)
+        ref, fname = call.data.get("map"), call.data.get("file")
+        # Which map the backup belongs to. It may no longer exist on the robot (the lost-map
+        # case), so beyond the robot's own maps, accept a bare map id, a saved setup's map
+        # name, or the id in the backup file's name.
+        backup_id = None
+        snap_name = None
+        if ref not in (None, ""):
+            want = fold(str(ref).strip())
+            hits = [mid for mid, n in names.items() if str(mid) == want or fold(n) == want]
+            if len(hits) > 1:
+                raise ServiceValidationError(f"{call.service}: '{ref}' matches several maps: {sorted(names.values())}")
+            if hits:
+                backup_id = hits[0]
+            elif want.isdigit():
+                backup_id = int(want)
+            else:
+                snap = await hass.async_add_executor_job(_find_snapshot, None, ref)
+                if snap:
+                    backup_id, snap_name = snap.get("map_id"), snap.get("map_name")
+        if backup_id is None and fname:
+            m = re.match(r"^(?:cloud|local)_(\d+)_\d+\.(?:bin|bkmap)$", os.path.basename(str(fname)))
+            if m:
+                backup_id = int(m.group(1))
+        if backup_id is None and ref in (None, ""):
+            backup_id = coord.map_id
+        if backup_id is None:
+            raise ServiceValidationError(
+                f"{call.service}: no map matching '{ref}' on the robot or in the saved map setups; "
+                f"pass the map id or file: (robot maps: {sorted(names.values())})")
+        try:
+            map_id, carrier = mapsnapshot.restore_target(names, coord.map_id, backup_id)
+        except ValueError as exc:
+            raise ServiceValidationError(f"{call.service}: {exc}") from exc
 
         def _pick() -> str | None:
-            fname = call.data.get("file")
             if fname:
                 p = os.path.join(folder, os.path.basename(str(fname)))
                 return p if os.path.isfile(p) else None
-            import re
             # cloud_<map_id>_<timestamp>.bin only - never the _snapshot preview image.
-            pat = re.compile(rf"^cloud_{map_id}_\d+\.bin$")
+            pat = re.compile(rf"^cloud_{backup_id}_\d+\.bin$")
             cands = sorted(f for f in os.listdir(folder) if pat.match(f))
             return os.path.join(folder, cands[-1]) if cands else None
 
@@ -571,14 +679,14 @@ def async_setup_services(hass: HomeAssistant) -> None:
                                         call.data.get("verification_code"))
                 best = None
                 for b in cloud.map_backups(thing):
-                    if b.get("mapId") == map_id and (best is None
+                    if b.get("mapId") == backup_id and (best is None
                             or (b.get("timestamp") or 0) > (best.get("timestamp") or 0)):
                         best = b
                 return best
 
             best = await hass.async_add_executor_job(_cloud_backup)
             if not best or not best.get("mapUrl"):
-                raise ServiceValidationError(f"{call.service}: no cloud backup for map {map_id}")
+                raise ServiceValidationError(f"{call.service}: no cloud backup for map {backup_id}")
             url = best["mapUrl"]
             md5 = best.get("mapMd5")
             src = "cloud"
@@ -586,7 +694,7 @@ def async_setup_services(hass: HomeAssistant) -> None:
             path = await hass.async_add_executor_job(_pick)
             if path is None:
                 raise ServiceValidationError(
-                    f"{call.service}: no backup file for map {map_id} in {folder}; "
+                    f"{call.service}: no backup file for map {backup_id} in {folder}; "
                     "run fetch_cloud_map_backups first, or pass file:")
             md5 = await hass.async_add_executor_job(
                 lambda: hashlib.md5(open(path, "rb").read()).hexdigest())  # noqa: SIM115
@@ -618,12 +726,33 @@ def async_setup_services(hass: HomeAssistant) -> None:
                 store.pop(token, None)
         await coord.async_request_map_refresh()
         status = process.get("status")
+        # Where did it land? The robot restores under the backup's own map id; if that id was
+        # gone it comes back as a new, unsaved map that must be saved in the Tapo app.
+        landed = None
+        if status == 3:
+            try:
+                _, map_list = await hass.async_add_executor_job(coord.client.get_map_info)
+                landed = next((m for m in map_list if m.get("map_id") == backup_id), None)
+            except Exception:  # the restore itself already succeeded
+                landed = None
+        saved = bool(landed) and landed.get("is_saved", True) is not False
         # The robot reports status 3 when the map is applied, 13 on failure, 2 while still working.
         note = ("restore failed on the robot (status 13); if the backup is served through a reverse "
                 "proxy, set base_url to HA's direct LAN address" if status == 13
                 else "still applying when polling ended" if status == 2 else None)
-        return {"map_id": map_id, "map_name": names.get(map_id), "source": src, "md5": md5,
-                "url": url, "error_code": code, "process": process, "applied": status == 3, "note": note}
+        next_steps = None
+        if status == 3 and landed and not saved:
+            next_steps = (f"The map came back as a new, unsaved map (id {backup_id}). Save it in the Tapo app "
+                          "(keep the name), then run apply_map_setup on it to put back room names, no-go zones, "
+                          "furniture, presets and schedules. Delete any throwaway map afterwards.")
+        elif status == 3:
+            next_steps = ("Run apply_map_setup on this map (dry_run: true first to preview) to put back anything "
+                          "the backup does not carry: room names, zones, furniture, presets, schedules.")
+        return {"map_id": map_id, "map_name": names.get(map_id), "backup_map_id": backup_id,
+                "backup_map_name": names.get(backup_id) or snap_name, "carrier": carrier,
+                "restored_map_saved": saved if status == 3 else None, "source": src, "md5": md5,
+                "url": url, "error_code": code, "process": process, "applied": status == 3,
+                "note": note, "next_steps": next_steps}
 
     hass.services.async_register(DOMAIN, "restore_map_backup", handle_restore_map_backup,
                                  supports_response=SupportsResponse.ONLY)
