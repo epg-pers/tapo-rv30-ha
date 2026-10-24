@@ -416,7 +416,8 @@ class TapoRV30Card extends HTMLElement {
     el.hidden = false;
     el.innerHTML = "";
     for (const id of r.presets) {
-      const s = this._st(id); if (!s) continue;
+      // A preset deleted on the robot leaves an unavailable button behind: no chip for it.
+      const s = this._st(id); if (!s || s.state === "unavailable") continue;
       const label = (s.attributes.friendly_name || id).replace(/^.*?Preset\s*/i, "");
       const b = document.createElement("button"); b.className = "chip";
       b.innerHTML = `<ha-icon icon="${ICONS.preset}"></ha-icon><span>${esc(label)}</span>`;

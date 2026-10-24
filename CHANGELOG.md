@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.27.0b2
+## v0.27.0
 
 A full bug hunt across the integration. Everything below was found by reading and testing the code, then fixed.
 
@@ -25,7 +25,7 @@ A full bug hunt across the integration. Everything below was found by reading an
 - Services: `update_preset` finds rooms on the preset's own map; `run_schedule` accepts ids like "1" and checks the robot is free before changing levels; ambiguous partial room names are refused instead of cleaning every match; `passes` must be 1 to 3; `clean_zone` explains bad zones; `save_map_setup` keeps a good setup unless forced; a missing backup folder gives a clear message; `remote_drive` is removed with the integration.
 - Schedule restore compares map, rooms and preset, not just time; schedules on another floor show their own room names; long schedule lists are read past the first page.
 - Voice: "pause the robot" pauses instead of stopping; ambiguous room names ask which one; "vacuum go home" and "clean the whole house" do what they say.
-- Card: no blank card after editing its config or when the vacuum appears late; no animation running after the card is closed; 90 and 270 degree rotation fits; selections clear on a floor switch.
+- Card: presets deleted on the robot no longer leave a dead chip; no blank card after editing its config or when the vacuum appears late; no animation running after the card is closed; 90 and 270 degree rotation fits; selections clear on a floor switch.
 - Panel: switching tab while History is loading no longer throws an error. Forms are no longer wiped by every poll while the robot works; the Planner tab no longer crashes without a map; editing another floor's schedule no longer moves it to this floor; an offline robot is still listed; remote drive state resets when switching robots; history charts use local days; planner live updates survive a reload.
 - Cloud backup fetch: a mistyped verification code can be retried.
 - Docs: the Sweep Walk field is `sweepWalk`.
