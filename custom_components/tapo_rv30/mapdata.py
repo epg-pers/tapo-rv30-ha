@@ -564,3 +564,41 @@ def preset_body(name: str, map_id: int, rooms: list[dict], clean_order: bool = T
     if rule_id is not None:
         body["rule_id"] = int(rule_id)
     return body
+
+
+def pick_segments(segment_ids: list[str], known: dict[int, set[int]], active: int | None,
+                  names: dict[int, str] | None = None) -> tuple[int, list[int], list[str]]:
+    """Choose what vacuum.clean_area can clean from Home Assistant's segment ids.
+
+    Home Assistant keeps every "<map_id>:<room_id>" ever mapped to an area, so after a
+    remap or a lost map an area can still hold ids the robot no longer has. Those (and
+    bare pre-0.4 ids) are dropped. If what is left spans several maps, the active map
+    wins; with no active map among them it is an error, as is nothing left at all.
+    Returns (map_id, room_ids, dropped_ids); raises ValueError with a readable reason.
+    """
+    names = names or {}
+    by_map: dict[int, list[int]] = {}
+    dropped: list[str] = []
+    for seg in segment_ids:
+        try:
+            map_id, room_id = (int(p) for p in str(seg).split(":", 1))
+        except ValueError:
+            dropped.append(str(seg))
+            continue
+        if room_id in known.get(map_id, set()):
+            if room_id not in by_map.setdefault(map_id, []):
+                by_map[map_id].append(room_id)
+        else:
+            dropped.append(str(seg))
+    if not by_map:
+        raise ValueError("none of the selected areas match a room on the robot's maps any more; "
+                         "redo the area mapping (vacuum settings, Map vacuum segments to areas)")
+    if len(by_map) > 1:
+        if active not in by_map:
+            raise ValueError("the selected areas are on different maps ("
+                             + ", ".join(names.get(m, str(m)) for m in by_map)
+                             + "); the vacuum can only clean rooms on one map per run")
+        dropped += [f"{m}:{r}" for m, rooms in by_map.items() if m != active for r in rooms]
+        by_map = {active: by_map[active]}
+    (map_id, rooms), = by_map.items()
+    return map_id, rooms, dropped

@@ -138,3 +138,23 @@ def test_resolve_explicit_map():
 def test_resolve_errors(args, exc, fragment):
     with pytest.raises(exc, match=fragment):
         R(*args)
+
+
+def test_pick_segments_drops_stale_and_prefers_active_map():
+    import pytest
+
+    from custom_components.tapo_rv30.mapdata import pick_segments
+    known = {10: {1, 2, 4}, 20: {1, 3}}
+    # stale map 99, bare old id, room 7 gone: dropped; the rest kept in order
+    assert pick_segments(["99:1", "3", "10:7", "10:2", "10:4"], known, 10) == (10, [2, 4], ["99:1", "3", "10:7"])
+    # spans two live maps: the active one wins
+    m, rooms, dropped = pick_segments(["10:1", "20:3"], known, 20)
+    assert (m, rooms, dropped) == (20, [3], ["10:1"])
+    # spans two maps, neither active: refused with names
+    with pytest.raises(ValueError, match="Up, Down"):
+        pick_segments(["10:1", "20:3"], known, 55, {10: "Up", 20: "Down"})
+    # nothing left
+    with pytest.raises(ValueError, match="redo the area mapping"):
+        pick_segments(["99:1", "5"], known, 10)
+    # duplicates collapse
+    assert pick_segments(["10:1", "10:1"], known, 10)[1] == [1]

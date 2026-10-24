@@ -793,6 +793,17 @@ class TapoCoordinator(DataUpdateCoordinator):
             out.append((map_id, map_name, rooms))
         return out
 
+    def segment_index(self) -> tuple[int, dict[int, set[int]], dict[int, str]]:
+        """(active map id, {map_id: room ids}, {map_id: name}) read live, for clean_area."""
+        current_id, map_list = self.client.get_map_info()
+        known, names = {}, {}
+        for m in map_list:
+            map_id = m["map_id"]
+            names[map_id] = b64name(m.get("map_name", ""))
+            data = self.client.get_map_data(map_id)
+            known[map_id] = {a["id"] for a in data.get("area_list", []) if a.get("type") == "room"}
+        return current_id, known, names
+
     def resolve_rooms_live(
         self, name_patterns: list[str], map_name: str | None = None
     ) -> tuple[list[int], int]:

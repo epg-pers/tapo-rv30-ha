@@ -26,7 +26,7 @@ from .const import (
 )
 from .coordinator import TapoCoordinator
 from .frontend import STATIC_URL
-from .mapdata import b64name, decode_prompt
+from .mapdata import b64name, decode_prompt, pick_segments
 from .tpap import AuthError, RobotBusy
 
 _LOGGER = logging.getLogger(__name__)
@@ -186,21 +186,19 @@ class TapoVacuumEntity(CoordinatorEntity[TapoCoordinator], StateVacuumEntity):
         ]
 
     async def async_clean_segments(self, segment_ids: list[str], **kwargs: Any) -> None:
-        by_map: dict[int, list[int]] = {}
-        for seg in segment_ids:
-            try:
-                map_id, room_id = (int(p) for p in seg.split(":", 1))
-            except ValueError as exc:
-                raise ServiceValidationError(f"Unknown segment id '{seg}'") from exc
-            by_map.setdefault(map_id, []).append(room_id)
-        if len(by_map) > 1:
-            names = await self.hass.async_add_executor_job(self.coordinator.map_names)
-            raise ServiceValidationError(
-                "The selected areas are on different maps "
-                f"({', '.join(names.get(m, str(m)) for m in by_map)}); "
-                "the vacuum can only clean rooms on one map per run"
-            )
-        (map_id, room_ids), = by_map.items()
+        # Checked against the robot's maps right now: Home Assistant keeps area mappings
+        # to rooms of maps that have since been remapped or lost.
+        try:
+            active, known, names = await self.hass.async_add_executor_job(self.coordinator.segment_index)
+        except Exception as exc:
+            raise HomeAssistantError(f"Could not read maps from the vacuum: {exc}") from exc
+        try:
+            map_id, room_ids, dropped = pick_segments(segment_ids, known, active, names)
+        except ValueError as exc:
+            raise ServiceValidationError(f"{self.coordinator.device_name}: {exc}") from exc
+        if dropped:
+            _LOGGER.info("%s: clean_area skipped rooms the robot no longer has or on another map: %s",
+                         self.coordinator.device_name, ", ".join(dropped))
         await self._call(self.coordinator.client.clean_rooms, room_ids, map_id)
         await self.coordinator.async_refresh_soon()
 

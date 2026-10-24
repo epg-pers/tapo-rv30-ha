@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.26.3b1
+
+### Fixed
+
+- `vacuum.clean_area` copes with area mappings left over from old maps. Home Assistant keeps every room ever mapped to an area, so after a remap or a lost map an area could point at rooms the robot no longer has, and the whole clean was refused. Those rooms are now skipped (and logged), the active map wins when the rest spans several maps, and you only get an error, telling you to redo the area mapping, when nothing valid is left.
+
 ## v0.26.2
 
 ### Fixed
