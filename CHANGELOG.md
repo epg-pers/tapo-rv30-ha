@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.32.1
+
+### Fixed
+
+- The test suite runs under CI's plain `pytest tests` again (a new test imported a helper in a way only a local run could find). No change to the integration itself.
+
 ## v0.32.0
 
 ### Security
