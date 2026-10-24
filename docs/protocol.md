@@ -4,6 +4,20 @@ What the robot answers over its local TPAP (SPAKE2+) transport, learned from liv
 the forks, and the Tapo Android app's code. `tapo_rv30.send_raw` lets you try any method
 against your own robot, docked.
 
+## Login: device attestation on tls 0
+
+A robot that answers discovery with `tls: 0` and `dac: 1` (seen on an RV30 Max Plus Gen2,
+firmware 1.3.5) has no TLS certificate to check, so it proves its identity in the handshake
+instead. The client sends a random `dac_nonce` with `pake_share`; the reply carries `dac_ca`
+(the device's attestation certificate), `dac_ica` (the intermediate) and `dac_proof`, an
+ECDSA SHA-256 signature over the SPAKE2+ SharedKey followed by the decoded nonce.
+
+`dac_ca` and `dac_ica` are base64 of PEM text: the Tapo app base64-decodes them and reads the
+result with a PEM reader. The chain must lead to one of the two TP-Link device roots the app
+pins (TP-LINK SYSTEMS DEVICE ROOT CA, TP-LINK GLOBAL DEVICE ROOT CA). The app itself only does
+this for robots offering the default passcode type (`pake` containing 0); this integration
+does it whenever a tls 0 robot offers attestation.
+
 ## Room cleaning
 
 The `setSwitchClean` payload for selective room cleaning was reverse-engineered here

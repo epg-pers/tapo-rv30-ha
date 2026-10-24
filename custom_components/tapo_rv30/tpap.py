@@ -244,6 +244,25 @@ XhBkdDAKBggqhkjOPQQDAgNJADBGAiEA+7j5jemtXcGYN0unH+9rjVhVAL7WrsOi
 5rbc0IIvD6MCIQCZuGGssu4Ygt2V8Vr0QF2fO9wxfNB3aRRMYQ+6lMrLGA==
 -----END CERTIFICATE-----"""
 
+# The second TP-Link device root the Tapo app pins for device attestation (DAC). The app's own
+# build trusts the root above; a robot's attestation chain is accepted under either, but only
+# the root above is used for TLS.
+_GLOBAL_DEVICE_ROOT_PEM = """-----BEGIN CERTIFICATE-----
+MIICLzCCAdagAwIBAgIUEu75Wpooc20sMGjoAWEwz6yRQ7swCgYIKoZIzj0EAwIw
+eTEmMCQGA1UEAwwdVFAtTElOSyBHTE9CQUwgREVWSUNFIFJPT1QgQ0ExHDAaBgNV
+BAoME1RQLUxJTksgR0xPQkFMIElOQy4xDzANBgNVBAcMBklydmluZTETMBEGA1UE
+CAwKQ2FsaWZvcm5pYTELMAkGA1UEBhMCVVMwHhcNMjQxMDA4MDU1NzQ0WhcNMzQx
+MDA2MDU1NzQ0WjB5MSYwJAYDVQQDDB1UUC1MSU5LIEdMT0JBTCBERVZJQ0UgUk9P
+VCBDQTEcMBoGA1UECgwTVFAtTElOSyBHTE9CQUwgSU5DLjEPMA0GA1UEBwwGSXJ2
+aW5lMRMwEQYDVQQIDApDYWxpZm9ybmlhMQswCQYDVQQGEwJVUzBZMBMGByqGSM49
+AgEGCCqGSM49AwEHA0IABMOrq4jz+WOTc7ccQ8Xt0ESFFu0CP53a6XXyhGpDoRU6
+2bMwRfSwwYcgk+R8SpuoHRQzq1Ot6ELsxmbiTVrTgnKjPDA6MAsGA1UdDwQEAwIB
+hjAMBgNVHRMEBTADAQH/MB0GA1UdDgQWBBQiWAnre1g9PIoRvaqJG/D3O4J+fjAK
+BggqhkjOPQQDAgNHADBEAiAoBtOIcMmh/invyzmnLvSU+sNzOiiVAPa/+yQC2/aX
+SAIgSgHhlRYfS7Dy4Tw+jDrZY9hbz47Lul5Caq6txqzPIH8=
+-----END CERTIFICATE-----"""
+_DAC_ROOTS_PEM = (_ROOT_CA_PEM, _GLOBAL_DEVICE_ROOT_PEM)
+
 _TLS_CIPHERS = ":".join([
     "ECDHE-ECDSA-AES256-GCM-SHA384", "ECDHE-ECDSA-AES256-SHA384",
     "ECDHE-ECDSA-AES256-SHA",        "ECDHE-ECDSA-AES128-GCM-SHA256",
@@ -406,16 +425,27 @@ def _raise_for_error(response: dict, action: str) -> None:
 
 
 def _load_cert(value: str) -> x509.Certificate:
-    """Load a certificate the device sent as PEM or bare base64 DER."""
+    """A certificate from pake_share's dac_ca / dac_ica. The Tapo app reads these as base64 of
+    PEM text (base64-decode, then a PEM reader), which is what firmware 1.3.5 sends; plain PEM
+    and base64 DER are accepted too. Parsing the decoded PEM as DER is what failed before
+    ("unexpected tag 13, constructed": the "-" that starts "-----BEGIN")."""
     data = value.strip()
     if "-----BEGIN" in data:
         return x509.load_pem_x509_certificate(data.encode())
-    return x509.load_der_x509_certificate(_b64d(data))
+    raw = _b64d(data)
+    if raw.lstrip().startswith(b"-----BEGIN"):
+        return x509.load_pem_x509_certificate(raw)
+    return x509.load_der_x509_certificate(raw)
 
 
 def _verify_cert_chain(ca: x509.Certificate, ica: x509.Certificate | None) -> None:
-    """Verify the device attestation chain up to the pinned TP-Link root."""
-    root = x509.load_pem_x509_certificate(_ROOT_CA_PEM.encode())
+    """Verify the device attestation chain up to a pinned TP-Link device root (the one whose
+    subject issued the top of the chain)."""
+    top   = ica or ca
+    roots = [x509.load_pem_x509_certificate(p.encode()) for p in _DAC_ROOTS_PEM]
+    root  = next((r for r in roots if r.subject == top.issuer), None)
+    if root is None:
+        raise AuthError("DAC certificate chain does not lead to a TP-Link device root")
     now  = datetime.now(UTC)
     chain = [ca] + ([ica] if ica else []) + [root]
     for cert in chain:

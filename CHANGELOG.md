@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.32.2
+
+### Fixed
+
+- **Robots that prove their identity without TLS (tls 0 with device attestation, seen on RV30 Max Plus Gen2 firmware 1.3.5) can be set up again.** They send their attestation certificates as base64 of PEM text, the format the Tapo app reads; the integration parsed the decoded text as DER and setup failed with "DAC verification failed: error parsing asn1 value ... Tag { value: 13, constructed: true ... }", followed by a needless re-authentication prompt. Base64 PEM, plain PEM and base64 DER are all read now.
+- The attestation chain is accepted under either of the two TP-Link device roots the Tapo app pins (TP-LINK SYSTEMS and TP-LINK GLOBAL DEVICE ROOT CA), not just the first. The TLS pin is unchanged.
+
 ## v0.32.1
 
 ### Fixed
