@@ -33,7 +33,7 @@ Needs Home Assistant 2026.3 or newer (HACS enforces it). Coming from a fork of t
 Same domain, so your config entry and entities carry over; see
 [switching from a fork](docs/troubleshooting.md#switching-from-a-fork).
 
-## Only here
+## Features
 
 - **Bundled map card**: tap-to-clean rooms through a lossless room mask (no calibration),
   zone drawing, saved zones, floors, presets, controls, theme-aware, visual editor
@@ -49,7 +49,7 @@ Same domain, so your config entry and entities carry over; see
 - **Do Not Disturb aware**: a schedule inside the robot's Do Not Disturb window never runs; the sidebar page and the services flag it before you save, instead of leaving a dead schedule on the robot
 - **One-click dashboard**: a dashboard strategy that builds the whole thing for every robot
 - **Schedules from Home Assistant**: add, change, enable / disable and remove the robot's own
-- **Matter**: pairing state, setup code, and a button that opens the pairing window
+- **Matter**: pairing state, a button that opens the pairing window, and the setup code from an admin-only action
 - **Furniture** drawn as little illustrations on the map, from the app's own type table
 - **Voice**: "vacuum the kitchen and the lounge" works in Assist with nothing to configure
 - **Discovery**: the robot is found on the network and its entry follows IP changes
@@ -64,37 +64,13 @@ Same domain, so your config entry and entities carry over; see
 - Adaptive polling, hardened TPAP login, a repair issue when the robot stops answering,
   diagnostics, reconfigure and reauth from the integration page
 
-## Compared with the forks
+## The upstream project
 
-Several forks of this project exist. The only one still maintained is
-[jan-tdy/TapoVac-ADV](https://github.com/jan-tdy/TapoVac-ADV); the others last changed
-between March and August 2026. TapoVac-ADV includes many of this project's features, adapted
-from here as its README credits - its 4.0.0 release ports this project's sidebar page and
-smart planner from v0.20.0. Checked on 2026-10-23 against TapoVac-ADV 4.0.0 by reading its
-code and README, so this is what shipped on that day, not a promise about tomorrow.
+This is the upstream project: new features, fixes and protocol work land here first, and the
+forks of this integration build on its code. If you use it in any form, starring the repo,
+reporting issues and contributing here is what keeps it moving.
 
-| | This project | TapoVac-ADV 4.0.0 |
-|---|:---:|:---:|
-| Local TPAP control, rooms, zones, spot, presets, `run_schedule`, native `vacuum.clean_area`, dock buttons, raw send | yes | yes |
-| Live cleaning path and last clean map | yes | yes, adapted from here |
-| Per-room "last cleaned" and coverage | yes | yes, adapted from here |
-| Add, edit and remove the robot's own schedules, Do Not Disturb aware | yes | yes, adapted from here |
-| Matter, voice, network discovery, device triggers, blueprints | yes | yes, adapted from here |
-| Furniture on the map | yes, illustrated and labelled | yes, adapted from here, plain shapes |
-| Go to a point | yes, tap the map or call the service | yes, in the separate VacuumCard-ADV card |
-| Remote drive | yes, arrow buttons and keys on the sidebar page | yes, in the separate VacuumCard-ADV card |
-| Sidebar page (schedules editor, history, drive, maintenance, settings) | yes | yes, ported from here |
-| Smart cleaning planner (room targets, people, motion sensors) | yes | yes, ported from here |
-| Bundled map card (tap rooms, draw zones, floors) | yes | no, separate card project |
-| Map editor on the sidebar page (draw no-go zones, walls, furniture on the live map, save to robot) | yes | no |
-| Restore a whole map backup to the robot, locally | yes | no |
-| Backup map viewer (thumbnails of every backup, view full size, restore in a press) | yes | no |
-| Map setup save and re-apply (no-go zones, walls, carpets, room names) and local copies of cloud backups | yes | no |
-| Dashboard strategy (whole dashboard in one line) | yes | no |
-| Tests and CI (hassfest, HACS, lint, unit tests) | yes | yes |
-| Documentation site | [yes](https://epg-pers.github.io/tapo-rv30-ha/) | README |
-
-Moving over keeps your entities and dashboards; see
+Coming from a fork? Same domain, so your entities and dashboards carry over; see
 [switching from a fork](https://epg-pers.github.io/tapo-rv30-ha/troubleshooting/#switching-from-a-fork).
 
 ## Voice
