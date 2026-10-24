@@ -2,9 +2,10 @@
 import gzip
 import json
 
+from test_maprender import _map, _pos_array
+
 from custom_components.tapo_rv30 import cleanhistory as ch
 from custom_components.tapo_rv30.maprender import render_record
-from tests.test_maprender import _map, _pos_array
 
 DAY = 86400
 
