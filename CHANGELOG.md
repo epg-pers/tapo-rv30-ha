@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.31.1
+
+### Fixed
+
+- Handing a map backup back to the robot during a restore no longer checks the file on Home Assistant's event loop (a blocking call on every request the robot makes). A missing file still answers 404.
+
 ## v0.31.0
 
 A fifth bug hunt: the last release's own changes, the protocol and transport line by line, time and state machines, map geometry (including the map editor problem reported with a screenshot), what happens when things go wrong, and the docs and packaging. Every finding was checked by separate reviewers trying to disprove it.
