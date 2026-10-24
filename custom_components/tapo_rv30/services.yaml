@@ -482,6 +482,12 @@ remove_matter_fabric:
           max: 255
           mode: box
 
+get_matter_setup_code:
+  target:
+    entity:
+      domain: vacuum
+      integration: tapo_rv30
+
 create_preset:
   target:
     entity:

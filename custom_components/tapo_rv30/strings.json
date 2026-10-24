@@ -342,6 +342,10 @@
         }
       }
     },
+    "get_matter_setup_code": {
+      "name": "Get Matter setup code",
+      "description": "Admin only. Returns the robot's Matter manual pairing code and QR payload, for adding it to another ecosystem while the pairing window is open. The code is never put in entity state."
+    },
     "fetch_cloud_map_backups": {
       "name": "Fetch cloud map backups",
       "description": "Read-only. Logs in to your TP-Link account, downloads the map backups made with the Tapo app's backup feature, and saves them in config/tapo_rv30/map_backups (with the robot's current local map data for comparison when it is idle). Nothing is sent to the robot except routine reads.",

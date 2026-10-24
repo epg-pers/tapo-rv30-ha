@@ -10,9 +10,6 @@
       "matter": {
         "default": "mdi:link-variant"
       },
-      "matter_setup_code": {
-        "default": "mdi:qrcode"
-      },
       "current_room": {
         "default": "mdi:floor-plan"
       },
@@ -98,6 +95,9 @@
     },
     "delete_preset": {
       "service": "mdi:playlist-remove"
+    },
+    "get_matter_setup_code": {
+      "service": "mdi:qrcode"
     }
   }
 }

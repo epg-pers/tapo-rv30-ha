@@ -20,6 +20,7 @@ robot in it is refused with a clear message. With one vacuum set up the target i
 | `set_schedule` | Change a schedule (enable / disable, time, days, rooms or `room_ids`, levels). Same Do Not Disturb check when the time changes or the schedule is enabled. |
 | `remove_schedule` | Delete one schedule or all. |
 | `remove_matter_fabric` | Unpair the robot from one Matter ecosystem (fabric index from the Matter sensor). Untested. |
+| `get_matter_setup_code` | Admin only, returns a response. The robot's Matter manual pairing code and QR payload. |
 | `remote_drive` | The app's remote control, one step per call: `enter` (the robot leaves the dock; the response carries `leaving_dock_ms`), `forward` / `backward` / `left` / `right` (a short nudge; repeat while held), `stop`, `exit`. Refused while a clean is running. |
 | `go_to` | Drive to a point (x, y in map mm) on robots with go-to-point; `vacuum.stop` cancels it. |
 | `get_clean_records` | Cleaning history and lifetime totals as a service response. |

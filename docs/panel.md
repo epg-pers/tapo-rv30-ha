@@ -54,7 +54,7 @@ default), 1 year, Forever) and how many at most with the **Clean Map History Lim
 (200 by default, the oldest go first). Both are also entities on the device, so the Settings
 tab and automations can change them. Turning history off deletes the kept maps. They are
 stored compressed under `config/tapo_rv30/clean_history/<robot>/`, only the parts needed to
-draw them, typically under 100 KB a run.
+draw them (a one-room run here took 9 KB).
 
 ![History and statistics](panel-history.png){ width="760" }
 

@@ -123,21 +123,11 @@ def _matter(d: dict) -> dict:
 _MATTER_SENSOR = TapoSensorDescription(
     key="matter", translation_key="matter", name="Matter",
     entity_category=EntityCategory.DIAGNOSTIC, entity_registry_enabled_default=False,
-    # Not paired / Pairing window open / Paired. The setup code and QR payload are the
-    # robot's fixed ones (printed on it); they are attributes here so you can pair from
-    # another ecosystem, which is also why the sensor is off by default.
+    # Not paired / Pairing window open / Paired. The setup code is never in state or attributes
+    # (every user can read those and the recorder keeps them): it comes only from the admin-only
+    # get_matter_setup_code action.
     value_fn=lambda d: _matter(d)["state"],
-    attrs_fn=lambda d: {**_matter(d), **{k: v for k, v in ((d.get("settings") or {}).get("matter_setup") or {}).items()
-                                        if k in ("setup_code", "setup_payload")}},
-)
-
-
-_MATTER_CODE_SENSOR = TapoSensorDescription(
-    key="matter_setup_code", translation_key="matter_setup_code", name="Matter Setup Code",
-    entity_category=EntityCategory.DIAGNOSTIC, entity_registry_enabled_default=False,
-    # The robot's fixed manual pairing code as the state, the QR payload as an attribute.
-    value_fn=lambda d: ((d.get("settings") or {}).get("matter_setup") or {}).get("setup_code"),
-    attrs_fn=lambda d: {"setup_payload": ((d.get("settings") or {}).get("matter_setup") or {}).get("setup_payload")},
+    attrs_fn=_matter,
 )
 
 
@@ -231,12 +221,11 @@ async def async_setup_entry(
         entities.append(TapoPlannerSensor(coordinator, entry))
     if coordinator.has("matter") and "matter_status" in coordinator.settings:
         entities.append(TapoStatusSensor(coordinator, entry, _MATTER_SENSOR))
-    if coordinator.has("matter") and "matter_setup" in coordinator.settings:
-        entities.append(TapoStatusSensor(coordinator, entry, _MATTER_CODE_SENSOR))
 
     remove_missing_parts(hass, coordinator, entry, "sensor",
                          [f"consumable_{f}_used" for f in ("main_brush_lid_time", "rag_time")
                           if not coordinator.has_part(f)]
+                         + ["matter_setup_code"]     # held the pairing code in state until 0.32
                          + [f"consumable_{k}" for k in CONSUMABLE_LABELS if not coordinator.has_part(k)])
     for ckey, clabel in CONSUMABLE_LABELS.items():
         if not coordinator.has_part(ckey):

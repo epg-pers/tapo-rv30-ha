@@ -645,7 +645,7 @@ class TapoRV30Panel extends HTMLElement {
       };
     }
     if (note) note.textContent = !hist ? "" : keep === "Off" ? "Clean maps are not kept; a run's map can still be read from the robot while it has the run."
-      : `${hist.usage.runs} map${hist.usage.runs === 1 ? "" : "s"} kept (${(hist.usage.bytes / 1048576).toFixed(1)} MB), at most ${hist.limit}.`;
+      : `${hist.usage.runs} map${hist.usage.runs === 1 ? "" : "s"} kept (${hist.usage.bytes >= 1048576 ? (hist.usage.bytes / 1048576).toFixed(1) + " MB" : Math.max(1, Math.round(hist.usage.bytes / 1024)) + " KB"}), at most ${hist.limit}.`;
     runs.innerHTML = list.length ? list.slice(0, 40).map((x) => {
       const d = x.started ? new Date(x.started * 1000) : null;
       const when = d ? d.toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" }) + " " + d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" }) : "";

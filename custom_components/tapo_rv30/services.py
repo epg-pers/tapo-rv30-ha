@@ -20,7 +20,7 @@ from .tpap import RobotBusy, _opt_int
 _LOGGER = logging.getLogger(__name__)
 SERVICES = ("clean_rooms", "set_room_settings", "clean_zone", "run_schedule", "send_raw",
             "get_clean_records", "run_preset", "set_map", "go_to",
-            "add_schedule", "set_schedule", "remove_schedule", "remove_matter_fabric",
+            "add_schedule", "set_schedule", "remove_schedule", "remove_matter_fabric", "get_matter_setup_code",
             "fetch_cloud_map_backups", "save_map_setup", "apply_map_setup", "restore_map_backup",
             "create_preset", "update_preset", "delete_preset", "remote_drive")
 
@@ -447,6 +447,21 @@ def async_setup_services(hass: HomeAssistant) -> None:
         except Exception as exc:
             raise HomeAssistantError(f"{call.service}: vacuum rejected the removal: {exc}") from exc
         await coord.async_settings_changed()
+
+    async def handle_get_matter_setup_code(call: ServiceCall) -> ServiceResponse:
+        """The robot's Matter pairing code and QR payload, for admins only: never in entity
+        state, where every user and the recorder would see it."""
+        coord = _one(hass, call)
+        if not coord.has("matter"):
+            raise ServiceValidationError(f"{call.service}: {coord.device_name} has no Matter support")
+        info = coord.settings.get("matter_setup")
+        if not isinstance(info, dict) or not info.get("setup_code"):
+            try:
+                info = await hass.async_add_executor_job(coord.client.send, "getMatterSetupInfo")
+                info = (info or {}).get("result") or {}
+            except Exception as exc:
+                raise HomeAssistantError(f"{call.service}: could not read the setup code: {exc}") from exc
+        return {"setup_code": info.get("setup_code"), "setup_payload": info.get("setup_payload")}
 
     async def handle_remove_matter_fabric(call: ServiceCall) -> None:
         """Unpair the robot from one Matter ecosystem (fabric_index from the Matter sensor)."""
@@ -1017,6 +1032,8 @@ def async_setup_services(hass: HomeAssistant) -> None:
     hass.services.async_register(DOMAIN, "set_schedule", handle_set_schedule)
     hass.services.async_register(DOMAIN, "remove_schedule", _admin_only(hass, handle_remove_schedule))
     hass.services.async_register(DOMAIN, "remove_matter_fabric", _admin_only(hass, handle_remove_matter_fabric))
+    hass.services.async_register(DOMAIN, "get_matter_setup_code", _admin_only(hass, handle_get_matter_setup_code),
+                                 supports_response=SupportsResponse.ONLY)
     hass.services.async_register(DOMAIN, "get_clean_records", handle_get_clean_records,
                                  supports_response=SupportsResponse.ONLY)
     hass.services.async_register(DOMAIN, "set_room_settings", handle_set_room_settings)

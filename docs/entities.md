@@ -38,8 +38,8 @@ Cleans, Total Area Cleaned, Total Cleaning Time, Current Room, Schedules (count,
 as attributes, each with `blocked_by_dnd` when its time falls inside Do Not Disturb), consumable
 life (Main Brush / Side Brush / Filter / Sensor / Charge Contacts Remaining, in hours left; the
 percentage is in the vacuum's `consumables` attribute) and use
-(Main Brush Lid Used, Mop Cloth Used, in hours) for the parts the robot reports, Wi-Fi Signal (diagnostic, off by default), Matter and Matter Setup Code
-(diagnostic, off by default; see [matter.md](matter.md)).
+(Main Brush Lid Used, Mop Cloth Used, in hours) for the parts the robot reports, Wi-Fi Signal (diagnostic, off by default), Matter
+(diagnostic, off by default; the pairing code is not an entity, see [matter.md](matter.md)).
 
 ## Binary sensors
 
