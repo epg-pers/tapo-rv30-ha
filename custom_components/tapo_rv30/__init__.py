@@ -45,7 +45,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         cache_dir=hass.config.path(".storage", "tapo_rv30"),
     ))
     coordinator = TapoCoordinator(hass, client, entry)
-    await coordinator.async_config_entry_first_refresh()
+    try:
+        await coordinator.async_config_entry_first_refresh()
+    except BaseException:
+        # Setup is retried with a new client; release this one (the AES client owns a thread).
+        await hass.async_add_executor_job(client.close)
+        raise
     coordinator.planner = TapoPlanner(hass, coordinator, entry)
     await coordinator.planner.async_load()
 
@@ -87,8 +92,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if ok:
         coordinator = hass.data[DOMAIN].pop(entry.entry_id, None)
-        if coordinator is not None and hasattr(coordinator.client, "close"):
-            coordinator.client.close()
+        if coordinator is not None:
+            await hass.async_add_executor_job(coordinator.client.close)
         if not hass.data[DOMAIN]:
             async_unload_services(hass)
             async_remove_panel_if_present(hass)

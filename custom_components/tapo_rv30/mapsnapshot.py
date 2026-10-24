@@ -80,9 +80,17 @@ def _norm_furn(f: dict) -> dict:
     return {k: f[k] for k in ("type", "id", "angle", "vertexs") if f.get(k) is not None}
 
 
-def _sched_key(rule: dict) -> tuple:
+def _sched_key(rule: dict, map_id: int | None = None, preset_names: dict | None = None) -> tuple:
+    """What makes two schedules the same clean: time, days, what and where. The map id is
+    the target's (a setup may come from another map) and a preset is compared by name,
+    since a recreated preset gets a new id."""
     attr = rule.get("clean_attr") or {}
-    return (rule.get("s_min"), rule.get("week_day"), rule.get("mode"), attr.get("clean_mode"))
+    preset = attr.get("custom_rule_id")
+    if preset is not None and preset_names is not None:
+        preset = preset_names.get(preset, preset)
+    return (rule.get("s_min"), rule.get("week_day"), rule.get("mode"), attr.get("clean_mode"),
+            map_id if map_id is not None else attr.get("map_id"),
+            tuple(attr.get("room_list") or ()), preset)
 
 
 def plan(snap: dict, target_map_id: int, area_list: list, furniture: list,
@@ -140,9 +148,10 @@ def plan(snap: dict, target_map_id: int, area_list: list, furniture: list,
                                "area_list": items})
 
     names_by_id = {p.get("rule_id"): _b64(p.get("rule_name")) for p in snap.get("presets") or []}
-    have = {_sched_key(s) for s in schedules_now or []}
+    names_now = {p.get("rule_id"): _b64(p.get("rule_name")) for p in presets_now or []}
+    have = {_sched_key(s, None, names_now) for s in schedules_now or []}
     for s in snap.get("schedules") or []:
-        if _sched_key(s) in have:
+        if _sched_key(s, target_map_id, names_by_id) in have:
             continue
         attr = dict(s.get("clean_attr") or {})
         attr["map_id"] = target_map_id

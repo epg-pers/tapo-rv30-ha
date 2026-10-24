@@ -341,6 +341,10 @@
         "map": {
           "name": "Map",
           "description": "Map name or id. Defaults to the active map."
+        },
+        "force": {
+          "name": "Force",
+          "description": "Replace the saved setup even if this map looks degraded (rooms missing or unnamed, as after a lost map)."
         }
       }
     },
@@ -445,6 +449,36 @@
         "confirm": {
           "name": "Confirm",
           "description": "Required: this deletes the preset."
+        }
+      }
+    },
+    "restore_map_backup": {
+      "name": "Restore map backup",
+      "description": "Put a whole map backup back on the robot. Home Assistant serves the backup on your network and the robot fetches it; the robot must be docked and idle. Works even if the map was deleted: any map on the robot carries the restore.",
+      "fields": {
+        "map": {
+          "name": "Map",
+          "description": "The map to restore: its name or id. It can be a map that is no longer on the robot (from its saved setup)."
+        },
+        "file": {
+          "name": "File",
+          "description": "A backup file in config/tapo_rv30/map_backups to use instead of the newest one for this map."
+        },
+        "base_url": {
+          "name": "Base URL",
+          "description": "Home Assistant's direct LAN address (for example http://192.168.1.10:8123) if the robot cannot reach it through the detected one, such as behind a reverse proxy."
+        },
+        "use_cloud_url": {
+          "name": "Use cloud URL",
+          "description": "Let the robot download the backup from TP-Link's cloud instead of from Home Assistant."
+        },
+        "verification_code": {
+          "name": "Verification code",
+          "description": "The code TP-Link emailed you, when the cloud download asks for one."
+        },
+        "confirm": {
+          "name": "Confirm",
+          "description": "Must be on: this replaces the map on the robot."
         }
       }
     }

@@ -13,9 +13,11 @@ import voluptuous as vol
 from homeassistant.components import websocket_api
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers.dispatcher import async_dispatcher_connect
 
 from .const import DOMAIN
 from .planlogic import PlannerError
+from .planner import planner_signal
 
 _KEY = f"{DOMAIN}_planner_ws"
 
@@ -57,9 +59,12 @@ def ws_subscribe(hass: HomeAssistant, connection: websocket_api.ActiveConnection
 
     @callback
     def forward() -> None:
-        connection.send_message(websocket_api.event_message(msg["id"], planner.view))
+        current = _planner(hass, msg["entity_id"])     # a reload replaces the planner object
+        if current is not None:
+            connection.send_message(websocket_api.event_message(msg["id"], current.view))
 
-    connection.subscriptions[msg["id"]] = planner.add_listener(forward)
+    connection.subscriptions[msg["id"]] = async_dispatcher_connect(
+        hass, planner_signal(planner.entry.entry_id), forward)
     connection.send_result(msg["id"])
     forward()
 

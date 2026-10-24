@@ -5,21 +5,21 @@ from __future__ import annotations
 import logging
 
 from homeassistant.core import HomeAssistant, ServiceCall, ServiceResponse, SupportsResponse
-from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError, Unauthorized
 from homeassistant.helpers import entity_registry as er
 
 from .const import DOMAIN, FAN_NAME_TO_INT, REMOTE_CONTROL_CODE, REMOTE_DIRECTIONS, WATER_NAME_TO_INT
 from .coordinator import TapoCoordinator
 from .mapdata import build_schedule_rule, decode_clean_record, dnd_active, dnd_window, encode_weekdays, parse_hhmm
 from .targets import INDIRECT_TARGET_KEYS, TargetError, as_list, has_indirect_target, resolve
-from .tpap import RobotBusy
+from .tpap import RobotBusy, _opt_int
 
 _LOGGER = logging.getLogger(__name__)
 SERVICES = ("clean_rooms", "set_room_settings", "clean_zone", "run_schedule", "send_raw",
             "get_clean_records", "run_preset", "set_map", "go_to",
             "add_schedule", "set_schedule", "remove_schedule", "remove_matter_fabric",
             "fetch_cloud_map_backups", "save_map_setup", "apply_map_setup", "restore_map_backup",
-            "create_preset", "update_preset", "delete_preset")
+            "create_preset", "update_preset", "delete_preset", "remote_drive")
 
 
 # Methods the integration itself calls while the robot is working.
@@ -42,6 +42,22 @@ BLOCKED_METHODS = frozenset({
     "connect_cloud", "device_reset", "device_reboot", "unbind_device", "set_lidar_enabled",
     "set_forwarding", "debug_nbus", "test",
 })
+_BLOCKED_NORM = frozenset(m.replace("_", "").lower() for m in BLOCKED_METHODS)
+
+
+def _raw_methods(method: str, params: dict) -> list[str]:
+    """Every method a send_raw call would run: multipleRequest carries its own list (which
+    may nest), and each of those must pass the same checks as a plain call."""
+    out = [method]
+    if method.replace("_", "").lower() == "multiplerequest":
+        for req in (params.get("requests") or []) if isinstance(params, dict) else []:
+            if isinstance(req, dict):
+                out += _raw_methods(str(req.get("method", "")), req.get("params") or {})
+    return out
+
+
+def _is_blocked(method: str) -> bool:
+    return method.replace("_", "").lower() in _BLOCKED_NORM
 
 
 def _coordinators(hass: HomeAssistant, call: ServiceCall) -> list[TapoCoordinator]:
@@ -94,6 +110,8 @@ def _levels(call: ServiceCall) -> dict:
             out["cistern"] = WATER_NAME_TO_INT[str(call.data["water"]).strip().lower()]
         if "passes" in call.data:
             out["clean_number"] = int(call.data["passes"])
+            if not 1 <= out["clean_number"] <= 3:
+                raise ValueError(f"passes {out['clean_number']}")
     except (KeyError, ValueError) as exc:
         raise ServiceValidationError(
             f"{call.service}: invalid value {exc}. suction: {list(FAN_NAME_TO_INT)}, "
@@ -147,6 +165,24 @@ async def _read(hass: HomeAssistant, call: ServiceCall, fn, *args):
         raise HomeAssistantError(f"{call.service}: could not read from the vacuum: {exc}") from exc
 
 
+# Services that can wipe or rewrite what is on the robot (or send it anything at all): only
+# admins may call them, like the write websocket commands. Automations and scripts run
+# without a user and are allowed, as with Home Assistant's own admin services.
+ADMIN_SERVICES = frozenset({"send_raw", "restore_map_backup", "apply_map_setup", "save_map_setup",
+                            "fetch_cloud_map_backups", "delete_preset", "remove_schedule",
+                            "remove_matter_fabric"})
+
+
+def _admin_only(hass: HomeAssistant, handler):
+    async def wrapped(call: ServiceCall):
+        if call.context.user_id:
+            user = await hass.auth.async_get_user(call.context.user_id)
+            if user is None or not user.is_admin:
+                raise Unauthorized(context=call.context)
+        return await handler(call)
+    return wrapped
+
+
 def async_setup_services(hass: HomeAssistant) -> None:
     """Register the services once (safe to call per config entry)."""
     if hass.services.has_service(DOMAIN, SERVICES[0]):
@@ -181,11 +217,20 @@ def async_setup_services(hass: HomeAssistant) -> None:
         g = coord.data or {}
         lv = {"suction": g.get("suction", 3), "cistern": g.get("cistern", 0),
               "clean_number": 1, **_levels(call)}
+        zones = call.data.get("zones")
+        try:
+            zones = [[int(v) for v in z] for z in zones]
+            if not zones or any(len(z) != 4 for z in zones):
+                raise ValueError
+        except (TypeError, ValueError):
+            raise ServiceValidationError(
+                f"{call.service}: 'zones' must be a list of [x1, y1, x2, y2] rectangles in map mm, "
+                "for example [[-500, -500, 500, 500]]") from None
         try:
             map_id, _ = await hass.async_add_executor_job(coord.client.get_map_info)
         except Exception as exc:
             raise HomeAssistantError(f"{call.service}: could not read maps from the vacuum: {exc}") from exc
-        await _send(hass, call, coord.client.clean_zones, map_id, call.data["zones"],
+        await _send(hass, call, coord.client.clean_zones, map_id, zones,
                     lv["suction"], lv["cistern"], lv["clean_number"])
         await coord.async_refresh_soon()
 
@@ -353,13 +398,11 @@ def async_setup_services(hass: HomeAssistant) -> None:
         if sid is None:
             raise ServiceValidationError(f"{call.service}: 'schedule_id' is required")
         try:
-            sid = int(sid)
-        except (TypeError, ValueError):
-            pass
-        try:
-            await hass.async_add_executor_job(coord.client.run_schedule, sid)
+            await hass.async_add_executor_job(coord.client.run_schedule, str(sid))
         except ValueError as exc:
             raise ServiceValidationError(f"{call.service}: {exc}") from exc
+        except RobotBusy as exc:
+            raise ServiceValidationError(f"{call.service}: the vacuum {exc}") from exc
         except Exception as exc:
             raise HomeAssistantError(f"{call.service}: vacuum rejected the command: {exc}") from exc
         await coord.async_refresh_soon()
@@ -372,16 +415,19 @@ def async_setup_services(hass: HomeAssistant) -> None:
         params = call.data.get("params") or {}
         if not isinstance(params, dict):
             raise ServiceValidationError(f"{call.service}: 'params' must be a mapping")
-        if method in BLOCKED_METHODS or method.lower() in BLOCKED_METHODS:
+        methods = _raw_methods(method, params)
+        blocked = [m for m in methods if _is_blocked(m)]
+        if blocked:
             raise ServiceValidationError(
-                f"{call.service}: '{method}' is an onboarding, system or factory call and is blocked. "
+                f"{call.service}: '{blocked[0]}' is an onboarding, system or factory call and is blocked. "
                 "Calls like this have wiped this robot's maps; use the Tapo app for them.")
         # Probing a robot mid-run is how the author lost a map set and the robot's
         # clean history (see README, "Protocol notes"). Known-safe status reads are
         # allowed; anything else waits for the robot to be idle unless forced.
-        if coord.busy and method not in SAFE_WHILE_BUSY and not call.data.get("force"):
+        unsafe = [m for m in methods if m not in SAFE_WHILE_BUSY and m != "multipleRequest"]
+        if coord.busy and unsafe and not call.data.get("force"):
             raise ServiceValidationError(
-                f"{call.service}: {coord.device_name} is {coord.busy}; '{method}' is not on the "
+                f"{call.service}: {coord.device_name} is {coord.busy}; '{unsafe[0]}' is not on the "
                 f"known-safe list, so it is refused until the robot is idle (pass force: true to override)")
         try:
             resp = await hass.async_add_executor_job(coord.client.send, method, params)
@@ -485,7 +531,14 @@ def async_setup_services(hass: HomeAssistant) -> None:
             raise HomeAssistantError(f"{call.service}: could not read the preset: {exc}") from exc
         keep = {a["id"]: a for a in detail.get("area_list") or [] if a.get("type") == "room"}
         if "rooms" in call.data:
-            room_ids, rmap = await _resolve(hass, call, coord)
+            # Rooms are matched on the preset's own map, which need not be the active one.
+            try:
+                room_ids, rmap = await hass.async_add_executor_job(
+                    coord.resolve_rooms_live, _rooms_list(call), preset.get("map_name") or str(map_id))
+            except ValueError as exc:
+                raise ServiceValidationError(f"{call.service}: {exc}") from exc
+            except Exception as exc:
+                raise HomeAssistantError(f"{call.service}: could not read maps from the vacuum: {exc}") from exc
             if rmap != map_id:
                 raise ServiceValidationError(f"{call.service}: the rooms must be on the preset's own map")
         else:
@@ -592,15 +645,33 @@ def async_setup_services(hass: HomeAssistant) -> None:
                                  time.strftime("%Y-%m-%dT%H:%M:%S"))
         folder = _snapshots_folder()
 
-        def _write() -> None:
+        def _write() -> bool:
+            """Write the snapshot; the latest copy is only replaced by a degraded one
+            (rooms missing or unnamed, as after a lost map) when forced."""
             os.makedirs(os.path.join(folder, "history"), exist_ok=True)
             stamp = time.strftime("%Y%m%d-%H%M%S")
-            for path in (os.path.join(folder, f"{map_id}.json"),
-                         os.path.join(folder, "history", f"{map_id}_{stamp}.json")):
+            latest = os.path.join(folder, f"{map_id}.json")
+            old = None
+            try:
+                with open(latest) as fh:
+                    old = json.load(fh)
+            except (OSError, ValueError):
+                pass
+            keep_old = mapsnapshot.is_degraded(old, snap) and not call.data.get("force")
+            paths = [os.path.join(folder, "history", f"{map_id}_{stamp}.json")]
+            if not keep_old:
+                paths.append(latest)
+            for path in paths:
                 with open(path, "w") as fh:
                     json.dump(snap, fh)
+            return keep_old
 
-        await hass.async_add_executor_job(_write)
+        kept = await hass.async_add_executor_job(_write)
+        if kept:
+            raise ServiceValidationError(
+                f"{call.service}: map {names.get(map_id) or map_id} looks degraded (rooms missing or "
+                "unnamed), so the saved setup was kept and this one only went to history. "
+                "Pass force: true to replace it anyway.")
         return {"map_id": map_id, "map_name": names.get(map_id), "saved": snap["counts"],
                 "furniture": len(snap["furniture"]), "presets": len(snap["presets"]),
                 "schedules": len(snap["schedules"]), "file": f"map_setups/{map_id}.json"}
@@ -691,7 +762,10 @@ def async_setup_services(hass: HomeAssistant) -> None:
                 return p if os.path.isfile(p) else None
             # cloud_<map_id>_<timestamp>.bin only - never the _snapshot preview image.
             pat = re.compile(rf"^cloud_{backup_id}_\d+\.bin$")
-            cands = sorted(f for f in os.listdir(folder) if pat.match(f))
+            try:
+                cands = sorted(f for f in os.listdir(folder) if pat.match(f))
+            except OSError:      # no backups fetched yet
+                return None
             return os.path.join(folder, cands[-1]) if cands else None
 
         # Default: serve the backup from HA on the LAN and let the robot fetch it directly - a
@@ -753,17 +827,18 @@ def async_setup_services(hass: HomeAssistant) -> None:
             except RuntimeError as exc:
                 raise HomeAssistantError(f"{call.service}: {exc}") from exc
             process = {}
-            for _ in range(30):
+            for _ in range(45):
                 await asyncio.sleep(2)
                 process = await _read(hass, call, coord.client.get_map_br_process)
-                if process.get("process") in (100, "100") or process.get("status") not in (None, 0, 1):
+                # status 2 is "still running": wait for success (3) or failure (13).
+                if process.get("status") in (3, 13, "3", "13"):
                     break
         finally:
             if store is not None and token is not None:
                 await asyncio.sleep(3)  # let a slow fetch finish before the URL stops serving
                 store.pop(token, None)
         await coord.async_request_map_refresh()
-        status = process.get("status")
+        status = _opt_int(process.get("status"))
         # Where did it land? The robot restores under the backup's own map id; if that id was
         # gone it comes back as a new, unsaved map that must be saved in the Tapo app.
         landed = None
@@ -801,18 +876,20 @@ def async_setup_services(hass: HomeAssistant) -> None:
                 "url": url, "error_code": code, "process": process, "applied": status == 3,
                 "note": note, "next_steps": next_steps}
 
-    hass.services.async_register(DOMAIN, "restore_map_backup", handle_restore_map_backup,
+    hass.services.async_register(DOMAIN, "restore_map_backup", _admin_only(hass, handle_restore_map_backup),
                                  supports_response=SupportsResponse.ONLY)
-    hass.services.async_register(DOMAIN, "save_map_setup", handle_save_map_setup,
+    hass.services.async_register(DOMAIN, "save_map_setup", _admin_only(hass, handle_save_map_setup),
                                  supports_response=SupportsResponse.ONLY)
-    hass.services.async_register(DOMAIN, "apply_map_setup", handle_apply_map_setup,
+    hass.services.async_register(DOMAIN, "apply_map_setup", _admin_only(hass, handle_apply_map_setup),
                                  supports_response=SupportsResponse.ONLY)
-    hass.services.async_register(DOMAIN, "fetch_cloud_map_backups", handle_fetch_cloud_map_backups,
+    hass.services.async_register(DOMAIN, "fetch_cloud_map_backups", _admin_only(hass, handle_fetch_cloud_map_backups),
                                  supports_response=SupportsResponse.ONLY)
     hass.services.async_register(DOMAIN, "clean_rooms", handle_clean_rooms)
     hass.services.async_register(DOMAIN, "run_preset", handle_run_preset)
     for name, fn in (("create_preset", handle_create_preset), ("update_preset", handle_update_preset),
                      ("delete_preset", handle_delete_preset)):
+        if name in ADMIN_SERVICES:
+            fn = _admin_only(hass, fn)
         hass.services.async_register(DOMAIN, name, fn, supports_response=SupportsResponse.OPTIONAL)
     hass.services.async_register(DOMAIN, "set_map", handle_set_map)
     hass.services.async_register(DOMAIN, "go_to", handle_go_to)
@@ -821,14 +898,14 @@ def async_setup_services(hass: HomeAssistant) -> None:
     hass.services.async_register(DOMAIN, "add_schedule", handle_add_schedule,
                                  supports_response=SupportsResponse.OPTIONAL)
     hass.services.async_register(DOMAIN, "set_schedule", handle_set_schedule)
-    hass.services.async_register(DOMAIN, "remove_schedule", handle_remove_schedule)
-    hass.services.async_register(DOMAIN, "remove_matter_fabric", handle_remove_matter_fabric)
+    hass.services.async_register(DOMAIN, "remove_schedule", _admin_only(hass, handle_remove_schedule))
+    hass.services.async_register(DOMAIN, "remove_matter_fabric", _admin_only(hass, handle_remove_matter_fabric))
     hass.services.async_register(DOMAIN, "get_clean_records", handle_get_clean_records,
                                  supports_response=SupportsResponse.ONLY)
     hass.services.async_register(DOMAIN, "set_room_settings", handle_set_room_settings)
     hass.services.async_register(DOMAIN, "clean_zone", handle_clean_zone)
     hass.services.async_register(DOMAIN, "run_schedule", handle_run_schedule)
-    hass.services.async_register(DOMAIN, "send_raw", handle_send_raw,
+    hass.services.async_register(DOMAIN, "send_raw", _admin_only(hass, handle_send_raw),
                                  supports_response=SupportsResponse.ONLY)
 
 

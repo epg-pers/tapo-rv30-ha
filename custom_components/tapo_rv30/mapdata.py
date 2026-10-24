@@ -396,6 +396,12 @@ def resolve_rooms(
                 f"No room matching '{pat}' on map '{target_name}'. "
                 f"Available rooms: {decoded}"
             )
+        if not exact and len(hits) > 1:
+            # "bed" when there is a Bedroom and a Bedroom 2: say so rather than clean both.
+            raise RoomNotFound(
+                f"Room '{pat}' is ambiguous on map '{target_name}', matches: "
+                f"{[n for r, n in zip(rooms, decoded) if r in hits]}"
+            )
         for r in hits:
             if r["id"] not in seen:
                 seen.add(r["id"]); matched.append(r["id"])

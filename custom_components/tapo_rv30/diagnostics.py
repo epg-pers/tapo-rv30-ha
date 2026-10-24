@@ -13,7 +13,8 @@ from .mapdata import b64name
 
 TO_REDACT = {CONF_USERNAME, CONF_PASSWORD, "host", "ip", "mac", "device_id", "oem_id",
              "hw_id", "fw_id", "cd", "ssid", "nickname", "lang", "longitude", "latitude",
-             "region", "time_diff"}
+             "region", "time_diff", "setup_code", "setup_payload", "qr_code", "manual_code",
+             "bind_code", "account_id", "username", "password", "email", "token"}
 
 
 async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: ConfigEntry) -> dict[str, Any]:
@@ -33,8 +34,10 @@ async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: ConfigE
     out["device"] = async_redact_data(
         {k: v for k, v in info.items() if k in ("model", "fw_ver", "hw_ver", "type", "device_on", "rssi", "signal_level")}
         | {"client": type(coord.client).__name__}, TO_REDACT)
-    out["status"] = coord.data if coord.data else None
-    out["settings"] = coord.settings
+    # The raw status and settings carry the device info (MAC, IP, Wi-Fi, location) and the
+    # Matter setup code, so they are redacted like everything else.
+    out["status"] = async_redact_data(coord.data, TO_REDACT) if coord.data else None
+    out["settings"] = async_redact_data(coord.settings, TO_REDACT)
     out["map"] = {
         "map_id": coord.map_id,
         "map_name": coord.map_name,

@@ -10,7 +10,7 @@
  * the vacuum's device automatically.
  */
 
-const CARD_VERSION = "0.22.0b1";
+const CARD_VERSION = "0.27.0";
 const ROOM_COLORS = ["#ffb3ba", "#bae1ff", "#baffc9", "#ffffba", "#dcbaff", "#ffdcba", "#baffff"];
 
 const ICONS = {
@@ -21,6 +21,10 @@ const ICONS = {
   alert: "mdi:alert-circle", room: "mdi:map-marker", history: "mdi:history", bin: "mdi:delete-variant",
   goto: "mdi:map-marker-path",
 };
+
+// Everything from entity state or attributes goes through esc() before it reaches innerHTML.
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const pct = (v) => { const n = Number(v); return isFinite(n) ? Math.max(0, Math.min(100, n)) : 0; };
 
 const FRESH = (ts) => {
   if (!ts) return null;
@@ -56,7 +60,9 @@ ha-card { overflow: hidden; }
   background: color-mix(in srgb, var(--primary-text-color) 5%, transparent); }
 .stage { position: relative; }
 .stage.r90, .stage.r270 { aspect-ratio: var(--map-h) / var(--map-w); }
-.stage.r90 canvas, .stage.r270 canvas { position: absolute; left: 50%; top: 50%; width: auto; height: 100%; max-width: none; transform-origin: center; }
+/* Before rotating, the canvas is as wide as the stage is tall (stage width x map w / map h), so the
+   rotated map fills the stage exactly and its bounding box is the stage box. */
+.stage.r90 canvas, .stage.r270 canvas { position: absolute; left: 50%; top: 50%; width: calc(100% * var(--map-w) / var(--map-h)); height: auto; max-width: none; transform-origin: center; }
 .stage.r90 canvas { transform: translate(-50%, -50%) rotate(90deg); }
 .stage.r270 canvas { transform: translate(-50%, -50%) rotate(270deg); }
 .stage.r180 canvas { transform: rotate(180deg); }
@@ -129,7 +135,8 @@ canvas { display: block; width: 100%; height: auto; touch-action: none; cursor: 
 class TapoRV30Card extends HTMLElement {
   static getConfigElement() { return document.createElement("tapo-rv30-card-editor"); }
   static getStubConfig(hass) {
-    const vac = Object.keys(hass.states).find((id) => id.startsWith("vacuum.") && hass.states[id].attributes.integration === "tapo_rv30")
+    const reg = hass.entities || {};
+    const vac = Object.keys(hass.states).find((id) => id.startsWith("vacuum.") && ((reg[id] && reg[id].platform === "tapo_rv30") || hass.states[id].attributes.integration === "tapo_rv30"))
       || Object.keys(hass.states).find((id) => id.startsWith("vacuum."));
     return { entity: vac || "vacuum.robot" };
   }
@@ -148,9 +155,25 @@ class TapoRV30Card extends HTMLElement {
 
   setConfig(config) {
     if (!config || !config.entity) throw new Error("Set 'entity' to your vacuum (vacuum.xxx)");
+    const sameEntity = this._config && this._config.entity === config.entity;
     this._config = { show_presets: true, show_controls: true, rotate: 0, ...config };
     this._related = null;
+    // _build() replaces the whole DOM, so forget what was last rendered into it.
+    this._sig = null; this._statusOpen = false;
+    this._selected.clear(); this._zone = null; this._target = null; this._drag = null;
+    if (!sameEntity) {
+      this._img = null; this._imgKey = null; this._mask = null; this._maskKey = null; this._mapKey = undefined;
+      this._runsHtml = null; this._maskFail = null;
+    }
     this._build();
+    if (this._hass) this.hass = this._hass;
+  }
+
+  connectedCallback() { if (this._hass && this._el) this._draw(); }   // restarts the pulse after a re-attach
+
+  disconnectedCallback() {
+    if (this._raf) { cancelAnimationFrame(this._raf); this._raf = null; }
+    clearTimeout(this._pressTimer);
   }
 
   getCardSize() { return 8; }
@@ -159,10 +182,24 @@ class TapoRV30Card extends HTMLElement {
     const first = !this._hass;
     this._hass = hass;
     if (!this._related) this._related = this._findRelated();
+    this._checkMapChange();
     const sig = this._signature();
     if (first || sig !== this._sig) { this._sig = sig; this._render(); }
     this._loadImage();
     this._loadMask();
+    // Entities found while the vacuum itself is missing may be a guess; look again once it appears.
+    if (!hass.states[this._config.entity]) this._related = null;
+  }
+
+  // A floor switch (or a re-map) makes room ids, zones and points from the old map meaningless.
+  _checkMapChange() {
+    const a = this._mapAttrs(), key = `${a.map_id ?? ""}|${a.rooms_mask_url ?? ""}`;
+    if (this._mapKey !== undefined && key !== this._mapKey) {
+      this._selected.clear(); this._zone = null; this._target = null; this._drag = null;
+      const sheet = this._el && this._el.mapwrap.querySelector(".sheet"); if (sheet) sheet.remove();
+      if (this._el) this._updateTools();
+    }
+    this._mapKey = key;
   }
 
   // ---- entity discovery -----------------------------------------------------------
@@ -211,6 +248,8 @@ class TapoRV30Card extends HTMLElement {
   _build() {
     const root = this.shadowRoot;
     root.innerHTML = `<style>${STYLE}</style><ha-card>
+      <div class="empty missing" hidden></div>
+      <div class="body">
       <div class="head">
         <div class="avatar"><ha-icon icon="${ICONS.robot}"></ha-icon></div>
         <div class="title"><div class="name"></div><div class="sub"></div></div>
@@ -234,6 +273,7 @@ class TapoRV30Card extends HTMLElement {
       <div class="status" hidden></div>
       <div class="chips"></div>
       <div class="controls"></div>
+      </div>
     </ha-card>`;
     this._el = {
       name: root.querySelector(".name"), sub: root.querySelector(".sub"), avatar: root.querySelector(".avatar"),
@@ -244,6 +284,7 @@ class TapoRV30Card extends HTMLElement {
       tStatus: root.querySelector(".t-status"), status: root.querySelector(".status"),
       go: root.querySelector(".go"), chips: root.querySelector(".chips"), controls: root.querySelector(".controls"),
       mapwrap: root.querySelector(".mapwrap"), floors: root.querySelector(".floors"), stage: root.querySelector(".stage"),
+      missing: root.querySelector(".missing"), body: root.querySelector(".body"),
     };
     this._el.tRooms.onclick = () => this._setMode("rooms");
     this._el.tZone.onclick = () => this._setMode("zone");
@@ -264,13 +305,16 @@ class TapoRV30Card extends HTMLElement {
 
   _render() {
     const h = this._hass, r = this._related, vac = this._st(this._config.entity);
-    if (!vac) { this.shadowRoot.querySelector("ha-card").innerHTML = `<div class="empty">${this._config.entity} not found</div>`; return; }
+    // Keep the built DOM (and the refs in this._el) so the card recovers when the entity appears.
+    this._el.missing.hidden = !!vac; this._el.body.hidden = !vac;
+    this._el.missing.textContent = vac ? "" : `${this._config.entity} not found`;
+    if (!vac) return;
     const name = this._config.name || vac.attributes.friendly_name || this._config.entity;
     const state = vac.state;
     const status = this._val(r.status, state);
     const room = vac.attributes.current_room || this._val(r.room, null);
     this._el.name.textContent = name;
-    this._el.sub.innerHTML = `<span>${status}</span>` + (room && room !== "unknown" ? `<span class="dot">&middot;</span><ha-icon icon="${ICONS.room}" style="--mdc-icon-size:14px"></ha-icon><span>${room}</span>` : "");
+    this._el.sub.innerHTML = `<span>${esc(status)}</span>` + (room && room !== "unknown" ? `<span class="dot">&middot;</span><ha-icon icon="${ICONS.room}" style="--mdc-icon-size:14px"></ha-icon><span>${esc(room)}</span>` : "");
     this._el.avatar.classList.toggle("active", state === "cleaning" || state === "returning");
     this._el.tGoto.hidden = vac.attributes.goto_point === false;
 
@@ -322,9 +366,9 @@ class TapoRV30Card extends HTMLElement {
     const last = a.last_clean || {};
     const cons = vac.attributes.consumables || {};
     const url = a.last_clean_url || null;
-    const lastLine = last.started ? `${FRESH(last.started)}${last.area != null ? `, ${last.area} m²` : ""}${last.minutes != null ? `, ${last.minutes} min` : ""}` : "no run recorded yet";
+    const lastLine = last.started ? `${FRESH(last.started)}${last.area != null ? `, ${esc(last.area)} m²` : ""}${last.minutes != null ? `, ${esc(last.minutes)} min` : ""}` : "no run recorded yet";
     const consHtml = Object.entries(cons).map(([k, v]) =>
-      `<div class="con ${v <= 10 ? "low" : v <= 30 ? "mid" : ""}"><div class="row"><span>${k}</span><span>${v}%</span></div><div class="bar"><div style="width:${v}%"></div></div></div>`).join("");
+      `<div class="con ${v <= 10 ? "low" : v <= 30 ? "mid" : ""}"><div class="row"><span>${esc(k)}</span><span>${esc(v)}%</span></div><div class="bar"><div style="width:${pct(v)}%"></div></div></div>`).join("");
     this._el.status.innerHTML =
       `<h5>Last clean, ${lastLine}</h5>` + (url ? `<img alt="Last clean map">` : "") +
       `<h5>Recent runs</h5><div class="runs"><div class="run"><ha-icon icon="${ICONS.history}"></ha-icon><span class="when">Loading</span></div></div>` +
@@ -341,7 +385,7 @@ class TapoRV30Card extends HTMLElement {
         const d = r.started ? new Date(r.started * 1000) : null;
         const when = d ? d.toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" }) + " " + d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" }) : "";
         const meta = [r.area != null ? `${r.area} m²` : null, r.minutes != null ? `${r.minutes} min` : null, start[r.start_type] || null, r.rule_name || null].filter(Boolean).join(" · ");
-        return `<div class="run ${r.error ? "err" : ""}"><ha-icon icon="${r.error ? ICONS.alert : ICONS.history}"></ha-icon><span class="when">${when}</span><span class="meta">${meta}</span></div>`;
+        return `<div class="run ${r.error ? "err" : ""}"><ha-icon icon="${r.error ? ICONS.alert : ICONS.history}"></ha-icon><span class="when">${esc(when)}</span><span class="meta">${esc(meta)}</span></div>`;
       }).join("") : `<div class="run"><span class="when">No runs recorded</span></div>`;
     } catch (e) {
       this._runsHtml = `<div class="run"><span class="when">Could not load history</span></div>`;
@@ -375,7 +419,7 @@ class TapoRV30Card extends HTMLElement {
       const s = this._st(id); if (!s) continue;
       const label = (s.attributes.friendly_name || id).replace(/^.*?Preset\s*/i, "");
       const b = document.createElement("button"); b.className = "chip";
-      b.innerHTML = `<ha-icon icon="${ICONS.preset}"></ha-icon><span>${label}</span>`;
+      b.innerHTML = `<ha-icon icon="${ICONS.preset}"></ha-icon><span>${esc(label)}</span>`;
       b.title = (s.attributes.rooms || []).join(", ");
       b.onclick = () => this._call("button", "press", {}, { entity_id: id });
       el.appendChild(b);
@@ -428,25 +472,33 @@ class TapoRV30Card extends HTMLElement {
     let url = src.startsWith("http") ? src : this._hass.hassUrl(src);
     url += (url.includes("?") ? "&" : "?") + "_c=" + encodeURIComponent(stamp);
     const im = new Image();
-    im.onload = () => { this._img = im; this._draw(); };
+    im.onload = () => { if (this._imgKey === key) { this._img = im; this._draw(); } };
     im.src = url;
   }
 
   async _loadMask() {
     const url = this._mapAttrs().rooms_mask_url;
     if (!url || url === this._maskKey) return;
+    // A failed URL is tried again, but not on every state update.
+    const f = this._maskFail;
+    if (f && f.url === url && Date.now() - f.at < 15000) return;
     this._maskKey = url;
+    this._mask = null;     // the old map's mask would pick wrong rooms until the new one loads
     try {
       const resp = await this._hass.fetchWithAuth(url);
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const blob = await resp.blob();
       const bmp = await createImageBitmap(blob);
       const c = document.createElement("canvas"); c.width = bmp.width; c.height = bmp.height;
       const ctx = c.getContext("2d", { willReadFrequently: true });
       ctx.drawImage(bmp, 0, 0);
+      if (this._maskKey !== url) return;          // the map changed while this one loaded
       this._mask = { w: bmp.width, h: bmp.height, data: ctx.getImageData(0, 0, bmp.width, bmp.height).data };
+      this._maskFail = null;
       this._draw();
     } catch (e) {
-      this._mask = null;
+      if (this._maskKey !== url) return;
+      this._mask = null; this._maskKey = null; this._maskFail = { url, at: Date.now() };
     }
   }
 
@@ -543,7 +595,7 @@ class TapoRV30Card extends HTMLElement {
       const t = (Date.now() % 1600) / 1600;
       ctx.beginPath(); ctx.arc(p[0], p[1], 8 + t * 14, 0, Math.PI * 2);
       ctx.strokeStyle = `rgba(0,180,255,${0.7 * (1 - t)})`; ctx.lineWidth = 3; ctx.stroke();
-      if (!this._raf) this._raf = requestAnimationFrame(() => { this._raf = null; this._draw(); });
+      if (!this._raf && this.isConnected) this._raf = requestAnimationFrame(() => { this._raf = null; if (this.isConnected) this._draw(); });
     }
   }
 
@@ -578,12 +630,12 @@ class TapoRV30Card extends HTMLElement {
     const sheet = document.createElement("div"); sheet.className = "sheet";
     const seg = (key, opts) => `<div class="opt"><span>${{ suction: "Suction", water_level: "Water", passes: "Passes" }[key]}</span><div class="seg" data-key="${key}">` +
       opts.map(([v, l]) => `<button data-v="${v}" class="${cur[key] === v ? "on" : ""}">${l}</button>`).join("") + `</div></div>`;
-    const fresh = g.last_cleaned ? `<div class="fresh"><ha-icon icon="${ICONS.history}"></ha-icon><span>Last cleaned ${FRESH(g.last_cleaned)}${g.coverage != null ? `, ${g.coverage}% covered` : ""}</span></div>` : "";
-    sheet.innerHTML = `<div class="panel"><h4><span>${g.name}</span><button class="x"><ha-icon icon="${ICONS.clear}"></ha-icon></button></h4>` + fresh +
+    const fresh = g.last_cleaned ? `<div class="fresh"><ha-icon icon="${ICONS.history}"></ha-icon><span>Last cleaned ${FRESH(g.last_cleaned)}${g.coverage != null ? `, ${esc(g.coverage)}% covered` : ""}</span></div>` : "";
+    sheet.innerHTML = `<div class="panel"><h4><span>${esc(g.name)}</span><button class="x"><ha-icon icon="${ICONS.clear}"></ha-icon></button></h4>` + fresh +
       seg("suction", [[1, "Quiet"], [2, "Standard"], [3, "Turbo"], [4, "Max"], [5, "Ultra"]]) +
       seg("water_level", [[0, "Off"], [1, "Low"], [2, "Medium"], [3, "High"]]) +
       seg("passes", [[1, "1"], [2, "2"], [3, "3"]]) +
-      `<button class="save">Clean ${g.name} now</button></div>`;
+      `<button class="save">Clean ${esc(g.name)} now</button></div>`;
     sheet.onclick = (e) => { if (e.target === sheet) sheet.remove(); };
     sheet.querySelector(".x").onclick = () => sheet.remove();
     sheet.querySelectorAll(".seg button").forEach((b) => b.onclick = () => {

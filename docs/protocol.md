@@ -70,7 +70,7 @@ From the app's `RobotRemoteControlViewModel` and its control view (component
   4 stop. The app sends the held direction, waits for the answer, pauses 300 ms and sends
   it again while the finger stays down; lifting sends 4. Status is 3 ("Remote Control")
   meanwhile.
-- `getSweepWalk` / `setSweepWalk {"sweep_walk": bool}` is "clean while moving" (the Sweep
+- `getSweepWalk` / `setSweepWalk {"sweepWalk": bool}` is "clean while moving" (the Sweep
   Walk switch). The app's "spot clean here" is an ordinary spot clean (clean_mode 2).
 
 ## Schedules

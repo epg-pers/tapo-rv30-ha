@@ -25,11 +25,16 @@ from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.helpers import area_registry as ar
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.event import async_track_state_change_event, async_track_time_interval
 from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
 from .const import CLEANING_CODES, DOCKED_CODES, DOMAIN
+
+
+def planner_signal(entry_id: str) -> str:
+    return f"{DOMAIN}_planner_update_{entry_id}"
 from .mapdata import b64name
 from .planlogic import (
     TARGET_CHOICES,
@@ -73,6 +78,7 @@ class TapoPlanner:
         self.skip_today: str | None = None
         self.room_skips: dict[str, str] = {}
         self.ran_window: str | None = None
+        self._preview_window: str | None = None   # ran_window set by a preview, not a real run
         self.preview_names: list[str] = []
         self.decision: Decision | None = None
         self.view: dict = {}
@@ -129,6 +135,9 @@ class TapoPlanner:
 
     @callback
     def _notify(self) -> None:
+        # Websocket subscribers listen by config entry, so they survive a reload of the
+        # entry (which builds a new planner) instead of staying bound to the old one.
+        async_dispatcher_send(self.hass, planner_signal(self.entry.entry_id))
         for cb in list(self._listeners):
             try:
                 cb()
@@ -292,7 +301,7 @@ class TapoPlanner:
         d = decide(snap, self.config)
         if d.action == "clean" and time.time() >= self._retry_at:
             if self.config.get("preview"):
-                self.ran_window = window_key(snap.now)
+                self.ran_window = self._preview_window = window_key(snap.now)
                 self.preview_names = list(d.names)
                 self._log("preview", f"Preview: would have cleaned {self._and(d.names)}. " + "; ".join(d.chips))
                 self._fire("preview", d)
@@ -320,7 +329,8 @@ class TapoPlanner:
             self._save()
             return
         self.ran_window = window_key(snap.now)
-        self._run = {"names": names, "started": time.time(), "dock_after": None, "docked": False}
+        self._run = {"names": names, "started": time.time(), "dock_after": None, "docked": False,
+                     "by": by, "home_at_start": sorted(snap.people_home)}
         why = (" " + "; ".join(chips) + ".") if chips else ""
         who = "You started" if by == "user" else "Started"
         self._log("start", f"{who} cleaning {self._and(names)}.{why}")
@@ -342,12 +352,15 @@ class TapoPlanner:
             return
         if run["docked"] or self.config.get("on_return") != "finish_room" or not self.config.get("require_away"):
             return
-        if code not in CLEANING_CODES or not snap.people_home:
+        # Only someone arriving after the start counts: a run started by hand ("Clean now")
+        # with people at home is meant to finish, whatever the conditions.
+        arrived = [p for p in snap.people_home if p not in run.get("home_at_start", [])]
+        if code not in CLEANING_CODES or not arrived or run.get("by") == "user":
             return
         room = self.coordinator.current_room or ""
         if run["dock_after"] is None:
             run["dock_after"] = room
-            self._log("return", f"{self._and(snap.people_home)} came home: finishing "
+            self._log("return", f"{self._and(arrived)} came home: finishing "
                       f"{('the ' + room) if room else 'this room'}, then docking.")
             self._save()
         elif room and room != run["dock_after"]:
@@ -398,6 +411,8 @@ class TapoPlanner:
         self.config = merged_config({**self.config, **validate_changes(changes, self.config)})
         if "enabled" in changes:
             self._log("config", "Planner turned on." if self.config["enabled"] else "Planner turned off.")
+        if "preview" in changes and not self.config["preview"] and self.ran_window == self._preview_window:
+            self.ran_window = None      # a preview does not use up today's window
         if "preview" in changes:
             self._log("config", "Preview mode on: nothing will start." if self.config["preview"]
                       else "Preview mode off: the planner will start the robot.")

@@ -211,3 +211,32 @@ def test_tls_mode_keeps_https_on_the_discovery_port(tls, tport, url, verify):
     c._tls_mode, c._tpap_port = tls, tport
     c._apply_tls_mode()
     assert c.base_url == url and c._verify is verify
+
+
+def _conn_error_client(monkeypatch, exc):
+    c = _timeout_client(monkeypatch)
+
+    def post(path, body=None, binary=False):
+        c.posts.append(path)
+        raise exc
+    c._post = post
+    return c
+
+
+def test_write_not_resent_after_connection_lost_mid_reply(monkeypatch):
+    import requests
+    c = _conn_error_client(monkeypatch, requests.ConnectionError("Connection aborted: RemoteDisconnected"))
+    with pytest.raises(RuntimeError, match="not sent again"):
+        c.send("setSwitchClean", {"clean_on": True})
+    assert len(c.posts) == 1
+
+
+def test_write_resent_when_it_never_left(monkeypatch):
+    import requests
+    from urllib3.exceptions import MaxRetryError, NewConnectionError
+    refused = requests.ConnectionError(MaxRetryError(None, "/", NewConnectionError(None, "refused")))
+    for exc in (refused, requests.ConnectTimeout("connect timed out"), requests.HTTPError("401")):
+        c = _conn_error_client(monkeypatch, exc)
+        with pytest.raises(RuntimeError):
+            c.send("setSwitchClean", {"clean_on": True})
+        assert len(c.posts) == 2, exc

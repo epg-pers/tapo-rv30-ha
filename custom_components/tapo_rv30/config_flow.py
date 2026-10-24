@@ -153,6 +153,10 @@ class TapoRV30ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             data, errors = await self._validate(user_input)
             if data:
+                await self.async_set_unique_id(data[CONF_HOST])
+                if any(e.unique_id == data[CONF_HOST] and e.entry_id != entry.entry_id
+                       for e in self._async_current_entries(include_ignore=False)):
+                    return self.async_abort(reason="already_configured")
                 return self.async_update_reload_and_abort(
                     entry, data=data, title=f"Tapo Vacuum ({data[CONF_HOST]})", unique_id=data[CONF_HOST])
         return self.async_show_form(
@@ -183,7 +187,8 @@ class TapoOptionsFlow(config_entries.OptionsFlow):
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None):
         if user_input is not None:
-            return self.async_create_entry(title="", data=user_input)
+            # Keep the other stored options (the poll interval set from the device page).
+            return self.async_create_entry(title="", data={**self.config_entry.options, **user_input})
         current = self.config_entry.options.get(OPT_SHOW_PANEL, True)
         return self.async_show_form(
             step_id="init",

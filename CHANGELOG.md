@@ -1,5 +1,35 @@
 # Changelog
 
+## v0.27.0b1
+
+A full bug hunt across the integration. Everything below was found by reading and testing the code, then fixed.
+
+### Security
+
+- The card put room and preset names into the page unescaped, so a name could run script in the browser of anyone viewing it. Everything from the robot is now escaped.
+- Diagnostics downloads redact the device details (MAC, IP, Wi-Fi name, location) and the Matter setup code, which the raw status and settings sections still carried.
+- `send_raw` checks every call inside a `multipleRequest`, so the blocked onboarding and factory calls can no longer be sent that way. Busy checks apply to them too.
+- Services that can wipe or rewrite what is on the robot need an admin user: `send_raw`, `restore_map_backup`, `apply_map_setup`, `save_map_setup`, `fetch_cloud_map_backups`, `delete_preset`, `remove_schedule`, `remove_matter_fabric`. Automations and scripts are unaffected. The panel disables those controls for other users.
+- Environment settings such as `REQUESTS_CA_BUNDLE` no longer widen the TP-Link certificate pin. A robot that advertises device attestation but sends no proof is now logged as a warning.
+
+### Fixed
+
+- A command is only sent again after a lost reply when it certainly never reached the robot. Before, most dropped connections re-sent writes (a clean could start twice), and the RV30C (AES) client could send one write up to 8 times.
+- RV30C (AES): one getter the robot does not support no longer makes every status poll fail; sessions, sockets and threads are closed on unload and after a failed setup.
+- Planner: "Clean now" no longer docks after the first room because someone is home; a planner run only docks for someone who arrives during it. A preview run no longer uses up the day.
+- `restore_map_backup` waits for the robot to finish (it stopped at "running"), so a restored deleted map now finishes on its own. The pending finish survives a restart, and the automatic snapshot cannot overwrite the setup it needs meanwhile.
+- `apply_map_setup` and the map editor switch the robot back to the map it was on, and the editor keeps the robot's own fields on existing no-go zones and walls. One refused preset or schedule no longer stops the rest.
+- One failed settings read no longer drops that setting (the planner could ignore Do Not Disturb); overlapping polls no longer fire `clean_finished` twice; a failed map read retries the map alone; entities for settings or dock actions that only answer after a restart are added.
+- Saving the integration options no longer resets the poll interval; reconfigure refuses an address another entry already uses; the unreachable repair clears after a reload; firmware version updates after a robot update.
+- Room freshness: runs that could not be folded in yet are retried rather than skipped forever.
+- Services: `update_preset` finds rooms on the preset's own map; `run_schedule` accepts ids like "1" and checks the robot is free before changing levels; ambiguous partial room names are refused instead of cleaning every match; `passes` must be 1 to 3; `clean_zone` explains bad zones; `save_map_setup` keeps a good setup unless forced; a missing backup folder gives a clear message; `remote_drive` is removed with the integration.
+- Schedule restore compares map, rooms and preset, not just time; schedules on another floor show their own room names; long schedule lists are read past the first page.
+- Voice: "pause the robot" pauses instead of stopping; ambiguous room names ask which one; "vacuum go home" and "clean the whole house" do what they say.
+- Card: no blank card after editing its config or when the vacuum appears late; no animation running after the card is closed; 90 and 270 degree rotation fits; selections clear on a floor switch.
+- Panel: forms are no longer wiped by every poll while the robot works; the Planner tab no longer crashes without a map; editing another floor's schedule no longer moves it to this floor; an offline robot is still listed; remote drive state resets when switching robots; history charts use local days; planner live updates survive a reload.
+- Cloud backup fetch: a mistyped verification code can be retried.
+- Docs: the Sweep Walk field is `sweepWalk`.
+
 ## v0.26.3
 
 ### Fixed

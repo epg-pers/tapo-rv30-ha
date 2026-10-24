@@ -134,6 +134,7 @@ def test_resolve_explicit_map():
     ((["Hallway"], "   "), MapNotFound, "empty after trimming"),
     ((["Hallway"], '""'), MapNotFound, "empty after trimming"),
     ((["Hallway"], "s"), MapNotFound, "ambiguous"),
+    ((["n"],), RoomNotFound, "ambiguous"),          # Dining Room and Kitchen
 ])
 def test_resolve_errors(args, exc, fragment):
     with pytest.raises(exc, match=fragment):

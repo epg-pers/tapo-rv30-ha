@@ -86,17 +86,20 @@ async def ws_backups_image(hass: HomeAssistant, connection: websocket_api.Active
         connection.send_error(msg["id"], "not_found", f"No Tapo vacuum for {msg['entity_id']}")
         return
     folder = _folder(hass)
-    if backupstore.safe_path(folder, msg["file"]) is None:
-        connection.send_error(msg["id"], "not_found", "no such backup")
-        return
-    entry = next((e for e in backupstore.scan(folder) if e["file"] == msg["file"]), None)
-    if entry is None:
-        connection.send_error(msg["id"], "not_found", "no such backup")
-        return
 
-    def build() -> dict:
+    def build() -> dict | None:
+        # All file access (path checks, the folder scan, decoding) runs in the executor.
+        if backupstore.safe_path(folder, msg["file"]) is None:
+            return None
+        entry = next((e for e in backupstore.scan(folder) if e["file"] == msg["file"]), None)
+        if entry is None:
+            return None
         png, mime = backupstore.image_png(folder, entry)
         return {"file": entry["file"], "image": backupstore.data_uri(png, mime) if png else None,
                 "facts": backupstore.facts_for(folder, entry)}
 
-    connection.send_result(msg["id"], await hass.async_add_executor_job(build))
+    result = await hass.async_add_executor_job(build)
+    if result is None:
+        connection.send_error(msg["id"], "not_found", "no such backup")
+        return
+    connection.send_result(msg["id"], result)

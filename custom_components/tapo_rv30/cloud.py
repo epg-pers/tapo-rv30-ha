@@ -217,8 +217,9 @@ def _connect(client, username: str, password: str, terminal_uuid: str,
     if code:
         if terminal_uuid not in _PENDING:
             raise CloudError("no verification code was requested; run without a code first")
-        process_id, cloud.app_server = _PENDING.pop(terminal_uuid)
+        process_id, cloud.app_server = _PENDING[terminal_uuid]
         cloud.finish_mfa(process_id, code.strip())
+        _PENDING.pop(terminal_uuid, None)    # only once it worked: a mistyped code can be retried
     else:
         try:
             cloud.login()

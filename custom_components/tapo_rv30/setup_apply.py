@@ -70,9 +70,13 @@ async def apply_setup(hass, coord, map_id: int, snap: dict, dry_run: bool = Fals
         "plan": mapsnapshot.summary(plan), "dry_run": dry_run}
     if dry_run:
         return result
-    # setAreaInfo writes the active map; switch to the target first.
+    # setAreaInfo writes the active map; switch to the target first, and back afterwards so
+    # the next clean does not start on the wrong floor.
     info = await hass.async_add_executor_job(client.send, "getMapInfo")
-    if (info.get("result") or {}).get("current_map_id") != map_id:
+    current = (info.get("result") or {}).get("current_map_id")
+    previous = None
+    if current != map_id:
+        previous = current
         await hass.async_add_executor_job(client.set_current_map, map_id)
         await asyncio.sleep(5)
     written: dict[str, int] = {}
@@ -85,18 +89,32 @@ async def apply_setup(hass, coord, map_id: int, snap: dict, dry_run: bool = Fals
         if plan["furniture"]:
             written["furniture"] = await hass.async_add_executor_job(client.set_furniture, map_id, plan["furniture"])
         for body in plan["presets"]:
+            # One preset the robot refuses (a room gone after a remap) must not stop the rest.
             written.setdefault("presets", 0)
-            if await hass.async_add_executor_job(client.add_preset, body) == 0:
+            try:
+                await hass.async_add_executor_job(client.add_preset, body)
                 written["presets"] += 1
+            except Exception as exc:
+                skipped.append(f"preset {mapsnapshot._b64(body.get('rule_name'))!r}: {exc}")
         if plan["schedules"]:
             _, presets_now, _ = await hass.async_add_executor_job(robot_state, client, map_id)
             ready, why = mapsnapshot.resolve_schedules(plan["schedules"], presets_now, map_id)
             skipped += why
+            written["schedules"] = 0
             for rule in ready:
-                await hass.async_add_executor_job(client.add_schedule, rule)
-            written["schedules"] = len(ready)
+                try:
+                    await hass.async_add_executor_job(client.add_schedule, rule)
+                    written["schedules"] += 1
+                except Exception as exc:
+                    skipped.append(f"schedule at {rule.get('s_min')} min: {exc}")
     except Exception as exc:
         raise ApplyError(f"{exc} (written so far: {written})", written) from exc
+    finally:
+        if previous is not None:
+            try:
+                await hass.async_add_executor_job(client.set_current_map, previous)
+            except Exception as exc:
+                skipped.append(f"could not switch back to map {previous}: {exc}")
     await coord.async_settings_changed()
     await coord.async_request_map_refresh()
     result.update(written=written, skipped=skipped)

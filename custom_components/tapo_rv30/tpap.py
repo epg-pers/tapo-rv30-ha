@@ -32,7 +32,7 @@ from cryptography.hazmat.primitives.cmac import CMAC
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from ecdsa import NIST256p, NIST384p, NIST521p, ellipticcurve
 from requests.adapters import HTTPAdapter
-from urllib3.exceptions import InsecureRequestWarning
+from urllib3.exceptions import InsecureRequestWarning, NewConnectionError
 
 from .const import CLEANING_CODES, DOCKED_CODES, PAUSED_CODES
 
@@ -294,6 +294,16 @@ def _resend_safe(method: str, params: dict | None) -> bool:
     return method.startswith("get")
 
 
+def _never_sent(exc: requests.RequestException) -> bool:
+    """Did this request certainly not reach the robot? Only then may a write be retried:
+    the connection was refused or never set up, or the robot answered with an HTTP error
+    (a stale session) without acting on it. A reset or timeout after sending is unknown."""
+    if isinstance(exc, (requests.ConnectTimeout, requests.HTTPError)):
+        return True
+    reason = getattr(exc.args[0], "reason", None) if exc.args else None
+    return isinstance(exc, requests.ConnectionError) and isinstance(reason, NewConnectionError)
+
+
 def _opt_int(value) -> int | None:
     if value is None:
         return None
@@ -358,6 +368,9 @@ class TapoVacuumClient:
         self.username = username
         self.password = password
         self._http    = requests.Session()
+        # Environment settings (REQUESTS_CA_BUNDLE, proxies) must not apply to the robot: a CA
+        # bundle there would replace the TP-Link pin with every public CA.
+        self._http.trust_env = False
         self._cache   = self._cache_path(host, cache_dir)
         # HA calls us from several executor threads (poll + commands); the session
         # seq/nonce is shared state, so one request at a time.
@@ -482,6 +495,10 @@ class TapoVacuumClient:
 
     # ---- SPAKE2+ auth --------------------------------------------------------
     def _discover(self) -> None:
+        # Discovery always starts from the configured https port: a TLS mode or port cached
+        # from before a firmware update must not keep every new handshake failing.
+        self._tls_mode, self._tpap_port = None, None
+        self._apply_tls_mode()
         d = self._post("/", {"method": "login", "params": {"sub_method": "discover"}})
         _raise_for_error(d, "discover")
         r = d["result"]
@@ -651,6 +668,11 @@ class TapoVacuumClient:
         dac_ica   = share_result.get("dac_ica") or ""
         dac_proof = share_result.get("dac_proof")
         if not (dac_ca and isinstance(dac_proof, str)):
+            # The robot said it would prove its identity, then sent no proof. Refusing would
+            # lock out any firmware that advertises DAC without using it, so log it loudly:
+            # on this transport nothing else confirms the other end is the robot.
+            _LOGGER.warning("TPAP: %s advertised device attestation but sent no proof; "
+                            "its identity was not verified", self.host)
             return
         try:
             ca  = _load_cert(dac_ca)
@@ -670,6 +692,13 @@ class TapoVacuumClient:
         if not self._session_id:
             self._load_session() or self.authenticate()
 
+    def close(self) -> None:
+        """Release the HTTP connection pool (the entry is unloading or setup failed)."""
+        try:
+            self._http.close()
+        except Exception:
+            pass
+
     # ---- Send ----------------------------------------------------------------
     def send(self, method: str, params: dict | None = None) -> dict:
         """Send an encrypted request, re-handshaking once if the session lapsed."""
@@ -677,7 +706,10 @@ class TapoVacuumClient:
             return self._send(method, params)
 
     def _send(self, method: str, params: dict | None) -> dict:
-        self._ensure_auth()
+        try:
+            self._ensure_auth()
+        except _SessionLost as exc:     # internal: callers only know RuntimeError / AuthError
+            raise RuntimeError(str(exc)) from exc
         for attempt in range(2):
             try:
                 return self._send_once(method, params)
@@ -701,18 +733,16 @@ class TapoVacuumClient:
                               self._seq))
         try:
             raw = self._post(f"/stok={self._session_id}/ds", payload, binary=True)
-        except requests.ReadTimeout as exc:
-            # The request reached the robot but the reply did not come back. A read is
-            # safe to repeat; a write is not (it may have been carried out), so start a
-            # fresh session for the next call and report it instead of resending.
-            if _resend_safe(method, params):
-                raise _SessionLost(f"no reply: {exc}") from exc
+        except requests.RequestException as exc:
+            # A reset or refused connection usually means the device dropped us, so the
+            # session is rebuilt and the request sent again. A write is only sent again when
+            # it certainly never arrived: after a timeout or a connection lost mid-reply the
+            # robot may already have acted on it (started a clean, added a schedule).
+            if _resend_safe(method, params) or _never_sent(exc):
+                raise _SessionLost(f"transport error: {exc}") from exc
             self._clear_session()
             raise RuntimeError(f"no reply to {method}; not sent again in case the robot already "
                                "acted on it, check its state") from exc
-        except requests.RequestException as exc:
-            # A reset or refused connection usually means the device dropped us.
-            raise _SessionLost(f"transport error: {exc}") from exc
         if len(raw) < 4 + _TAG_LEN:
             raise _SessionLost(f"response too short ({len(raw)} bytes)")
         rseq = struct.unpack(">I", raw[:4])[0]
@@ -976,8 +1006,20 @@ class TapoVacuumClient:
 
     def get_schedules(self) -> list[dict]:
         """Saved schedule rules as configured in the Tapo app (get_schedule_rules)."""
-        r = self.send("get_schedule_rules", {"start_index": 0})
-        return (r.get("result") or {}).get("rule_list", [])
+        return self._all_schedule_pages(self.send("get_schedule_rules", {"start_index": 0}).get("result") or {}
+                                        ).get("rule_list", [])
+
+    def _all_schedule_pages(self, first: dict) -> dict:
+        """get_schedule_rules pages its list (start_index / sum): fetch the rest, if any."""
+        rules = list(first.get("rule_list") or [])
+        total = _opt_int(first.get("sum")) or 0
+        while len(rules) < total:
+            page = (self.send("get_schedule_rules", {"start_index": len(rules)}).get("result") or {})
+            more = page.get("rule_list") or []
+            if not more:
+                break
+            rules += more
+        return {**first, "rule_list": rules}
 
     # Schedule management: the app posts the ScheduleRule bean as-is. Verified on an
     # RV30 Max Plus: add returns {"id": "S1"}, edit needs the whole rule (a partial
@@ -1016,9 +1058,11 @@ class TapoVacuumClient:
         its settings: suction / water / passes via setCleanAttr, then the rooms,
         preset or whole house via setSwitchClean.
         """
-        rule = next((r for r in self.get_schedules() if r.get("id") == schedule_id), None)
+        rule = next((r for r in self.get_schedules() if str(r.get("id")) == str(schedule_id)), None)
         if rule is None:
             raise ValueError(f"No schedule with id {schedule_id!r}")
+        # Before the default levels are changed: a busy robot would refuse the clean anyway.
+        self._require_idle("running a schedule")
         attr = rule.get("clean_attr") or {}
         with self._lock:
             cur = self.send("getCleanAttr", {"type": "global"})["result"]
@@ -1116,6 +1160,8 @@ class TapoVacuumClient:
         for key, method, params in self._SETTINGS:
             try:
                 out[key] = self.send(method, params)["result"]
+                if key == "schedules":
+                    out[key] = self._all_schedule_pages(out[key] or {})
             except Exception as exc:
                 _LOGGER.debug("%s failed: %s", method, exc)
         return out

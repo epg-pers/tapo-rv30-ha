@@ -31,7 +31,16 @@ SENTENCES_HOME = [
     f"(send|tell|get) [the] {ROBOT} (home|back|to [the] (dock|base|charger))",
     f"{ROBOT} (go home|dock|return to [the] (dock|base))",
 ]
-SENTENCES_STOP = [f"(stop|pause|halt) [the] {ROBOT}", f"{ROBOT} stop"]
+SENTENCES_STOP = [f"(stop|halt) [the] {ROBOT}", f"{ROBOT} stop"]
+SENTENCES_PAUSE = [f"pause [the] {ROBOT}", f"{ROBOT} pause"]
+
+# "vacuum go home" and "clean the whole house" also fit the rooms wildcard; whichever
+# trigger answers, these phrases must do what they say rather than look for a room.
+_WHOLE = {"everywhere", "everything", "whole house", "entire house", "whole home", "entire home",
+          "whole flat", "entire flat", "whole floor", "entire floor", "whole place", "entire place"}
+_HOME = {"go home", "home", "dock", "return to dock", "return to the dock", "return to base",
+         "return to the base", "back"}
+_STOP = {"stop", "halt"}
 
 
 def _coordinators(hass: HomeAssistant) -> list:
@@ -57,7 +66,11 @@ async def _clean_rooms(hass: HomeAssistant, coord, phrase: str) -> str:
     chosen, unknown = [], []
     for w in wanted:
         key = fold(w)
-        hit = rooms.get(key) or next((r for k, r in rooms.items() if key and key in k), None)
+        partial = [r for k, r in rooms.items() if key and key in k]
+        if key not in rooms and len(partial) > 1:
+            return (f"{w} could be {' or '.join(r['name_text'] for r in partial)}. "
+                    "Which one?")
+        hit = rooms.get(key) or (partial[0] if partial else None)
         (chosen if hit else unknown).append(hit or w)
     if unknown:
         return (f"I don't know a room called {', '.join(unknown)}. "
@@ -90,6 +103,13 @@ def async_setup_voice(hass: HomeAssistant):
             return "No Tapo robot is set up."
         ent = result.entities.get("rooms")
         phrase = (ent.text if ent is not None else "").strip()
+        key = " ".join(fold(phrase).replace("the ", " ").split())
+        if key in _WHOLE:
+            return await on_all(user_input, result)
+        if key in _HOME:
+            return await on_home(user_input, result)
+        if key in _STOP:
+            return await on_stop(user_input, result)
         return await _clean_rooms(hass, coord, phrase)
 
     async def on_all(user_input, result):
@@ -98,31 +118,41 @@ def async_setup_voice(hass: HomeAssistant):
             return "No Tapo robot is set up."
         if coord.busy:
             return f"{coord.device_name} is already {coord.busy}."
-        await hass.async_add_executor_job(coord.client.start)
-        await coord.async_refresh_soon()
-        return f"{coord.device_name} is cleaning the whole house."
+        return await _do(coord, coord.client.start, "is cleaning the whole house")
 
     async def on_home(user_input, result):
         coord = _pick(hass, user_input.text)
         if coord is None:
             return "No Tapo robot is set up."
-        await hass.async_add_executor_job(coord.client.dock)
-        await coord.async_refresh_soon()
-        return f"{coord.device_name} is heading home."
+        return await _do(coord, coord.client.dock, "is heading home")
 
     async def on_stop(user_input, result):
         coord = _pick(hass, user_input.text)
         if coord is None:
             return "No Tapo robot is set up."
-        await hass.async_add_executor_job(coord.client.stop)
+        return await _do(coord, coord.client.stop, "stopped")
+
+    async def on_pause(user_input, result):
+        coord = _pick(hass, user_input.text)
+        if coord is None:
+            return "No Tapo robot is set up."
+        return await _do(coord, coord.client.pause, "is paused")
+
+    async def _do(coord, fn, done: str) -> str:
+        try:
+            await hass.async_add_executor_job(fn)
+        except Exception as exc:
+            _LOGGER.warning("Voice command failed: %s", exc)
+            return f"{coord.device_name} did not accept that: {exc}"
         await coord.async_refresh_soon()
-        return f"{coord.device_name} stopped."
+        return f"{coord.device_name} {done}."
 
     unregisters = [
         manager.register_trigger(SENTENCES_ROOMS, on_rooms),
         manager.register_trigger(SENTENCES_ALL, on_all),
         manager.register_trigger(SENTENCES_HOME, on_home),
         manager.register_trigger(SENTENCES_STOP, on_stop),
+        manager.register_trigger(SENTENCES_PAUSE, on_pause),
     ]
 
     @callback

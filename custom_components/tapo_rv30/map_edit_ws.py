@@ -9,6 +9,7 @@ names and order). The map's shape (grid) is the robot's own and is never written
 from __future__ import annotations
 
 import base64
+import logging
 from typing import Any
 
 import voluptuous as vol
@@ -19,8 +20,11 @@ from homeassistant.helpers import entity_registry as er
 from .const import DOMAIN
 from .mapdata import b64name
 
+_LOGGER = logging.getLogger(__name__)
+
 _KEY = f"{DOMAIN}_map_edit_ws"
 _AREA_TYPES = ("forbid", "virtual_wall", "carpet_rectangle", "carpet_round")
+_KEEP = ("label", "define_type", "carpet_strategy")   # robot fields the editor does not round-trip
 
 
 def _coord(hass: HomeAssistant, entity_id: str):
@@ -93,13 +97,25 @@ async def ws_edit_apply(hass: HomeAssistant, connection: websocket_api.ActiveCon
         return
     map_id = msg["map_id"]
     result: dict[str, Any] = {}
+    previous = None
     try:
-        # setAreaInfo writes the active map; switch to the target first.
+        # setAreaInfo writes the active map; switch to the target first (and back after).
         info = await hass.async_add_executor_job(coord.client.send, "getMapInfo")
-        if (info.get("result") or {}).get("current_map_id") != map_id:
+        current = (info.get("result") or {}).get("current_map_id")
+        if current != map_id:
+            previous = current
             await hass.async_add_executor_job(coord.client.set_current_map, map_id)
+        # The editor only round-trips id and shape; keep the robot's own fields (label,
+        # define_type, carpet handling) on zones it already has, or the save would drop them.
+        existing = {}
+        if msg.get("areas"):
+            data = await hass.async_add_executor_job(coord.client.get_map_data, map_id)
+            existing = {(a.get("type"), a.get("id")): a for a in data.get("area_list", [])}
         for t, items in (msg.get("areas") or {}).items():
             if t in _AREA_TYPES:
+                items = [{**{k: old[k] for k in _KEEP if k in old}, **item}
+                         if (old := existing.get((t, item.get("id")))) else item
+                         for item in items]
                 result[t] = await hass.async_add_executor_job(coord.client.set_areas, map_id, t, items)
         if "furniture" in msg:
             result["furniture"] = await hass.async_add_executor_job(
@@ -116,5 +132,11 @@ async def ws_edit_apply(hass: HomeAssistant, connection: websocket_api.ActiveCon
     except Exception as exc:
         connection.send_error(msg["id"], "write_failed", str(exc))
         return
+    finally:
+        if previous is not None:      # leave the robot on the map it was using
+            try:
+                await hass.async_add_executor_job(coord.client.set_current_map, previous)
+            except Exception as exc:
+                _LOGGER.warning("Could not switch %s back to map %s: %s", coord.device_name, previous, exc)
     await coord.async_request_map_refresh()
     connection.send_result(msg["id"], {"map_id": map_id, "result": result})

@@ -14,9 +14,21 @@ function entitiesFor(hass, deviceId) {
 }
 function byDomain(list, domain) { return list.filter((e) => e.entity_id.startsWith(domain + ".")); }
 function find(list, needle) { return list.find((e) => e.entity_id.includes(needle)); }
+// A URL-safe view path that no other robot's view uses. Accents are dropped ("Café" -> "cafe");
+// names with no Latin letters or digits at all fall back to "robot". A purely numeric path would
+// be read as a view index, so it gets a prefix too.
+function viewPath(name, used) {
+  let base = String(name).normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  if (!base || /^\d+$/.test(base)) base = base ? `robot-${base}` : "robot";
+  let path = base;
+  for (let n = 2; used.has(path); n++) path = `${base}-${n}`;
+  used.add(path);
+  return path;
+}
 function title(hass, e) { return (hass.states[e.entity_id] || {}).attributes?.friendly_name || e.entity_id; }
 
-function robotViews(hass, device) {
+function robotViews(hass, device, used) {
   const ents = entitiesFor(hass, device.id);
   const vac = byDomain(ents, "vacuum")[0];
   if (!vac) return [];
@@ -57,7 +69,7 @@ function robotViews(hass, device) {
   const sched = find(sensors, "schedules");
   const totals = pick(sensors, ["total_cleans", "total_area", "total_cleaning_time"]);
   if (sched || totals.length) cards.push({ type: "entities", title: "Schedules and totals", entities: [sched?.entity_id].filter(Boolean).concat(totals) });
-  return [{ title: name, path: name.toLowerCase().replace(/[^a-z0-9]+/g, "-"), icon: "mdi:robot-vacuum",
+  return [{ title: name, path: viewPath(name, used), icon: "mdi:robot-vacuum",
             type: "sections", max_columns: 3,
             sections: cards.map((c) => ({ type: "grid", cards: [c] })) }];
 }
@@ -66,7 +78,8 @@ class TapoRV30DashboardStrategy {
   static async generate(config, hass) {
     const devices = Object.values(hass.devices || {}).filter((d) =>
       (d.identifiers || []).some((i) => i[0] === DOMAIN));
-    const views = devices.flatMap((d) => robotViews(hass, d));
+    const used = new Set();
+    const views = devices.flatMap((d) => robotViews(hass, d, used));
     if (!views.length) {
       return { title: "Tapo Vacuum", views: [{ title: "Tapo Vacuum", cards: [{ type: "markdown",
         content: "No Tapo robot vacuum found. Set up the Tapo Robot Vacuum integration first." }] }] };
@@ -74,4 +87,4 @@ class TapoRV30DashboardStrategy {
     return { title: config.title || "Tapo Vacuum", views };
   }
 }
-customElements.define("ll-strategy-dashboard-tapo-rv30", TapoRV30DashboardStrategy);
+if (!customElements.get("ll-strategy-dashboard-tapo-rv30")) customElements.define("ll-strategy-dashboard-tapo-rv30", TapoRV30DashboardStrategy);
