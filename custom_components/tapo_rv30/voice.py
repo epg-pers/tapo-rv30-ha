@@ -81,7 +81,8 @@ def _pick(hass: HomeAssistant, text: str, rooms: list[str] | None = None, active
         return named
     if rooms:
         have = [c for c in coords
-                if all(any(fold(w) in fold(r.get("name_text") or "") for r in c.rooms_named()) for w in rooms)]
+                if all(any(_room_match(fold(w), fold(r.get("name_text") or "")) for r in c.rooms_named())
+                       for w in rooms)]
         if len(have) == 1:
             return have[0]
     if active:
@@ -89,6 +90,19 @@ def _pick(hass: HomeAssistant, text: str, rooms: list[str] | None = None, active
         if len(working) == 1:
             return working[0]
     return None
+
+
+def _room_match(said: str, name: str) -> bool:
+    """A room asked for by part of its name: the start of one of its words, three letters or
+    more ("bath" is Bathroom). "it" is not Kitchen and "room" is not Bedroom: a stray
+    sentence must not start a clean."""
+    said = said.strip()
+    if said == name:
+        return True
+    return len(said) >= 3 and said not in _GENERIC and any(w.startswith(said) for w in name.split())
+
+
+_GENERIC = {"room", "rooms", "area", "floor", "house", "home"}     # in many names, mean none of them
 
 
 def _which(hass: HomeAssistant) -> str:
@@ -112,7 +126,7 @@ async def _clean_rooms(hass: HomeAssistant, coord, phrase: str) -> str:
     chosen, unknown = [], []
     for w in wanted:
         key = fold(w)
-        partial = [r for k, r in rooms.items() if key and key in k]
+        partial = [r for k, r in rooms.items() if _room_match(key, k)]
         if key not in rooms and len(partial) > 1:
             return (f"{w} could be {' or '.join(r['name_text'] for r in partial)}. "
                     "Which one?")
@@ -123,6 +137,8 @@ async def _clean_rooms(hass: HomeAssistant, coord, phrase: str) -> str:
                 f"{coord.device_name} knows {', '.join(r['name_text'] for r in coord.rooms_named()) or 'no rooms'}.")
     if coord.busy:
         return f"{coord.device_name} is already {coord.busy}."
+    if why := coord.start_refused():
+        return f"{coord.device_name} {why}."
     names = [r["name_text"] for r in chosen]
     try:
         await hass.async_add_executor_job(coord.client.clean_rooms, [r["id"] for r in chosen], coord.map_id)
@@ -183,6 +199,8 @@ def async_setup_voice(hass: HomeAssistant):
             return _which(hass)
         if coord.busy:
             return f"{coord.device_name} is already {coord.busy}."
+        if why := coord.start_refused():
+            return f"{coord.device_name} {why}."
         return await _do(coord, coord.client.start, "is cleaning the whole house")
 
     async def on_home(user_input, result):

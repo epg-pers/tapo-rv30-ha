@@ -8,8 +8,24 @@ from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
+from .const import DOMAIN
 from .coordinator import TapoCoordinator
 from .tpap import AuthError, RobotBusy
+
+
+def remove_missing_parts(hass, coordinator: TapoCoordinator, entry: ConfigEntry, domain: str,
+                         keys: list[str]) -> None:
+    """Drop registry entries for part entities no longer created because the robot does not
+    report the part (0.28 made them for every robot). Only on a definite answer: a parts list
+    that was read, so a failed read never removes anything."""
+    from homeassistant.helpers import entity_registry as er
+
+    if not keys or not (coordinator.data or {}).get("consumables"):
+        return
+    reg = er.async_get(hass)
+    for key in keys:
+        if eid := reg.async_get_entity_id(domain, DOMAIN, f"{entry.entry_id}_{key}"):
+            reg.async_remove(eid)
 
 
 class TapoEntity(CoordinatorEntity[TapoCoordinator]):

@@ -22,16 +22,16 @@ const TRANSLATION_KEYS = { status: "status", error: "error", current_room: "curr
 const objectId = (e) => e.entity_id.slice(e.entity_id.indexOf(".") + 1);
 // An id made from a name the way Home Assistant makes entity ids ("Jarvis Robot" -> "jarvis_robot").
 const slug = (n) => String(n || "").normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
-// One of the device's entities by its exact suffix ("last_clean" is never "last_clean_area"). An id
-// <base>_<suffix> wins (bases: the vacuum's object id and the device's name), then the shortest, so
-// "status" is the robot's Status and not its Planner Status.
+// One of the device's entities by its exact suffix ("last_clean" is never "last_clean_area"), allowing
+// the "_2" Home Assistant adds for a second robot of the same name. An id <base>_<suffix> wins (bases:
+// the vacuum's object id and the device's name), then the shortest, so "status" is the robot's Status
+// and not its Planner Status.
 function find(list, suffix, bases) {
   const key = TRANSLATION_KEYS[suffix];
   const byKey = key && list.find((e) => e.translation_key === key);
   if (byKey) return byKey;
-  const exact = list.find((e) => bases.some((b) => objectId(e) === `${b}_${suffix}`));
-  if (exact) return exact;
-  return list.filter((e) => objectId(e).endsWith(`_${suffix}`)).sort((a, b) => objectId(a).length - objectId(b).length)[0];
+  const hits = list.filter((e) => new RegExp(`_${suffix}(_\\d+)?$`).test(objectId(e))).sort((a, b) => objectId(a).length - objectId(b).length);
+  return hits.find((e) => bases.some((b) => new RegExp(`^${b}_${suffix}(_\\d+)?$`).test(objectId(e)))) || hits[0];
 }
 // A URL-safe view path that no other robot's view uses. Accents are dropped ("Café" -> "cafe");
 // names with no Latin letters or digits at all fall back to "robot". A purely numeric path would

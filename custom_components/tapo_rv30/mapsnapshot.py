@@ -65,11 +65,15 @@ def is_degraded(old: dict | None, new: dict) -> bool:
     no rooms or unnamed rooms; that must never replace a good snapshot."""
     if not old:
         return False
-    old_rooms = len((old.get("areas") or {}).get("room", []))
-    new_rooms = len((new.get("areas") or {}).get("room", []))
+    old_rooms = {r.get("id"): _b64(r.get("name")) for r in (old.get("areas") or {}).get("room", [])}
+    new_rooms = {r.get("id"): _b64(r.get("name")) for r in (new.get("areas") or {}).get("room", [])}
     if old_rooms and not new_rooms:
         return True
-    return named_rooms(new) < named_rooms(old)
+    if named_rooms(old) and not named_rooms(new):
+        return True
+    # A room that is still there but has lost its name. Rooms merged or deleted in the app are
+    # simply gone, and fewer rooms is then the new truth, not damage.
+    return any(name and not new_rooms.get(rid) for rid, name in old_rooms.items() if rid in new_rooms)
 
 
 def _norm_zone(a: dict) -> dict:
@@ -83,7 +87,7 @@ def _shape(zone: dict) -> str:
 def _hhmm(s_min) -> str:
     try:
         return f"{int(s_min) // 60:02d}:{int(s_min) % 60:02d}"
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return str(s_min)
 
 

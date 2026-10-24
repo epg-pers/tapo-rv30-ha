@@ -13,7 +13,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import AUTO_EMPTY_MODES, DOMAIN, WATER_INT_TO_NAME, WATER_NAME_TO_INT
 from .coordinator import TapoCoordinator
-from .entity import TapoEntity
+from .entity import TapoEntity, remove_missing_parts
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -27,10 +27,12 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     coordinator: TapoCoordinator = hass.data[DOMAIN][entry.entry_id]
-    entities: list[SelectEntity] = [
-        TapoCleanPassesSelect(coordinator, entry),
-        TapoWaterLevelSelect(coordinator, entry),
-    ]
+    entities: list[SelectEntity] = [TapoCleanPassesSelect(coordinator, entry)]
+    # Robots without a mop have no water level: no mop component and no water level reported.
+    if (coordinator.components and coordinator.has("mop")) or (coordinator.data or {}).get("cistern") is not None:
+        entities.append(TapoWaterLevelSelect(coordinator, entry))
+    else:
+        remove_missing_parts(hass, coordinator, entry, "select", ["water_level"])
     if "dust_collection_mode" in (coordinator.settings.get("dust") or {}):
         entities.append(TapoAutoEmptyModeSelect(coordinator, entry))
     async_add_entities(entities)

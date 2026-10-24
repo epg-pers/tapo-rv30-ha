@@ -27,7 +27,7 @@ from .const import (
     STATUS_LABELS,
 )
 from .coordinator import TapoCoordinator
-from .entity import TapoEntity
+from .entity import TapoEntity, remove_missing_parts
 from .mapdata import dnd_window, matter_state
 
 _LOGGER = logging.getLogger(__name__)
@@ -234,6 +234,10 @@ async def async_setup_entry(
     if coordinator.has("matter") and "matter_setup" in coordinator.settings:
         entities.append(TapoStatusSensor(coordinator, entry, _MATTER_CODE_SENSOR))
 
+    remove_missing_parts(hass, coordinator, entry, "sensor",
+                         [f"consumable_{f}_used" for f in ("main_brush_lid_time", "rag_time")
+                          if not coordinator.has_part(f)]
+                         + [f"consumable_{k}" for k in CONSUMABLE_LABELS if not coordinator.has_part(k)])
     for ckey, clabel in CONSUMABLE_LABELS.items():
         if not coordinator.has_part(ckey):
             continue

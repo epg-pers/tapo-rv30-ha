@@ -5,10 +5,12 @@ from homeassistant.components.button import ButtonEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.exceptions import ServiceValidationError
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN
-from .entity import TapoEntity
+from .entity import TapoEntity, remove_missing_parts
 
 # resetConsumablesTime keys, as the app sends them (the mop cloth has no reset in the app)
 RESETTABLE = {
@@ -26,20 +28,41 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry,
         entities.append(TapoEmptyBinButton(c, entry, "empty_bin", "Empty Bin"))
     entities += [TapoResetButton(c, entry, part, label) for part, label in RESETTABLE.items()
                  if c.has_part(f"{part}_time")]
+    remove_missing_parts(hass, c, entry, "button",
+                         [f"reset_{part}" for part in RESETTABLE if not c.has_part(f"{part}_time")])
     entities += [TapoDockActionButton(c, entry, key) for key in c.dock_actions if key in DOCK_LABELS]
     if c.has("matter") and "matter_status" in c.settings:
         entities.append(TapoMatterPairingButton(c, entry, "matter_pairing", "Open Matter Pairing Window"))
     async_add_entities(entities)
 
     # One button per preset; presets added in the app later appear on the next refresh.
-    known: set[int] = set()
+    known: dict[int, int | None] = {}     # preset id -> the map its button was made for
 
     @callback
     def _sync_presets() -> None:
-        new = [p for p in c.presets if p["id"] not in known]
-        if new:
-            known.update(p["id"] for p in new)
-            async_add_entities(TapoPresetButton(c, entry, p["id"]) for p in new)
+        reg = er.async_get(hass)
+        prefix = f"{entry.entry_id}_preset_"
+        if c.presets_read:
+            # A preset deleted in the app takes its button with it. The robot reuses preset ids,
+            # and an old button (pressed by an automation) must not come back running a different
+            # preset. A preset never changes map, so the same id on another map is another preset:
+            # its old button goes, and the new one gets its own on the next update.
+            maps = {p["id"]: p.get("map_id") for p in c.presets}
+            for ent in er.async_entries_for_config_entry(reg, entry.entry_id):
+                rid = ent.unique_id[len(prefix):] if ent.unique_id.startswith(prefix) else None
+                if rid is None or not rid.isdigit():
+                    continue
+                rid = int(rid)
+                if rid not in maps or (rid in known and known[rid] != maps[rid]):
+                    reg.async_remove(ent.entity_id)
+                    known.pop(rid, None)
+                    maps.pop(rid, None)
+            fresh = [p for p in c.presets if p["id"] in maps and p["id"] not in known]
+        else:
+            fresh = [p for p in c.presets if p["id"] not in known]
+        if fresh:
+            known.update({p["id"]: p.get("map_id") for p in fresh})
+            async_add_entities(TapoPresetButton(c, entry, p["id"], p.get("map_id")) for p in fresh)
 
     _sync_presets()
     entry.async_on_unload(c.async_add_listener(_sync_presets))
@@ -101,13 +124,16 @@ class TapoPresetButton(TapoEntity, ButtonEntity):
     """Starts a Tapo-app preset (clean_mode 5), switching map first if needed."""
     _attr_icon = "mdi:play-box-multiple"
 
-    def __init__(self, coordinator, entry, rule_id: int) -> None:
+    def __init__(self, coordinator, entry, rule_id: int, map_id: int | None = None) -> None:
         super().__init__(coordinator, entry, f"preset_{rule_id}", None)
         self._rule_id = rule_id
+        self._map_id = map_id
 
     @property
     def _preset(self) -> dict | None:
-        return next((p for p in self.coordinator.presets if p["id"] == self._rule_id), None)
+        # Only the preset this button was made for: an id reused on another map is not it.
+        return next((p for p in self.coordinator.presets if p["id"] == self._rule_id
+                     and (self._map_id is None or p.get("map_id") == self._map_id)), None)
 
     @property
     def name(self) -> str:
@@ -128,5 +154,7 @@ class TapoPresetButton(TapoEntity, ButtonEntity):
         p = self._preset
         if p is None:
             return
+        if why := self.coordinator.start_refused():
+            raise ServiceValidationError(f"{self.coordinator.device_name} {why}")
         await self._call(self.coordinator.client.run_preset, p["id"], p["map_id"], p.get("clean_order", True))
         await self.coordinator.async_refresh_soon()

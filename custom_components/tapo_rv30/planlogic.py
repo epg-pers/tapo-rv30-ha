@@ -153,7 +153,7 @@ def schedule_soon(now: datetime, schedules: list[dict], minutes: int = 60) -> di
 def _minutes(value) -> int:
     try:
         return int(float(value)) % 1440
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return 0
 
 

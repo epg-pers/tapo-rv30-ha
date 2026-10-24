@@ -64,8 +64,10 @@ RUN_STALE_AFTER = 4 * 3600        # a restored run older than this is over
 
 
 def _norm(name: str) -> str:
-    s = unicodedata.normalize("NFKD", name or "").encode("ascii", "ignore").decode().lower()
-    return re.sub(r"[^a-z0-9]+", " ", s.replace("&", " and ")).strip()
+    """A name as matched against area names: case and accents folded, punctuation as spaces.
+    Letters of every script are kept (Cyrillic, Chinese, Greek...), so names in them still match."""
+    s = "".join(c for c in unicodedata.normalize("NFKD", name or "") if not unicodedata.combining(c)).casefold()
+    return " ".join(re.sub(r"[\W_]+", " ", s.replace("&", " and ")).split())
 
 
 class TapoPlanner:
@@ -92,10 +94,20 @@ class TapoPlanner:
         self._retry_at = 0.0
         self._evaluating = False
         self._again = False
+        self._starting = False          # a start is waiting for the robot
+        self._read_only = False         # the stored file could not be read: do not overwrite it
 
     # ---- lifecycle -------------------------------------------------------------------
     async def async_load(self) -> None:
-        data = await self._store.async_load() or {}
+        try:
+            data = await self._store.async_load() or {}
+        except Exception as exc:
+            # A file from a newer version (after a downgrade) or one that is not ours: plan with
+            # the defaults and leave the file alone rather than fail the whole robot.
+            _LOGGER.warning("Planner settings unreadable (%s); using the defaults and not saving", exc)
+            data, self._read_only = {}, True
+        if not isinstance(data, dict):
+            data = {}
         self.config = merged_config(data.get("config"))
         self.log = list(data.get("log") or [])[:LOG_SIZE]
         self.skip_today = data.get("skip_today")
@@ -117,12 +129,14 @@ class TapoPlanner:
                 "run": self._run}
 
     def _save(self) -> None:
-        self._store.async_delay_save(self._data, 2)
+        if not self._read_only:
+            self._store.async_delay_save(self._data, 2)
 
     async def async_flush(self) -> None:
         """Write now (unload): a reload builds a new planner that would otherwise read the
         file before the delayed save lands, then overwrite it."""
-        await self._store.async_save(self._data())
+        if not self._read_only:
+            await self._store.async_save(self._data())
 
     @callback
     def async_start(self) -> None:
@@ -323,7 +337,7 @@ class TapoPlanner:
                 self.ran_window = self._preview_window = window_key(snap.now)
                 self.preview_names = list(d.names)
                 self._log("preview", f"Preview: would have cleaned {self._and(d.names)}. " + "; ".join(d.chips))
-                self._fire("preview", d)
+                self._fire("preview", d, by="planner")
                 self._save()
             else:
                 await self._start(snap, d.rooms, d.names, d.chips, by="planner")
@@ -342,6 +356,18 @@ class TapoPlanner:
             if by == "user":
                 raise PlannerError("The map is being written (map setup or editor); try again shortly")
             return False
+        if self._starting:      # one start at a time: the rollback below assumes it is the only one
+            if by == "user":
+                raise PlannerError("A clean is already being started")
+            return False
+        self._starting = True
+        try:
+            return await self._start_once(snap, keys, names, chips, by)
+        finally:
+            self._starting = False
+
+    async def _start_once(self, snap: Snapshot, keys: list[str], names: list[str], chips: list[str],
+                          by: str) -> bool:
         map_id = self.coordinator.map_id
         room_ids = [int(k.split(":", 1)[1]) for k in keys]
         # Recorded before the start is awaited, so an evaluation or unload meanwhile sees the
@@ -465,10 +491,14 @@ class TapoPlanner:
         opts = dict((entry.options.get("vacuum") or {}) if entry else {})
         mapping = {a: list(s) for a, s in (opts.get("area_mapping") or {}).items()}
         mapped = {seg for segs in mapping.values() for seg in segs}
-        by_name = {_norm(a.name): a.id for a in ar.async_get(self.hass).async_list_areas()}
+        by_name: dict[str, str | None] = {}
+        for a in ar.async_get(self.hass).async_list_areas():
+            k = _norm(a.name)
+            if k:       # two areas with the same name: neither is guessed
+                by_name[k] = None if k in by_name else a.id
         matched = []
         for key, name in self.rooms():
-            area_id = by_name.get(_norm(name))
+            area_id = by_name.get(_norm(name)) if _norm(name) else None
             if key in mapped or not area_id:
                 continue
             mapping.setdefault(area_id, []).append(key)

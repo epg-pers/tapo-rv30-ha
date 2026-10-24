@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import tempfile
 from collections.abc import Mapping
 from typing import Any
 
@@ -40,7 +41,14 @@ async def _test_connection(
     fail on AES too, so it is not tried.
     """
     def _try_tpap():
-        TapoVacuumClient(host, user, pw, DEFAULT_PORT).authenticate()
+        # A throwaway session folder: the entry's client makes its own session, and this test
+        # one must not leave a live session key behind.
+        with tempfile.TemporaryDirectory() as tmp:
+            c = TapoVacuumClient(host, user, pw, DEFAULT_PORT, cache_dir=tmp)
+            try:
+                c.authenticate()
+            finally:
+                c.close()
 
     def _try_aes():
         c = AesVacuumClient(host, user, pw, DEFAULT_PORT)
@@ -131,10 +139,15 @@ class TapoRV30ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                             # Its robot has moved too; its own lease update will set this.
                             self.hass.config_entries.async_update_entry(
                                 other, unique_id=f"moved-{other.entry_id}")
+                    old_host = entry.data.get(CONF_HOST, "")
                     self.hass.config_entries.async_update_entry(
                         entry, data={**entry.data, CONF_HOST: ip}, unique_id=ip,
                         title=f"Tapo Vacuum ({ip})")
                     self.hass.config_entries.async_schedule_reload(entry.entry_id)
+                    # The session saved for the old address is never used again: do not keep its key.
+                    cache = self.hass.config.path(".storage", DOMAIN)
+                    self.hass.async_add_executor_job(
+                        lambda h=old_host: TapoVacuumClient._cache_path(h, cache).unlink(missing_ok=True))
             return self.async_abort(reason="already_configured")
         for entry in self._async_current_entries(include_ignore=False):
             if entry.data.get(CONF_HOST) == ip:

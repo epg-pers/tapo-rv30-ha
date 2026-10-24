@@ -10,8 +10,7 @@
  * the vacuum's device automatically.
  */
 
-const CARD_VERSION = "0.29.0";
-const ROOM_COLORS = ["#ffb3ba", "#bae1ff", "#baffc9", "#ffffba", "#dcbaff", "#ffdcba", "#baffff"];
+const CARD_VERSION = "0.30.0b1";
 
 const ICONS = {
   start: "mdi:play", pause: "mdi:pause", stop: "mdi:stop", dock: "mdi:home-import-outline",
@@ -28,6 +27,8 @@ const pct = (v) => { const n = Number(v); return isFinite(n) ? Math.max(0, Math.
 // clean_rooms data for rooms read from one map: with map_id the service refuses them once the robot
 // is on another map, instead of cleaning a room there that happens to have the same id.
 const onMap = (data, mapId) => (Number.isInteger(mapId) ? { ...data, map_id: mapId } : data);
+// An id made from a name the way Home Assistant makes entity ids ("Jarvis Robot" -> "jarvis_robot").
+const slug = (n) => String(n || "").normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
 
 const FRESH = (ts) => {
   if (!ts) return null;
@@ -59,7 +60,7 @@ ha-card { overflow: hidden; }
 .progress > div { height: 100%; background: var(--primary-color); transition: width .6s ease; }
 .banner { margin: 4px 16px 8px; padding: 8px 12px; border-radius: 10px; font-size: .9em; display: flex; gap: 8px; align-items: center;
   background: color-mix(in srgb, var(--error-color, #db4437) 14%, transparent); color: var(--error-color, #db4437); }
-.mapwrap { position: relative; margin: 6px 12px; border-radius: 14px; overflow: hidden;
+.mapwrap { position: relative; margin: 6px 12px; border-radius: 14px; overflow: hidden; container-type: inline-size;
   background: color-mix(in srgb, var(--primary-text-color) 5%, transparent); }
 .stage { position: relative; }
 .stage.r90, .stage.r270 { aspect-ratio: var(--map-h) / var(--map-w); }
@@ -72,7 +73,9 @@ ha-card { overflow: hidden; }
 canvas { display: block; width: 100%; height: auto; touch-action: none; cursor: crosshair; }
 .hint { position: absolute; left: 10px; top: 10px; font-size: .78em; padding: 4px 9px; border-radius: 999px;
   background: color-mix(in srgb, var(--card-background-color) 75%, transparent); color: var(--secondary-text-color);
-  backdrop-filter: blur(6px); pointer-events: none; }
+  backdrop-filter: blur(6px); pointer-events: none; max-width: calc(100% - 20px); box-sizing: border-box; }
+/* Where the hint and the tool buttons do not fit side by side, the hint goes below the buttons. */
+@container (max-width: 470px) { .hint { top: 54px; } }
 .tools { position: absolute; right: 10px; top: 10px; display: flex; gap: 6px; }
 .tools button { width: 36px; height: 36px; border-radius: 10px; border: none; cursor: pointer; display: flex; align-items: center; justify-content: center;
   background: color-mix(in srgb, var(--card-background-color) 80%, transparent); color: var(--secondary-text-color); backdrop-filter: blur(6px); }
@@ -106,6 +109,7 @@ canvas { display: block; width: 100%; height: auto; touch-action: none; cursor: 
 .sheet .panel { width: 100%; background: var(--card-background-color); border-radius: 16px 16px 0 0; padding: 14px 16px 16px; box-shadow: 0 -6px 24px rgba(0,0,0,.3); }
 .sheet h4 { margin: 0 0 10px; font-size: 1em; font-weight: 500; color: var(--primary-text-color); display: flex; justify-content: space-between; align-items: center; }
 .sheet h4 button { border: none; background: none; color: var(--secondary-text-color); cursor: pointer; }
+.sheet .note { font-size: .78em; color: var(--secondary-text-color); margin: 8px 0 0; }
 .opt { display: flex; align-items: center; gap: 8px; margin: 8px 0; font-size: .85em; color: var(--secondary-text-color); }
 .opt span:first-child { width: 64px; flex: none; }
 .seg { display: flex; flex: 1; gap: 4px; }
@@ -166,7 +170,7 @@ class TapoRV30Card extends HTMLElement {
     this._selected.clear(); this._zone = null; this._target = null; this._drag = null;
     if (!sameEntity) {
       this._img = null; this._imgKey = null; this._mask = null; this._maskKey = null; this._mapKey = undefined;
-      this._runsHtml = null; this._maskFail = null;
+      this._runsHtml = null; this._maskFail = null; this._runsTok = null; this._runsFor = undefined; this._ov = null;
     }
     this._build();
     if (this._hass) this.hass = this._hass;
@@ -197,6 +201,8 @@ class TapoRV30Card extends HTMLElement {
   // A floor switch (or a re-map) makes room ids, zones and points from the old map meaningless.
   _checkMapChange() {
     const a = this._mapAttrs(), key = `${a.map_id ?? ""}|${a.rooms_mask_url ?? ""}`;
+    // No map at all (the camera unavailable for a moment) is not a new map: keep the selection.
+    if (key === "|") return;
     if (this._mapKey !== undefined && key !== this._mapKey) {
       this._selected.clear(); this._zone = null; this._target = null; this._drag = null;
       const sheet = this._el && this._el.mapwrap.querySelector(".sheet"); if (sheet) sheet.remove();
@@ -216,19 +222,30 @@ class TapoRV30Card extends HTMLElement {
       const base = vac.split(".")[1];
       ids = Object.keys(hass.states).filter((id) => id.split(".")[1].startsWith(base));
     }
-    const find = (prefix, suffix) => ids.find((id) => id.startsWith(prefix) && (!suffix || id.endsWith(suffix)));
+    // What the device's entity ids start with: the vacuum's own, or the device name they were made from.
+    const device = dev && hass.devices ? hass.devices[dev] : null;
+    const bases = [vac.split(".")[1], ...(device ? [slug(device.name_by_user), slug(device.name)] : [])].filter(Boolean);
+    // By the exact end of the object id, allowing the "_2" Home Assistant adds for a second robot of
+    // the same name ("_status" is never "_planner_status"): <base>_<suffix> first, then the shortest.
+    const find = (prefix, suffix) => {
+      const list = ids.filter((id) => id.startsWith(prefix));
+      if (!suffix) return list[0];
+      const end = new RegExp(`_${suffix}(_\\d+)?$`), oid = (id) => id.split(".")[1];
+      const hits = list.filter((id) => end.test(oid(id))).sort((a, b) => a.length - b.length);
+      return hits.find((id) => bases.some((b) => new RegExp(`^${b}_${suffix}(_\\d+)?$`).test(oid(id)))) || hits[0];
+    };
     return {
       // The live map, never the Last Clean Map (Map Image disabled: fall back to the camera).
-      image: this._config.image_entity || ids.find((id) => id.startsWith("image.") && id.endsWith("_map_image"))
+      image: this._config.image_entity || find("image.", "map_image")
         || ids.find((id) => id.startsWith("image.") && !id.includes("last_clean")),
       camera: this._config.camera_entity || find("camera."),
-      battery: find("sensor.", "_battery"),
-      status: find("sensor.", "_status"),
-      room: find("sensor.", "_current_room"),
-      progress: find("sensor.", "_clean_progress"),
-      problem: find("binary_sensor.", "_problem"),
-      charging: find("binary_sensor.", "_charging"),
-      bin: find("button.", "_empty_bin"),
+      battery: find("sensor.", "battery"),
+      status: find("sensor.", "status"),
+      room: find("sensor.", "current_room"),
+      progress: find("sensor.", "clean_progress"),
+      problem: find("binary_sensor.", "problem"),
+      charging: find("binary_sensor.", "charging"),
+      bin: find("button.", "empty_bin"),
       presets: ids.filter((id) => id.startsWith("button.") && id.includes("_preset_")),
     };
   }
@@ -302,7 +319,10 @@ class TapoRV30Card extends HTMLElement {
     c.addEventListener("pointerdown", (e) => this._down(e));
     c.addEventListener("pointermove", (e) => this._move(e));
     c.addEventListener("pointerup", (e) => this._up(e));
-    c.addEventListener("pointercancel", () => { this._drag = null; });
+    // A cancelled press (the page scrolled, say) is no long press and no tap.
+    c.addEventListener("pointercancel", () => { this._drag = null; clearTimeout(this._pressTimer); this._tapStart = null; });
+    // A mouse held on a room and dragged off the map is not a long press on that room either.
+    c.addEventListener("pointerleave", () => { if (this._mode === "rooms") clearTimeout(this._pressTimer); });
     const rot = [90, 180, 270].includes(Number(this._config.rotate)) ? Number(this._config.rotate) : 0;
     this._rot = rot;
     if (rot) this._el.stage.classList.add(`r${rot}`);
@@ -380,12 +400,18 @@ class TapoRV30Card extends HTMLElement {
       `<h5>Recent runs</h5><div class="runs"><div class="run"><ha-icon icon="${ICONS.history}"></ha-icon><span class="when">Loading</span></div></div>` +
       (consHtml ? `<h5>Consumables</h5><div class="cons">${consHtml}</div>` : "");
     if (url) this._loadLastClean(url);
+    // A new clean (last_clean moved on) brings a new run to list.
+    if (last.started && this._runsHtml && last.started !== this._runsFor) fetchRuns = true;
     if (!fetchRuns && this._runsHtml) { this._el.status.querySelector(".runs").innerHTML = this._runsHtml; return; }
+    if (this._runsTok) return;     // already loading: that reply fills in the runs drawn above
+    const tok = this._runsTok = {}, entity = this._config.entity;
+    this._runsFor = last.started;
     try {
       const resp = await this._hass.connection.sendMessagePromise({
         type: "call_service", domain: "tapo_rv30", service: "get_clean_records",
-        service_data: { entity_id: this._config.entity, limit: 8 }, return_response: true });
-      const recs = (resp && resp.response && (resp.response.records || resp.response[this._config.entity]?.records)) || [];
+        service_data: { entity_id: entity, limit: 8 }, return_response: true });
+      if (this._runsTok !== tok) return;     // another robot since
+      const recs = (resp && resp.response && (resp.response.records || resp.response[entity]?.records)) || [];
       const start = { 1: "app", 4: "schedule", 5: "automation", 2: "Alexa", 3: "Google", 0: "button", 6: "IFTTT" };
       this._runsHtml = recs.length ? recs.map((r) => {
         const d = r.started ? new Date(r.started * 1000) : null;
@@ -394,8 +420,10 @@ class TapoRV30Card extends HTMLElement {
         return `<div class="run ${r.error ? "err" : ""}"><ha-icon icon="${r.error ? ICONS.alert : ICONS.history}"></ha-icon><span class="when">${esc(when)}</span><span class="meta">${esc(meta)}</span></div>`;
       }).join("") : `<div class="run"><span class="when">No runs recorded</span></div>`;
     } catch (e) {
+      if (this._runsTok !== tok) return;
       this._runsHtml = `<div class="run"><span class="when">Could not load history</span></div>`;
     }
+    this._runsTok = null;
     const el = this._el.status.querySelector(".runs"); if (el) el.innerHTML = this._runsHtml;
   }
 
@@ -502,7 +530,7 @@ class TapoRV30Card extends HTMLElement {
     const f = this._maskFail;
     if (f && f.url === url && Date.now() - f.at < 15000) return;
     this._maskKey = url;
-    this._mask = null;     // the old map's mask would pick wrong rooms until the new one loads
+    this._mask = null; this._ov = null;     // the old map's mask would pick wrong rooms until the new one loads
     try {
       const resp = await this._hass.fetchWithAuth(url);
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
@@ -536,11 +564,6 @@ class TapoRV30Card extends HTMLElement {
     return g ? (g.name || `Room ${id}`) : `Room ${id}`;
   }
 
-  _roomColor(id) {
-    const ids = (this._mapAttrs().room_geometry || []).map((r) => r.id).sort((a, b) => a - b);
-    return ROOM_COLORS[Math.max(0, ids.indexOf(id)) % ROOM_COLORS.length];
-  }
-
   _draw() {
     const c = this._el.canvas, img = this._img;
     if (!img) return;
@@ -572,16 +595,19 @@ class TapoRV30Card extends HTMLElement {
 
   _drawSelection(ctx) {
     const m = this._mask, c = this._el.canvas;
-    const ov = document.createElement("canvas"); ov.width = m.w; ov.height = m.h;
-    const octx = ov.getContext("2d"); const id = octx.createImageData(m.w, m.h);
-    const sel = {}; for (const r of this._selected) { const col = this._roomColor(r); sel[r] = [parseInt(col.slice(1, 3), 16), parseInt(col.slice(3, 5), 16), parseInt(col.slice(5, 7), 16)]; }
-    for (let i = 0; i < m.w * m.h; i++) {
-      const v = m.data[i * 4], col = sel[v];
-      if (col) { id.data[i * 4] = 40; id.data[i * 4 + 1] = 110; id.data[i * 4 + 2] = 220; id.data[i * 4 + 3] = 120; }
+    // The overlay only changes with the mask or the selection, not every frame of the pulse.
+    const key = [...this._selected].sort((a, b) => a - b).join();
+    if (!this._ov || this._ov.mask !== m || this._ov.key !== key) {
+      const ov = document.createElement("canvas"); ov.width = m.w; ov.height = m.h;
+      const octx = ov.getContext("2d"); const id = octx.createImageData(m.w, m.h);
+      for (let i = 0; i < m.w * m.h; i++) {
+        if (this._selected.has(m.data[i * 4])) { id.data[i * 4] = 40; id.data[i * 4 + 1] = 110; id.data[i * 4 + 2] = 220; id.data[i * 4 + 3] = 120; }
+      }
+      octx.putImageData(id, 0, 0);
+      this._ov = { mask: m, key, canvas: ov };
     }
-    octx.putImageData(id, 0, 0);
     ctx.imageSmoothingEnabled = false;
-    ctx.drawImage(ov, 0, 0, c.width, c.height);
+    ctx.drawImage(this._ov.canvas, 0, 0, c.width, c.height);
     ctx.imageSmoothingEnabled = true;
     // outline + label
     const g = this._mapAttrs().room_geometry || [];
@@ -650,6 +676,7 @@ class TapoRV30Card extends HTMLElement {
     // The room's own levels when they are ones the sheet offers, else the defaults.
     const level = (v, ok, dflt) => (ok.includes(Number(v)) ? Number(v) : dflt);
     const cur = { suction: level(g.suction, [1, 2, 3, 4, 5], 3), water_level: level(g.water_level, [0, 1, 2, 3], 0), passes: level(g.passes, [1, 2, 3], 1) };
+    const start = { ...cur };     // levels sent with the clean become the robot's defaults: send only the changed ones
     const sheet = document.createElement("div"); sheet.className = "sheet";
     const seg = (key, opts) => `<div class="opt"><span>${{ suction: "Suction", water_level: "Water", passes: "Passes" }[key]}</span><div class="seg" data-key="${key}">` +
       opts.map(([v, l]) => `<button data-v="${v}" class="${cur[key] === v ? "on" : ""}">${l}</button>`).join("") + `</div></div>`;
@@ -659,9 +686,11 @@ class TapoRV30Card extends HTMLElement {
       seg("suction", [[1, "Quiet"], [2, "Standard"], [3, "Turbo"], [4, "Max"], [5, "Ultra"]]) +
       seg("water_level", [[0, "Off"], [1, "Low"], [2, "Medium"], [3, "High"]]) +
       seg("passes", [[1, "1"], [2, "2"], [3, "3"]]) +
+      `<p class="note">A level you change here also becomes the robot's default.</p>` +
       `<button class="save">Clean ${esc(label)} now</button></div>`;
     sheet.onclick = (e) => { if (e.target === sheet) sheet.remove(); };
     sheet.querySelector(".x").onclick = () => sheet.remove();
+    sheet.addEventListener("keydown", (e) => { if (e.key === "Escape") { e.stopPropagation(); sheet.remove(); } });
     sheet.querySelectorAll(".seg button").forEach((b) => b.onclick = () => {
       const segEl = b.parentElement; segEl.querySelectorAll("button").forEach((o) => o.classList.remove("on")); b.classList.add("on");
       cur[segEl.dataset.key] = Number(b.dataset.v);
@@ -669,13 +698,24 @@ class TapoRV30Card extends HTMLElement {
     const fan = ["", "quiet", "standard", "turbo", "max", "ultra"], water = ["off", "low", "medium", "high"];
     sheet.querySelector(".save").onclick = () => {
       // By id: an unnamed room, or two rooms with the same name, cannot be picked by name.
-      this._call("tapo_rv30", "clean_rooms", onMap({ room_ids: [g.id], suction: fan[cur.suction], water: water[cur.water_level], passes: cur.passes }, mapId), { entity_id: this._config.entity });
+      const data = { room_ids: [g.id] };
+      if (cur.suction !== start.suction) data.suction = fan[cur.suction];
+      if (cur.water_level !== start.water_level) data.water = water[cur.water_level];
+      if (cur.passes !== start.passes) data.passes = cur.passes;
+      this._call("tapo_rv30", "clean_rooms", onMap(data, mapId), { entity_id: this._config.entity });
       sheet.remove();
     };
     this._el.mapwrap.appendChild(sheet);
+    sheet.querySelector(".x").focus();
   }
 
   _move(e) {
+    if (this._mode === "rooms" && this._tapStart) {
+      // Moved off the room it pressed: not a long press on it.
+      const [x, y] = this._canvasPoint(e);
+      if (Math.hypot(x - this._tapStart[0], y - this._tapStart[1]) >= 10) clearTimeout(this._pressTimer);
+      return;
+    }
     if (this._mode !== "zone" || !this._drag) return;
     const [x, y] = this._canvasPoint(e);
     this._zone = { x0: this._drag.x0, y0: this._drag.y0, x1: x, y1: y };

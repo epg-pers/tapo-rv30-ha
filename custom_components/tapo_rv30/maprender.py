@@ -347,7 +347,7 @@ def _num(value) -> int | None:
     """A robot level field as an int (or None): it reaches the page, so never a string."""
     try:
         return int(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return None
 
 
@@ -356,9 +356,11 @@ def _dot(draw: ImageDraw.ImageDraw, sx: int, sy: int, color, radius: int = 6) ->
                  fill=color, outline=(255, 255, 255), width=2)
 
 
-def _png(img: Image.Image) -> bytes:
+def _png(img: Image.Image, fast: bool = False) -> bytes:
+    """fast: the frame redrawn every poll while the robot moves; optimize roughly doubles the
+    encode time for a few per cent smaller."""
     buf = io.BytesIO()
-    img.save(buf, format="PNG", optimize=True)
+    img.save(buf, format="PNG", optimize=not fast)
     return buf.getvalue()
 
 

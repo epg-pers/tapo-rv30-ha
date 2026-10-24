@@ -43,6 +43,10 @@ class TapoMapCamera(CoordinatorEntity[TapoCoordinator], Camera):
     """
     _attr_has_entity_name = True
     _attr_name = "Map"
+    # Large, and path_points changes every poll while cleaning: kept out of the recorder (the
+    # card reads them from the live state), so a cleaning hour does not add megabytes of history.
+    _unrecorded_attributes = frozenset({"room_geometry", "map_geometry", "rooms_last_cleaned",
+                                        "calibration_points", "maps", "path_points"})
     _attr_is_streaming = False
     _attr_is_recording = False
     _attr_brand = "TP-Link"

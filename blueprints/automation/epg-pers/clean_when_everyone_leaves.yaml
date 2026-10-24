@@ -48,12 +48,15 @@ mode: single
 triggers:
   - trigger: state
     entity_id: !input people
-    to: not_home
+    # Leaving home, whether to "away" or straight into a named zone (Work, School).
+    not_to: home
     for: !input away_for
 conditions:
+  # Nobody at home. Someone in a named zone counts as out; a person whose state is unknown
+  # counts as in, so the robot never starts on a guess.
   - condition: template
     value_template: >-
-      {{ people | map('states') | select('ne', 'not_home') | list | count == 0 }}
+      {{ people | map('states') | select('in', ['home', 'unknown', 'unavailable']) | list | count == 0 }}
   - condition: time
     after: !input after
     before: !input before

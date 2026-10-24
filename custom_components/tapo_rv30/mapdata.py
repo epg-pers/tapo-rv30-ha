@@ -167,14 +167,14 @@ def minutes_of(value) -> int:
     else is 0), kept within one day."""
     try:
         return int(float(value)) % 1440
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return 0
 
 
 def as_int(value, default: int = 0) -> int:
     try:
         return int(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return default
 
 
@@ -214,7 +214,7 @@ def decode_path(pos_array: str, pos_len: int, max_jump_mm: int = 1500) -> list[t
     import struct
     try:
         pos_len = int(pos_len)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return []
     raw = lz4_block_decompress(base64.b64decode(pos_array or ""), pos_len)
     body = raw[8:]
@@ -590,7 +590,7 @@ def decode_prompt(code) -> dict:
     """One getVacStatus prompt code as {code, prompt, description}."""
     try:
         code = int(code)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return {"code": code, "prompt": "unknown", "description": f"Prompt {code}"}
     slug, label = PROMPT_CODES.get(code, ("unknown", f"Prompt {code}"))
     return {"code": code, "prompt": slug, "description": label}

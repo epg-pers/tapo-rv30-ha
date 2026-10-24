@@ -166,9 +166,10 @@ canvas.chart { width: 100%; height: 140px; display: block; }
 .pill.out { opacity: .6; }
 .sensors { grid-column: 1 / -1; padding: 10px; border-radius: 10px; background: color-mix(in srgb, var(--primary-text-color) 4%, transparent); }
 .cond { display: grid; gap: 8px; }
-.cond .c { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 10px;
+.cond .c { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 10px;
   background: color-mix(in srgb, var(--primary-text-color) 4%, transparent); font-size: .9em; }
 .cond .c small { display: block; color: var(--secondary-text-color); font-size: .86em; margin-top: 2px; }
+.cond .c small.err { color: var(--error-color, #db4437); }
 .cond .c .ctl { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
 .cond .people { padding: 0 12px 4px; }
 .log .e { display: flex; gap: 12px; padding: 7px 0; border-bottom: 1px solid color-mix(in srgb, var(--primary-text-color) 8%, transparent); font-size: .88em; }
@@ -259,14 +260,15 @@ class TapoRV30Panel extends HTMLElement {
     const device = dev && this._hass.devices ? this._hass.devices[dev] : null;
     const bases = [objectId(vac), ...(device ? [slug(device.name_by_user), slug(device.name)] : [])].filter(Boolean);
     // By the registry's translation key where the integration sets one, else by the exact end of the
-    // entity id ("status" is never "planner_status"): <base>_<suffix> first, then the shortest.
+    // entity id ("status" is never "planner_status"), allowing the "_2" Home Assistant adds for a second
+    // robot of the same name: <base>_<suffix> first, then the shortest.
     const find = (prefix, suffix, key) => {
       const list = ids.filter((id) => id.startsWith(prefix));
       if (!suffix) return list[0];
       const byKey = key && list.find((id) => reg[id] && reg[id].translation_key === key);
       if (byKey) return byKey;
-      return list.find((id) => bases.some((b) => objectId(id) === `${b}_${suffix}`))
-        || list.filter((id) => objectId(id).endsWith(`_${suffix}`)).sort((a, b) => a.length - b.length)[0];
+      const hits = list.filter((id) => new RegExp(`_${suffix}(_\\d+)?$`).test(objectId(id))).sort((a, b) => a.length - b.length);
+      return hits.find((id) => bases.some((b) => new RegExp(`^${b}_${suffix}(_\\d+)?$`).test(objectId(id)))) || hits[0];
     };
     // Preset buttons are named "Preset <name>", so their ids are <base>_preset_<name>.
     const isPreset = (id) => (reg[id] && reg[id].translation_key === "preset") || bases.some((b) => objectId(id).startsWith(`${b}_preset_`));
@@ -402,7 +404,8 @@ class TapoRV30Panel extends HTMLElement {
       const pr = s.preset_id != null ? this._presets(r).find((p) => p.id === s.preset_id) : null;
       const target = s.preset_id != null ? (pr ? `Preset ${esc(pr.name || s.preset_id)}` : `(deleted preset ${esc(s.preset_id)})`)
         : (s.rooms && s.rooms.length ? esc(s.rooms.join(", ")) : "Whole house");
-      const days = (s.days || []).length === 7 ? "Daily" : (s.days || []).join(" ");
+      // A one-off schedule (made in the app) has no days, only its date.
+      const days = (s.days || []).length === 7 ? "Daily" : (s.days || []).length ? s.days.join(" ") : (s.date ? `Once, ${s.date}` : "");
       const levels = [s.suction != null ? FAN[s.suction - 1] : null, s.water_level != null ? `water ${WATER[s.water_level]}` : null, s.clean_passes ? `${s.clean_passes}x` : null].filter(Boolean).join(", ");
       return `<div class="row ${s.enabled ? "" : "off"}" data-id="${esc(s.id)}">
         ${toggle(s.enabled, `${s.time} schedule`, `data-act="toggle" title="${s.enabled ? "Disable" : "Enable"}"`)}
@@ -436,11 +439,22 @@ class TapoRV30Panel extends HTMLElement {
 
   _renderEditor(pane, r) {
     const s = this._editing, isNew = s.id == null;
-    const rooms = this._rooms(this._robot), presets = this._presets(r), dnd = this._dnd(r);
+    const presets = this._presets(r), dnd = this._dnd(r);
+    // Rooms by id from the map: an unnamed room, or one of two rooms with the same name, cannot be
+    // picked by name. Without the map's rooms (not read yet) the vacuum's room names are all there is.
+    const geom = ((this._st(r.camera) || { attributes: {} }).attributes.room_geometry || []).filter((g) => g && g.id != null);
+    const byId = geom.length > 0;
+    const rooms = byId ? geom.map((g) => ({ key: Number(g.id), label: g.name || `Room ${g.id}` }))
+      : this._rooms(this._robot).map((n) => ({ key: n, label: n }));
+    const picked = byId ? (s.room_ids || []).map(Number) : (s.rooms || []);
+    // A room since deleted (a re-map) stays on the schedule until it is taken off it.
+    for (const k of picked) if (!rooms.some((x) => x.key === k)) rooms.push({ key: k, label: byId ? `Room ${k} (gone)` : `${k} (gone)` });
+    // A one-off schedule (made in the app) has no days; an edit keeps it one-off unless days are picked.
+    const oneOff = !isNew && s.repeat === false;
     const state = {
       time: s.time || "09:00", days: new Set((s.days || []).map((d) => d.slice(0, 3))),
-      mode: s.preset_id != null ? "preset" : (s.rooms && s.rooms.length ? "rooms" : "house"),
-      rooms: new Set(s.rooms || []), preset: s.preset_id != null ? String(s.preset_id) : (presets[0] ? String(presets[0].id) : ""),
+      mode: s.preset_id != null ? "preset" : (picked.length || (s.rooms || []).length ? "rooms" : "house"),
+      rooms: new Set(picked), preset: s.preset_id != null ? String(s.preset_id) : (presets[0] ? String(presets[0].id) : ""),
       suction: s.suction || 0, water: s.water_level == null ? -1 : s.water_level, passes: s.clean_passes || 0, enabled: s.enabled !== false,
     };
     const dayChips = () => DAYS.map((d) => `<button class="chip ${state.days.has(d) ? "on" : ""}" data-day="${d}">${d}</button>`).join("") +
@@ -459,12 +473,12 @@ class TapoRV30Panel extends HTMLElement {
     // "Robot default" cannot be sent to an existing schedule (an edit sends only what changed, and
     // there is no value that clears a level), so it is offered only where it is already the value.
     const dflt = (cur, none) => (isNew || cur === none ? `<option value="${none}">Robot default</option>` : "");
-    const roomChips = () => rooms.map((n) => `<button class="chip ${state.rooms.has(n) ? "on" : ""}" data-room="${esc(n)}">${esc(n)}</button>`).join("");
+    const roomChips = () => rooms.map((x, i) => `<button class="chip ${state.rooms.has(x.key) ? "on" : ""}" data-room="${i}">${esc(x.label)}</button>`).join("");
     pane.innerHTML = `<ha-card><div class="card form">
       <h3><span>${isNew ? "New schedule" : `Edit schedule ${esc(s.id)}`}</span></h3>
       <div><label>Start time (robot's time zone)</label><input type="time" value="${esc(state.time)}">
         <div class="warn dnd" hidden><ha-icon icon="mdi:bell-sleep"></ha-icon><span></span></div></div>
-      <div><label>Days</label><div class="chips days">${dayChips()}</div></div>
+      <div><label>Days${oneOff && s.date ? ` (none picked: runs once, ${esc(s.date)})` : ""}</label><div class="chips days">${dayChips()}</div></div>
       <div><label>What to clean</label><div class="seg mode">
         <button data-mode="house" class="${state.mode === "house" ? "on" : ""}" ${foreign ? "disabled" : ""}>Whole house</button>
         <button data-mode="rooms" class="${state.mode === "rooms" ? "on" : ""}" ${foreign ? "disabled" : ""}>Rooms</button>
@@ -501,7 +515,7 @@ class TapoRV30Panel extends HTMLElement {
     };
     q("input[type=time]").oninput = dndCheck; dndCheck();
     bindDays();
-    q(".rooms").querySelectorAll("[data-room]").forEach((b) => b.onclick = () => { const n = b.dataset.room; state.rooms.has(n) ? state.rooms.delete(n) : state.rooms.add(n); b.classList.toggle("on"); });
+    q(".rooms").querySelectorAll("[data-room]").forEach((b) => b.onclick = () => { const n = rooms[b.dataset.room].key; state.rooms.has(n) ? state.rooms.delete(n) : state.rooms.add(n); b.classList.toggle("on"); });
     q(".mode").querySelectorAll("button").forEach((b) => b.onclick = () => {
       state.mode = b.dataset.mode; q(".mode").querySelectorAll("button").forEach((o) => o.classList.toggle("on", o === b));
       q(".rooms-box").hidden = state.mode !== "rooms"; q(".preset-box").hidden = state.mode !== "preset";
@@ -513,7 +527,7 @@ class TapoRV30Panel extends HTMLElement {
       const err = q(".err"); err.hidden = true;
       const time = q("input[type=time]").value;
       if (!time) { err.textContent = "Pick a start time."; err.hidden = false; return; }
-      if (!state.days.size) { err.textContent = "Pick at least one day (the robot only keeps repeating schedules)."; err.hidden = false; return; }
+      if (!state.days.size && !oneOff) { err.textContent = "Pick at least one day (the robot only keeps repeating schedules)."; err.hidden = false; return; }
       if (state.mode === "rooms" && !state.rooms.size) { err.textContent = "Pick at least one room."; err.hidden = false; return; }
       const su = Number(q(".suction").value), wa = Number(q(".water").value), pa = Number(q(".passes").value);
       const preset = state.mode === "preset" ? state.preset : "";
@@ -528,7 +542,7 @@ class TapoRV30Panel extends HTMLElement {
         || (state.mode === "preset" && changed("preset", preset)));
       if (targetChanged && state.mode === "preset" && !presetIds.has(preset)) { err.textContent = "Pick a preset."; err.hidden = false; return; }
       if (targetChanged) {
-        if (state.mode === "rooms") { data.rooms = [...state.rooms]; if (ownName) data.map = ownName; }
+        if (state.mode === "rooms") { data[byId ? "room_ids" : "rooms"] = [...state.rooms]; if (ownName) data.map = ownName; }
         else if (state.mode === "preset") data.preset = preset;
         else data.rooms = [];
       }
@@ -565,14 +579,19 @@ class TapoRV30Panel extends HTMLElement {
     const robot = this._robot, key = `${robot}|${tot(r.totals.cleans)}`;
     if (!this._records || this._recordsKey !== key) {
       const tok = this._recTok = {};
-      let recs;
+      let recs = null;
       try {
         const resp = await this._hass.connection.sendMessagePromise({ type: "call_service", domain: DOMAIN, service: "get_clean_records",
           service_data: { entity_id: robot, limit: 100 }, return_response: true });
         recs = (resp && resp.response && resp.response.records) || [];
-      } catch (e) { recs = []; }
+      } catch (e) { /* recs stays null: said so below, and fetched again on the next redraw */ }
       // A reply for a robot no longer shown, or one a newer request has overtaken, is dropped.
       if (this._recTok !== tok || this._robot !== robot) return;
+      if (!recs) {
+        this._records = null;
+        const runs = pane.querySelector(".runs"); if (runs) runs.innerHTML = `<div class="empty">Could not load history</div>`;
+        return;
+      }
       this._records = recs; this._recordsFor = robot; this._recordsKey = key;
     }
     const recs = this._records;
@@ -948,8 +967,11 @@ class TapoRV30Panel extends HTMLElement {
       return res;
     } catch (e) {
       this.dispatchEvent(new CustomEvent("hass-notification", { detail: { message: (e && e.message) || "The planner refused that" }, bubbles: true, composed: true }));
-      // Put the controls back to what the planner really holds, so a refused change does not look saved.
-      if (!stale() && this._tab === "planner") this._renderRight(true);
+      // Put the controls back to what the planner really holds, so a refused change does not look saved;
+      // while an input is being edited, once focus leaves it (a forgotten signature forces the redraw).
+      if (!stale() && this._tab === "planner") {
+        if (this._formBusy()) { this._paneSig = null; this._paneDirty = true; } else this._renderRight(true);
+      }
       return null;
     }
   }
@@ -1022,9 +1044,9 @@ class TapoRV30Panel extends HTMLElement {
         <div class="c"><span>Battery at least<small>it waits on the dock below this</small></span><select data-num="min_battery">${opt([0, 20, 30, 40, 50, 60, 80], c.min_battery, (n) => (n ? `${n}%` : "any"))}</select></div>
         <div class="c"><span>Not near the robot's own schedules<small>holds off when one starts within the hour</small></span>${toggle(c.avoid_schedules, "Not near the robot's own schedules", `data-set="avoid_schedules"`)}</div>
         <div class="c"><span>Outside Do Not Disturb<small>always: the robot would refuse anyway</small></span><span class="plan-sub">always</span></div>
-        <div class="c"><span>Weekdays<small>when it may start</small></span><span class="ctl"><input type="time" data-win="weekdays" data-i="0" value="${esc(w.weekdays[0])}"> to <input type="time" data-win="weekdays" data-i="1" value="${esc(w.weekdays[1])}"></span></div>
-        <div class="c"><span>Weekends</span><span class="ctl"><input type="time" data-win="weekends" data-i="0" value="${esc(w.weekends[0])}"> to <input type="time" data-win="weekends" data-i="1" value="${esc(w.weekends[1])}"></span></div>
-        <div class="c"><span>If someone comes home mid-run</span><span class="seg" style="min-width:220px"><button data-ret="finish_room" class="${c.on_return === "finish_room" ? "on" : ""}">Finish room, dock</button><button data-ret="keep_going" class="${c.on_return === "keep_going" ? "on" : ""}">Keep going</button></span></div>
+        <div class="c"><span>Weekdays<small>when it may start</small><small class="err" data-winerr="weekdays" hidden>The end has to be after the start.</small></span><span class="ctl"><input type="time" data-win="weekdays" data-i="0" value="${esc(w.weekdays[0])}"> to <input type="time" data-win="weekdays" data-i="1" value="${esc(w.weekdays[1])}"></span></div>
+        <div class="c"><span>Weekends<small class="err" data-winerr="weekends" hidden>The end has to be after the start.</small></span><span class="ctl"><input type="time" data-win="weekends" data-i="0" value="${esc(w.weekends[0])}"> to <input type="time" data-win="weekends" data-i="1" value="${esc(w.weekends[1])}"></span></div>
+        <div class="c"><span>If someone comes home mid-run</span><span class="seg" style="min-width:min(220px,100%)"><button data-ret="finish_room" class="${c.on_return === "finish_room" ? "on" : ""}">Finish room, dock</button><button data-ret="keep_going" class="${c.on_return === "keep_going" ? "on" : ""}">Keep going</button></span></div>
         <div class="c"><span>Target for new rooms</span><select data-num="default_target_days">${opt(targets.filter((n) => n), c.default_target_days, tname)}</select></div>
       </div></div></ha-card>
       <ha-card><div class="card log"><h3><span>Recent decisions</span></h3>${log || `<div class="empty">Nothing yet.</div>`}</div></ha-card>`;
@@ -1034,11 +1056,20 @@ class TapoRV30Panel extends HTMLElement {
     q("[data-mapping]").forEach((b) => b.onclick = () => this.dispatchEvent(new CustomEvent("hass-more-info", { detail: { entityId: this._robot, view: "settings" }, bubbles: true, composed: true })));
     q("[data-target]").forEach((s) => s.onchange = () => this._planSet({ rooms: { [s.dataset.target]: { target_days: Number(s.value) } } }));
     q("[data-num]").forEach((s) => s.onchange = () => this._planSet({ [s.dataset.num]: Number(s.value) }));
-    q("[data-win]").forEach((i) => i.onchange = () => {
-      if (!i.value) return;
-      // Both ends as the inputs hold them now: the pair captured at render is stale after the first change.
-      const win = i.dataset.win, pair = [0, 1].map((n) => (pane.querySelector(`[data-win="${win}"][data-i="${n}"]`) || {}).value || w[win][n]);
-      this._planSet({ windows: { [win]: pair } });
+    // A time input fires change on every digit typed, so a window is saved once focus leaves its pair
+    // of inputs, never half typed.
+    q("[data-win]").forEach((i) => i.onblur = () => {
+      const win = i.dataset.win, robot = this._robot, ends = [0, 1].map((n) => pane.querySelector(`[data-win="${win}"][data-i="${n}"]`));
+      const pair = ends.map((e) => (e ? e.value : "")), err = pane.querySelector(`[data-winerr="${win}"]`);
+      setTimeout(() => {
+        if (ends.includes(this.shadowRoot.activeElement) || this._robot !== robot) return;   // still in the pair
+        if (err) err.hidden = true;
+        // Against what the planner holds now: this pane may not have been redrawn since the last save.
+        const held = ((this._plan && this._plan.config && this._plan.config.windows) || {})[win] || w[win];
+        if (!pair[0] || !pair[1] || (pair[0] === held[0] && pair[1] === held[1])) return;
+        if (pair[0] >= pair[1]) { if (err) err.hidden = false; return; }
+        this._planSet({ windows: { [win]: pair } });
+      }, 0);
     });
     q("[data-ret]").forEach((b) => b.onclick = () => this._planSet({ on_return: b.dataset.ret }));
     q("[data-edit]").forEach((b) => b.onclick = () => { this._planOpen = this._planOpen === b.dataset.edit ? null : b.dataset.edit; this._renderRight(false); });
@@ -1202,9 +1233,16 @@ class TapoRV30Panel extends HTMLElement {
     const tim = r.times.map((id) => { const s = this._st(id); return `<div class="row"><div class="main"><div class="t">${esc(strip(id))}</div></div><input type="time" data-time="${esc(id)}" value="${esc(String(s.state).slice(0, 5))}"></div>`; }).join("");
     pane.innerHTML = `<ha-card><div class="card"><h3><span>Settings</span></h3>${sw}${sel}${tim}${num}${(sw || sel || num || tim) ? "" : `<div class="empty">No settings entities.</div>`}</div></ha-card>`;
     pane.querySelectorAll("[data-sw]").forEach((b) => b.onclick = () => this._call("switch", b.classList.contains("on") ? "turn_off" : "turn_on", {}, { entity_id: b.dataset.sw }));
-    pane.querySelectorAll("[data-sel]").forEach((e) => e.onchange = () => this._call("select", "select_option", { option: e.value }, { entity_id: e.dataset.sel }));
-    pane.querySelectorAll("[data-num]").forEach((e) => e.onchange = () => this._call("number", "set_value", { value: Number(e.value) }, { entity_id: e.dataset.num }));
-    pane.querySelectorAll("[data-time]").forEach((e) => e.onchange = () => { if (e.value) this._call("time", "set_value", { time: e.value + ":00" }, { entity_id: e.dataset.time }); });
+    // A refused change puts the control back to what the entity really holds, so it does not look saved.
+    const back = (ok, e, id, text) => { const s = this._st(id); if (!ok && s && e.isConnected) e.value = text(s.state); };
+    pane.querySelectorAll("[data-sel]").forEach((e) => e.onchange = async () => back(await this._call("select", "select_option", { option: e.value }, { entity_id: e.dataset.sel }), e, e.dataset.sel, String));
+    pane.querySelectorAll("[data-num]").forEach((e) => e.onchange = async () => back(await this._call("number", "set_value", { value: Number(e.value) }, { entity_id: e.dataset.num }), e, e.dataset.num, String));
+    // A time input fires change on every digit typed, so a time is saved once focus leaves it, never half typed.
+    pane.querySelectorAll("[data-time]").forEach((e) => e.onblur = async () => {
+      const id = e.dataset.time, v = e.value, s = this._st(id), hhmm = (x) => String(x).slice(0, 5);
+      if (!v || (s && v === hhmm(s.state))) return;
+      back(await this._call("time", "set_value", { time: v + ":00" }, { entity_id: id }), e, id, hhmm);
+    });
   }
 }
 if (!customElements.get("tapo-rv30-panel")) customElements.define("tapo-rv30-panel", TapoRV30Panel);

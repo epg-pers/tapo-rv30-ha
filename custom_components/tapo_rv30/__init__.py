@@ -24,7 +24,7 @@ from .services import async_setup_services
 from .voice import async_setup_voice
 
 VOICE_KEY = f"{DOMAIN}_voice"
-from .tpap import TapoVacuumClient
+from .tpap import TapoVacuumClient, security_stronger
 
 _LOGGER = logging.getLogger(__name__)
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
@@ -65,8 +65,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         raise
     # Trust on first use: remember what the robot offered, so a later impostor offering less
     # is refused (a reauth or reconfigure stores what the robot offers then).
+    # A firmware update that adds security is followed too (never one that removes it): only
+    # after a working session, so an answer that merely claims more cannot be stored.
     learned = getattr(client, "security", None) if client_cls is TapoVacuumClient else None
-    if learned and not entry.data.get(CONF_SECURITY):
+    stored = entry.data.get(CONF_SECURITY)
+    if learned and (not stored or security_stronger(learned, stored)):
         hass.config_entries.async_update_entry(entry, data={**entry.data, CONF_SECURITY: learned})
     forwarded = False
     try:

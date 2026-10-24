@@ -7,7 +7,7 @@ robot in it is refused with a clear message. With one vacuum set up the target i
 
 | Service | What it does |
 |---|---|
-| `clean_rooms` | Clean named rooms (partial match; a name that fits several rooms is refused). Or give `room_ids` (room numbers on the map, as the card sends them) for unnamed rooms or rooms that share a name, with `map_id` (the map they were picked on) so the clean is refused if the robot has since moved to another map. Optional `map` (else the current map), `suction`, `water`, `passes` for this run. |
+| `clean_rooms` | Clean named rooms (partial match; a name that fits several rooms is refused). Or give `room_ids` (room numbers on the map, as the card sends them) for unnamed rooms or rooms that share a name, with `map_id` (the map they were picked on) so the clean is refused if the robot has since moved to another map. Optional `map` (else the current map; the robot cleans the map it is on, so rooms on another map are refused: switch with `set_map` first). Optional `suction`, `water`, `passes`: the robot has no per-run levels, so these become its default levels for later cleans too. |
 | `clean_zone` | Clean rectangles given in map mm, same frame as the `position_mm` attribute. |
 | `set_room_settings` | Per-room suction / water / passes stored on the robot. Rejected by RV30 Max Plus firmware 1.3.3 (see [protocol.md](protocol.md)); use `clean_rooms` with levels, or `create_preset` to keep per-room levels. |
 | `run_schedule` | Replay a saved schedule's rooms and settings now, by its id (like `S1`). The vacuum has no "run schedule by id" call, so the schedule's suction, water and passes become the robot's default levels and the clean is started; if the start fails, the previous levels are put back. |
@@ -16,14 +16,14 @@ robot in it is refused with a clear message. With one vacuum set up the target i
 | `update_preset` | Change a preset by name or id: new `name`, `rooms` (same map), `suction`, `water`, `passes` or `clean_order`. Anything not given is kept. |
 | `delete_preset` | Delete a preset by name or id (`confirm: true`). Schedules that ran it are left pointing at nothing, so change or remove them too. |
 | `set_map` | Switch the active map (multi-floor). |
-| `add_schedule` | Create a schedule on the robot: time, days, rooms / preset / whole house, levels. Returns the id. Refused when the start time is inside the robot's Do Not Disturb window (the robot would never run it); `ignore_dnd: true` saves it anyway. |
-| `set_schedule` | Change a schedule (enable / disable, time, days, rooms, levels). Same Do Not Disturb check when the time changes or the schedule is enabled. |
+| `add_schedule` | Create a schedule on the robot: time, days, rooms (or `room_ids`) / preset / whole house, levels. Returns the id. Refused when the start time is inside the robot's Do Not Disturb window (the robot would never run it); `ignore_dnd: true` saves it anyway. |
+| `set_schedule` | Change a schedule (enable / disable, time, days, rooms or `room_ids`, levels). Same Do Not Disturb check when the time changes or the schedule is enabled. |
 | `remove_schedule` | Delete one schedule or all. |
 | `remove_matter_fabric` | Unpair the robot from one Matter ecosystem (fabric index from the Matter sensor). Untested. |
 | `remote_drive` | The app's remote control, one step per call: `enter` (the robot leaves the dock; the response carries `leaving_dock_ms`), `forward` / `backward` / `left` / `right` (a short nudge; repeat while held), `stop`, `exit`. Refused while a clean is running. |
 | `go_to` | Drive to a point (x, y in map mm) on robots with go-to-point; `vacuum.stop` cancels it. |
 | `get_clean_records` | Cleaning history and lifetime totals as a service response. |
-| `send_raw` | Send any device method with params and get the response back (use with "Return response" in Developer Tools). Refused while the robot is working unless `force: true`; see [protocol.md](protocol.md) for why. |
+| `send_raw` | Send any device method with params and get the response back (use with "Return response" in Developer Tools). Refused while the robot is working unless `force: true`; see [protocol.md](protocol.md) for why. Onboarding, reset, firmware, factory and map-deleting methods, and any name that is not a plain method name, are always refused. |
 | `save_map_setup` | Snapshot a map's room names, no-go zones, virtual walls, carpets, furniture, presets and schedules to `config/tapo_rv30/map_setups/<robot>` now (this also happens automatically as the map changes). See [map-recovery.md](map-recovery.md). |
 | `apply_map_setup` | Put back whatever the map is missing from its saved setup: room names, zones, walls, carpets, furniture, presets and schedules (robot docked and idle, `confirm: true`; `dry_run: true` only reports). `source_map` applies another map's setup, for a re-mapped floor. See [map-recovery.md](map-recovery.md). |
 | `fetch_cloud_map_backups` | Download your TP-Link cloud map backups to `config/tapo_rv30/map_backups/<robot>` for safe keeping. See [map-recovery.md](map-recovery.md). |

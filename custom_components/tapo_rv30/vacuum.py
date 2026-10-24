@@ -157,7 +157,12 @@ class TapoVacuumEntity(CoordinatorEntity[TapoCoordinator], StateVacuumEntity):
         except Exception as exc:
             raise HomeAssistantError(f"{self.coordinator.device_name} rejected the command: {exc}") from exc
 
+    def _check_start(self) -> None:
+        if why := self.coordinator.start_refused():
+            raise ServiceValidationError(f"{self.coordinator.device_name} {why}")
+
     async def async_start(self) -> None:
+        self._check_start()
         await self._call(self.coordinator.client.start)
         await self.coordinator.async_refresh_soon()
 
@@ -170,6 +175,7 @@ class TapoVacuumEntity(CoordinatorEntity[TapoCoordinator], StateVacuumEntity):
         await self.coordinator.async_refresh_soon()
 
     async def async_clean_spot(self, **kwargs: Any) -> None:
+        self._check_start()
         await self._call(self.coordinator.client.clean_spot)
         await self.coordinator.async_refresh_soon()
 
@@ -192,6 +198,7 @@ class TapoVacuumEntity(CoordinatorEntity[TapoCoordinator], StateVacuumEntity):
         ]
 
     async def async_clean_segments(self, segment_ids: list[str], **kwargs: Any) -> None:
+        self._check_start()
         # Checked against the robot's maps right now: Home Assistant keeps area mappings
         # to rooms of maps that have since been remapped or lost.
         try:
@@ -215,7 +222,7 @@ class TapoVacuumEntity(CoordinatorEntity[TapoCoordinator], StateVacuumEntity):
     async def async_set_fan_speed(self, fan_speed: str, **kwargs: Any) -> None:
         value = FAN_NAME_TO_INT.get(fan_speed.lower())
         if value is None:
-            _LOGGER.error("Unknown fan speed: %s", fan_speed)
-            return
+            raise ServiceValidationError(
+                f"{self.coordinator.device_name}: unknown fan speed '{fan_speed}'; use one of {self.fan_speed_list}")
         await self._call(self.coordinator.client.set_fan_speed, value)
         await self.coordinator.async_refresh_soon()

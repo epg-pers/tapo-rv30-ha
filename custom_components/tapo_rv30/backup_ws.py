@@ -9,6 +9,7 @@ Home Assistant layer over it.
 """
 from __future__ import annotations
 
+import os
 import time
 from typing import Any
 
@@ -21,6 +22,7 @@ from . import backupstore
 from .const import DOMAIN
 
 _KEY = f"{DOMAIN}_backup_ws"
+_CACHE: dict[tuple, tuple] = {}     # (file, mtime, size, picture files) -> (has image, thumb, facts)
 
 
 def _coord(hass: HomeAssistant, entity_id: str):
@@ -61,15 +63,33 @@ async def ws_backups_list(hass: HomeAssistant, connection: websocket_api.ActiveC
     def build() -> list[dict]:
         out = []
         for e in backupstore.scan_all(folders):
-            png, mime = backupstore.image_png(e["dir"], e)
+            path = os.path.join(e["dir"], e["file"])
+            try:
+                st = os.stat(path)
+                key = (path, st.st_mtime_ns, st.st_size, e.get("snapshot"), e.get("local_json"))
+            except OSError:
+                key = None
+            # Unpacking every backup and drawing every thumbnail on each open of the tab is
+            # slow on a small box; a file that has not changed gives the same answer.
+            if key is None or key not in _CACHE:
+                png, mime = backupstore.image_png(e["dir"], e)
+                made = (png is not None, backupstore.thumb(png, mime) if png else None,
+                        backupstore.facts_for(e["dir"], e))
+                if key is not None:
+                    if len(_CACHE) >= 200:
+                        _CACHE.pop(next(iter(_CACHE)))
+                    _CACHE[key] = made
+            else:
+                made = _CACHE[key]
+            has_image, thumb, facts = made
             out.append({
                 "file": e["file"], "source": e["source"], "map_id": e["map_id"],
                 "map_name": names.get(e["map_id"]) or f"Map {e['map_id']}",
                 "size": e["size"],
                 "when": time.strftime("%Y-%m-%d %H:%M", time.localtime(e["ts"])),
-                "has_image": png is not None,
-                "thumb": backupstore.thumb(png, mime) if png else None,
-                "facts": backupstore.facts_for(e["dir"], e),
+                "has_image": has_image,
+                "thumb": thumb,
+                "facts": facts,
             })
         return out
 

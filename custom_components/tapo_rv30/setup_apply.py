@@ -5,12 +5,15 @@ from __future__ import annotations
 import asyncio
 import glob
 import json
+import logging
 import os
 import re
 from typing import Any
 
 from . import mapsnapshot
 from .const import DOMAIN
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class ApplyError(Exception):
@@ -19,6 +22,29 @@ class ApplyError(Exception):
     def __init__(self, message: str, written: dict) -> None:
         super().__init__(message)
         self.written = written
+
+
+class MapBusy(ApplyError):
+    """Nothing was written: the robot is working or another map write is running. Try later."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message, {})
+
+
+def write_json(path: str, data) -> None:
+    """Write through a temporary file, so a crash or power cut part way leaves the old file
+    rather than a truncated one. Blocking."""
+    tmp = f"{path}.tmp"
+    with open(tmp, "w") as fh:
+        json.dump(data, fh)
+    os.replace(tmp, path)
+
+
+def _legacy(hass) -> bool:
+    """Before 0.28 every robot's files went into one shared folder. With one robot they are its
+    own; with several there is no telling whose they are, so they are not offered (a backup of
+    one robot restored onto another would bring that robot's schedules with it)."""
+    return len(hass.config_entries.async_entries(DOMAIN, include_ignore=False)) <= 1
 
 
 def robot_key(coord) -> str:
@@ -38,7 +64,7 @@ def snapshots_folder(hass, coord) -> str:
 def snapshot_folders(hass, coord) -> list[str]:
     """Where this robot's map setups are read from: its own folder, then the shared folder
     versions before 0.28 wrote every robot's setups to."""
-    return [snapshots_folder(hass, coord), hass.config.path(DOMAIN, "map_setups")]
+    return [snapshots_folder(hass, coord)] + ([hass.config.path(DOMAIN, "map_setups")] if _legacy(hass) else [])
 
 
 def backups_folder(hass, coord) -> str:
@@ -46,7 +72,7 @@ def backups_folder(hass, coord) -> str:
 
 
 def backup_folders(hass, coord) -> list[str]:
-    return [backups_folder(hass, coord), hass.config.path(DOMAIN, "map_backups")]
+    return [backups_folder(hass, coord)] + ([hass.config.path(DOMAIN, "map_backups")] if _legacy(hass) else [])
 
 
 def find_snapshot(folders, map_id: int | None, ref=None) -> dict | None:
@@ -59,8 +85,11 @@ def find_snapshot(folders, map_id: int | None, ref=None) -> dict | None:
         if ref in (None, ""):
             p = os.path.join(folder, f"{map_id}.json")
             if os.path.exists(p):
-                with open(p) as fh:
-                    return json.load(fh)
+                try:
+                    with open(p) as fh:
+                        return json.load(fh)
+                except (OSError, ValueError) as exc:   # damaged: try the next folder
+                    _LOGGER.warning("Map setup %s is unreadable (%s); looking for another copy", p, exc)
             continue
         want = fold(str(ref).strip())
         for p in sorted(glob.glob(os.path.join(folder, "*.json"))):
@@ -99,8 +128,12 @@ async def apply_setup(hass, coord, map_id: int, snap: dict, dry_run: bool = Fals
     if dry_run:
         return result
     if coord.map_lock.locked():
-        raise ApplyError(f"another map write to {coord.device_name} is still running; try again shortly", {})
+        raise MapBusy(f"another map write to {coord.device_name} is still running; try again shortly")
     async with coord.map_lock:     # one map write per robot at a time (each switches maps)
+        # Asked live: the last poll may predate the robot's own schedule starting it.
+        if await coord._robot_working():
+            raise MapBusy(f"{coord.device_name} is working (or part way through a clean); map writes wait "
+                          "until it is docked and idle")
         return await _write_plan(hass, coord, map_id, plan, result)
 
 

@@ -1,5 +1,50 @@
 # Changelog
 
+## v0.30.0b1
+
+A fourth bug hunt, from new angles: upgrades and stored data, the last release's own changes, other models and households, the sidebar page and card in a browser, the service contract, a safety audit of every write to the robot, and performance over weeks. Every finding was argued for and against by separate reviewers; only what held up was fixed.
+
+### Safety
+
+- **A clean can no longer start while a map write is running.** The vacuum's Start, spot clean, `vacuum.clean_area`, voice and preset buttons now wait for map setup, the map editor and the automatic restore finish, as the services already did. Map writes also ask the robot itself whether it is working, instead of trusting the last poll.
+- **A robot that docks to recharge part way through a clean is still cleaning.** It used to look finished: map writes were allowed and `clean_finished` fired early. Now the run stays open until the robot records it (map writes and the restore finish wait), one run gives one start and one finish event, and the planner does not start another clean meanwhile.
+- **Rooms picked on one map are never cleaned on another.** `clean_rooms` and `vacuum.clean_area` check which map the robot is on right now and refuse rooms from another map (room numbers restart on every map, so they would be other rooms). Switch with `set_map` first.
+- **Voice no longer cleans a room from part of a word.** "Clean it" cleaned the Kitchen ("it" is in "kitchen") and "clean the room" a Bedroom. A partial name now has to be the start of a word, three letters or more ("clean the bath").
+- With several robots, backups and setups saved by versions before 0.28 (in the shared folder) are no longer offered to every robot: there is no telling whose they are, and restoring one robot's map onto another also added its schedules.
+- `send_raw` refuses any name that is not a plain method name (hidden characters could make a blocked call look different) and a few more quick-setup, factory and map-deleting calls.
+- A preset button whose preset was deleted in the app is removed, and a button never runs a different preset that reused the id.
+
+### Fixed
+
+- The planner's "Match by name" works with area and room names in any script (Cyrillic, Chinese, Greek...); before, they all matched one area. A clean that fails no longer wipes the record of one that started at the same moment, and a planner file the integration cannot read no longer stops the robot from setting up.
+- `run_schedule` and `run_preset` switch back to the robot's map when the robot refuses the clean.
+- The stored connection security follows a firmware update that adds security (the pinned certificate, device attestation), never one that removes it.
+- A map setup file left half written by a crash no longer breaks `apply_map_setup` and the restore finish (files are now written safely, and a damaged one falls back to another copy). A Home Assistant restart while a restore is being applied still finishes it. A map write starting during the automatic finish now postpones the finish instead of dropping it.
+- Merging or deleting rooms in the app no longer freezes the map setup snapshot, and a run on another floor is counted for that floor's rooms once it is active again.
+- A second setting that answers late gets its entities too. A value the robot sends as infinity no longer breaks a poll.
+- Robots without a mop get no Water Level select, and entities for parts a robot does not have, left over from 0.28, are removed.
+- RV30C (AES): a refused command no longer reconnects and repeats, and batching is remembered as unsupported.
+- `vacuum.set_fan_speed` with an unknown speed now says so; `water: off` written without quotes works; the `send_raw` example works; planner preview events carry `by`; a clean for two robots checks both before starting either.
+- `restore_map_backup`, `apply_map_setup`, `save_map_setup` and `fetch_cloud_map_backups` work in scripts and automations without `response_variable`, as in the docs.
+- The "Clean when everyone has left" blueprint counts someone in a named zone (Work, School) as out.
+- `add_schedule` and `set_schedule` accept `room_ids`.
+- Sidebar page:
+  - Planner window times, and the Settings tab's times (Do Not Disturb), are saved when you leave the field, not on every keystroke (typing 18:00 could save 01:00 to the robot).
+  - The schedule editor picks rooms by id, so same-named and unnamed rooms work, and app-made one-off schedules can be edited and show their date.
+  - A refused setting shows the robot's real value again; History says when it could not load; the Planner tab fits a 320 px screen.
+- Card:
+  - The room sheet only sends the levels you change (they become the robot's defaults), opens with focus and closes on Escape.
+  - A long press no longer opens it after your finger has moved.
+  - The selection overlay is cached instead of redrawn every frame, a short outage no longer clears the selection, history is not fetched twice, and the hint no longer hides under the tools on phones.
+- Card, dashboard and sidebar page find the entities of a second robot with the same name (ids ending in `_2`).
+
+### Performance
+
+- The full map and settings read runs every 5 minutes as intended, also while cleaning (it ran every 100 seconds).
+- A docked robot's live map image is not redrawn and re-encoded when nothing changed, and the per-poll image is encoded faster.
+- The map camera's large attributes are no longer written to the recorder database on every poll while cleaning.
+- The Backups tab remembers thumbnails and details of files that have not changed.
+
 ## v0.29.0
 
 A third bug hunt, with new angles: hostile and odd robot data, network faults, things happening at the same time, a brand new user, missing tests and a check of the last round's fixes. Every finding was argued for and against by separate reviewers, and only what held up was fixed.

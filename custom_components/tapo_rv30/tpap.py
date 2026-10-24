@@ -48,7 +48,7 @@ def _ints(value) -> list[int]:
         try:
             if not isinstance(v, bool):
                 out.append(int(v))
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             pass
     return out
 
@@ -298,6 +298,20 @@ class _SessionLost(Exception):
     """Internal: the encrypted session is no longer usable — re-handshake."""
 
 
+def security_stronger(new: dict, old: dict) -> bool:
+    """new offers strictly more than old: the pinned certificate (TLS mode 2) kept or gained,
+    no passcode type that old lacked (none at all means the MAC-derived default), and device
+    attestation kept."""
+    if new == old:
+        return False
+    if new.get("tls") != 2 and new.get("tls") != old.get("tls"):
+        return False
+    pake = set(new.get("pake") or [])
+    if not pake or not pake <= set(old.get("pake") or []):
+        return False
+    return bool(new.get("dac")) >= bool(old.get("dac"))
+
+
 class NotVacuum(RuntimeError):
     """The device answered but is not a robot vacuum (a plug or bulb on the same address)."""
 
@@ -345,7 +359,7 @@ def _opt_int(value) -> int | None:
         return None
     try:
         return int(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return None
 
 
@@ -1034,7 +1048,16 @@ class TapoVacuumClient:
         current, _ = self.get_map_info()
         if current != map_id:
             self.set_current_map(map_id)
-        self.clean_custom_rule(rule_id, map_id, clean_order)
+        try:
+            self.clean_custom_rule(rule_id, map_id, clean_order)
+        except Exception as exc:
+            # Refused, so nothing started: back to the floor it was on.
+            if current != map_id and (isinstance(exc, RobotBusy) or "Device error" in str(exc)):
+                try:
+                    self.set_current_map(current)
+                except Exception as exc2:
+                    _LOGGER.debug("Could not switch back to map %s: %s", current, exc2)
+            raise
 
     def get_consumables(self) -> dict:
         return self.send("getConsumablesInfo")["result"]
@@ -1084,8 +1107,15 @@ class TapoVacuumClient:
 
     @_atomic
     def clean_rooms(self, room_ids: list[int], map_id: int, clean_order: bool = True,
-                    levels: dict | None = None) -> None:
+                    levels: dict | None = None, check_map: bool = True) -> None:
         self._require_idle("starting a room clean")
+        # The robot cleans the map it is on, and room ids restart on every map: rooms picked on
+        # another map would be other rooms here. Asked live, as the robot can change map itself.
+        if check_map:
+            current, _ = self.get_map_info()
+            if current != map_id:
+                raise RobotBusy(f"is on another map (rooms were picked on map {map_id}, it is on map "
+                                f"{current}); switch maps first (tapo_rv30.set_map) or pick rooms on this map")
         if levels:
             self.set_global_levels(**levels)
         self.send("setSwitchClean", {
@@ -1182,29 +1212,37 @@ class TapoVacuumClient:
             levels = {k: attr[k] for k in ("suction", "cistern", "clean_number") if attr.get(k) is not None}
             if levels:
                 self.send("setCleanAttr", {"type": "global", **levels})
+        current = switched = None
         try:
             current, _ = self.get_map_info()
             map_id = attr.get("map_id")
             if map_id is None:
                 map_id = current
             elif map_id != current:     # a schedule for another floor: switch, as the robot would
+                switched = current
                 self.set_current_map(map_id)
             order = attr.get("clean_order", True)
             if attr.get("custom_rule_id") is not None:
                 self.clean_custom_rule(attr["custom_rule_id"], map_id, order)
             elif attr.get("room_list"):
-                self.clean_rooms(attr["room_list"], map_id, order)
+                self.clean_rooms(attr["room_list"], map_id, order, check_map=False)   # switched above
             else:
                 self.start()
         except Exception as exc:
             # Put the old defaults back only when the start certainly did not happen (refused,
             # or the robot said no). With no reply the robot may be cleaning with the
             # schedule's levels, and swapping them now would change that run.
-            if levels and (isinstance(exc, (RobotBusy, ValueError)) or "Device error" in str(exc)):
+            refused = isinstance(exc, (RobotBusy, ValueError)) or "Device error" in str(exc)
+            if levels and refused:
                 try:
                     self.send("setCleanAttr", {"type": "global", **{k: before[k] for k in levels if k in before}})
-                except Exception as exc:
-                    _LOGGER.debug("Could not put the default levels back: %s", exc)
+                except Exception as exc2:
+                    _LOGGER.debug("Could not put the default levels back: %s", exc2)
+            if switched is not None and refused:    # nothing started: back to the floor it was on
+                try:
+                    self.set_current_map(switched)
+                except Exception as exc2:
+                    _LOGGER.debug("Could not switch back to map %s: %s", switched, exc2)
             raise
 
     def pause(self) -> None:

@@ -345,6 +345,13 @@ add_schedule:
       - Kitchen
       selector:
         object: {}
+    room_ids:
+      required: false
+      example:
+      - 2
+      - 4
+      selector:
+        object: {}
     preset:
       example: Night Vacuum
       selector:
@@ -403,6 +410,13 @@ set_schedule:
       selector:
         object: {}
     rooms:
+      selector:
+        object: {}
+    room_ids:
+      required: false
+      example:
+      - 2
+      - 4
       selector:
         object: {}
     preset:

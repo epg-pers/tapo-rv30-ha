@@ -147,6 +147,11 @@ class AesVacuumClient(TapoVacuumClient):
                 await self._drop()
                 raise AuthError(str(exc)) from exc
             except _RetryableError as exc:
+                code = getattr(getattr(exc, "error_code", None), "value", getattr(exc, "error_code", None))
+                if code in (-1001, -1002):
+                    # A plain "no" to this call (bad parameters, not supported): a new session
+                    # would get the same answer.
+                    raise RuntimeError(f"Device error {code}") from exc
                 # The robot answered and refused (expired session and the like): not run.
                 _LOGGER.debug("%s refused (%s), reconnecting", method, exc)
                 await self._drop()
@@ -190,10 +195,16 @@ class AesVacuumClient(TapoVacuumClient):
         with self._lock:
             if self._closed:
                 raise RuntimeError("the connection to the robot is closed (entry unloaded)")
-            try:
-                return self._loopthread.run(self._query_many(requests))
-            except Exception as exc:
-                _LOGGER.debug("Batched query failed (%s); falling back to single requests", exc)
+            if self._multi_supported is not False:
+                try:
+                    out = self._loopthread.run(self._query_many(requests))
+                    self._multi_supported = True
+                    return out
+                except Exception as exc:
+                    from kasa.exceptions import DeviceError
+                    if isinstance(exc, DeviceError) and self._multi_supported is None:
+                        self._multi_supported = False       # the firmware said no: stop asking
+                    _LOGGER.debug("Batched query failed (%s); falling back to single requests", exc)
         out = {}
         for m, p in requests:
             try:

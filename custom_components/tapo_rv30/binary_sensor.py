@@ -8,7 +8,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import CONSUMABLE_LABELS, CONSUMABLE_LIMITS_H, CONSUMABLE_WARN_FRACTION, DOMAIN, ERROR_CODES
-from .entity import TapoEntity
+from .entity import TapoEntity, remove_missing_parts
 from .mapdata import dnd_active
 
 
@@ -19,6 +19,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry,
                 TapoProblem(c, entry, "problem", "Problem")]
     entities += [TapoConsumableWarn(c, entry, key, label) for key, label in CONSUMABLE_LABELS.items()
                  if c.has_part(key)]
+    remove_missing_parts(hass, c, entry, "binary_sensor",
+                         [f"replace_{k}" for k in CONSUMABLE_LABELS if not c.has_part(k)])
     if c.has("mop"):
         entities.append(TapoMopAttached(c, entry, "mop_attached", "Mop Attached"))
     if "dnd" in c.settings:

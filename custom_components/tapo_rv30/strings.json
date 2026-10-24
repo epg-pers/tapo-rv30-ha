@@ -257,6 +257,10 @@
         "ignore_dnd": {
           "name": "Ignore Do Not Disturb",
           "description": "Save the schedule even if its start time is inside the robot's Do Not Disturb window. The robot will not run it until the time or the window changes; by default the call is refused instead."
+        },
+        "room_ids": {
+          "name": "Room ids",
+          "description": "Room numbers on the current map instead of names (as the sidebar page sends them); works for unnamed rooms and rooms that share a name. An empty list cleans the whole house."
         }
       }
     },
@@ -307,6 +311,10 @@
         "ignore_dnd": {
           "name": "Ignore Do Not Disturb",
           "description": "Save the change even if the start time is inside the robot's Do Not Disturb window, where the robot will not run it. By default the call is refused instead."
+        },
+        "room_ids": {
+          "name": "Room ids",
+          "description": "Room numbers on the current map instead of names (as the sidebar page sends them); works for unnamed rooms and rooms that share a name. An empty list cleans the whole house."
         }
       }
     },

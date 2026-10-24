@@ -7,7 +7,7 @@ install.
 
 - Home Assistant 2026.3 or newer (HACS enforces it) and [HACS](https://hacs.xyz/).
 - A Tapo robot vacuum on your network, set up in the Tapo app with your own account. TPAP
-  models need firmware 1.2 or newer; the older AES models (RV30C) are detected automatically,
+  models need firmware 1.2 or newer; the older AES models (RV30C) are detected automatically when added by IP (network discovery only offers TPAP robots),
   best effort.
 - The email and password of the Tapo account that owns the robot. A shared account (one the
   owner shared the robot with) is refused by the robot itself; see

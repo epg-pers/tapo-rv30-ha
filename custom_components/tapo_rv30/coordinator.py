@@ -25,6 +25,7 @@ from .const import (
     CONF_POLL_INTERVAL,
     CONSUMABLE_LABELS,
     CONSUMABLE_LIMITS_H,
+    DOCKED_CODES,
     DOMAIN,
     ERROR_CODES,
     EVENT_CLEAN_FINISHED,
@@ -70,11 +71,15 @@ _FRESHNESS_ALGO = 2         # per-room coverage logic; bump to re-fold saved his
 _ENTITY_SETTINGS = frozenset({"dust", "dnd", "volume", "auto_update", "matter_status", "matter_setup"})
 
 
+RUN_OPEN_MAX = 8 * 3600     # a run with no record after this long is taken as over
+RECHARGE_PROMPTS = frozenset({7, 31})   # "returning to recharge" / "paused to recharge", mid-run
+
+
 def _ts(record: dict) -> int:
     """A clean record's timestamp as an int (0 when missing or not a number)."""
     try:
         return int(record.get("timestamp") or 0)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return 0
 
 
@@ -96,7 +101,10 @@ class TapoCoordinator(DataUpdateCoordinator):
         self.client = client
         self.entry = entry
         self.poll_interval = interval
-        self._map_tick = 0
+        self._map_read_at: float | None = None
+        self._frame_key: tuple | None = None
+        self._run: dict | None = None                   # the robot's current run, see _track_run
+        self.presets_read = False                       # presets were read at least once            # what the last live map frame showed          # monotonic time of the last full map + settings read
         self.map_image_bytes: bytes | None = None
         self.last_clean_image_bytes: bytes | None = None   # render of the newest clean record
         self.last_clean_hash: str = "0"
@@ -195,8 +203,16 @@ class TapoCoordinator(DataUpdateCoordinator):
 
     @property
     def map_busy(self) -> str | None:
-        """Like busy, but for writes to the robot's maps: also refused while it drives home."""
-        return self.busy or ("returning" if self.status_code == 4 else None)
+        """Like busy, but for writes to the robot's maps: also refused while it drives home, and
+        while a run is not over yet. A robot that docks to recharge part way through a clean
+        reports plain charging, and only writes the run's record once it has finished."""
+        if self.busy or self.status_code == 4:
+            return self.busy or "returning"
+        if not self._run_open():
+            return None
+        if self._run.get("recharge"):
+            return "part way through a clean (back at the dock to recharge)"
+        return "finishing a clean (it has not recorded the run yet)"
 
     @property
     def busy(self) -> str | None:
@@ -206,11 +222,47 @@ class TapoCoordinator(DataUpdateCoordinator):
             return "cleaning"
         if code in PAUSED_CODES:
             return "paused"
+        if code in DOCKED_CODES and self._run_open() and self._run.get("recharge"):
+            return "recharging to finish its clean"
         return None
 
-    @property
-    def _map_cycles(self) -> int:
-        return max(1, MAP_INTERVAL // self.poll_interval)
+    def start_refused(self) -> str | None:
+        """Why a clean must not start now, for paths outside the services (vacuum entity, voice,
+        buttons): a map write switches maps and writes layers, and must not run under a robot."""
+        if self.map_lock.locked():
+            return "is having its map written (map setup or editor); try again shortly"
+        return None
+
+    def _run_open(self) -> bool:
+        run = self._run
+        return bool(run) and time.monotonic() - run["since"] < RUN_OPEN_MAX
+
+    def _track_run(self, new: dict) -> None:
+        """A run is open from the first cleaning status until the robot writes a record newer
+        than the ones it had (or RUN_OPEN_MAX passes, or it stops away from the dock). The
+        recharge notices mark one that will carry on after charging."""
+        code = new.get("status_code")
+        newest = max((_ts(r) for r in _records(self.settings.get("records"))), default=0)
+        if code in CLEANING_CODES or code in PAUSED_CODES or code == 4:
+            if not self._run:
+                self._run = {"since": time.monotonic(), "record": newest, "recharge": False, "docked": False}
+            elif code in CLEANING_CODES and self._run["docked"]:
+                self._run.update(recharge=False, docked=False, finish_held=False)   # charged, set off again
+            if set(new.get("prompts") or []) & RECHARGE_PROMPTS:
+                self._run["recharge"] = True
+            return
+        if not self._run:
+            return
+        if code in DOCKED_CODES:
+            self._run["docked"] = True
+        if (newest > self._run["record"] or not self._run_open()
+                or (code in (0, 8) and not self._run["recharge"])):
+            held, self._run = self._run.get("finish_held"), None
+            if held:    # it ended without setting off again (stopped while charging)
+                recs = _records(self.settings.get("records"))
+                record = decode_clean_record(max(recs, key=_ts)) if newest > 0 and recs else None
+                self.hass.bus.async_fire(EVENT_CLEAN_FINISHED, {**self._event_base(), "status_code": code,
+                                                                **({"record": record} if record else {})})
 
     async def async_set_poll_interval(self, seconds: int) -> None:
         seconds = max(MIN_POLL_INTERVAL, min(MAX_POLL_INTERVAL, int(seconds)))
@@ -252,12 +304,14 @@ class TapoCoordinator(DataUpdateCoordinator):
         # between, re-read the map data so position and current room track.
         # With no map yet (a new robot, or one between maps) the map is tried every poll, but
         # settings keep their own cycle and the failure is logged once, not every poll.
-        self._map_tick += 1
-        cycle = self._map_tick >= self._map_cycles
+        # Timed, not counted: the poll interval shortens while cleaning, and a count of polls
+        # would then re-read everything every 100 s instead of every MAP_INTERVAL.
+        now = time.monotonic()
+        cycle = self._map_read_at is None or now - self._map_read_at >= MAP_INTERVAL
         full = self._map_base is None or cycle
         if full or self._map_retry:
             if cycle:
-                self._map_tick = 0
+                self._map_read_at = now
             map_ok = False
             try:
                 await self.hass.async_add_executor_job(self._refresh_map)
@@ -301,6 +355,14 @@ class TapoCoordinator(DataUpdateCoordinator):
         data["signal_level"] = dev.get("signal_level")
         data["firmware"] = self.settings.get("firmware") or {}
         await self._fire_events(self.data, data)
+        self._track_run(data)
+        if (self._run and data.get("status_code") in DOCKED_CODES and not self._run.get("recharge")
+                and time.monotonic() - self._run.get("checked", 0) >= 60):
+            # Docked after a run: look for its record each minute rather than at the next full
+            # read, so map writes are not held back for minutes.
+            self._run["checked"] = time.monotonic()
+            await self._fetch_new_record()
+            self._track_run(data)
         return data
 
     # ---- events ------------------------------------------------------------------
@@ -318,6 +380,16 @@ class TapoCoordinator(DataUpdateCoordinator):
             self._note_latest_record()
             return
         change = clean_transition(prev.get("status_code"), new.get("status_code"), CLEANING_CODES, PAUSED_CODES)
+        # Docking to recharge part way through, and setting off again after, are one run.
+        recharging = bool(set(new.get("prompts") or []) & RECHARGE_PROMPTS) or bool(
+            self._run and self._run.get("recharge"))
+        if change == "finished" and recharging:
+            _LOGGER.debug("%s: docking to recharge part way through a clean", self.device_name)
+            if self._run:
+                self._run["finish_held"] = True     # fired when the run really ends
+            change = None
+        elif change == "started" and self._run_open() and self._run.get("recharge"):
+            change = None
         if change == "started":
             self.hass.bus.async_fire(EVENT_CLEAN_STARTED, {**self._event_base(), "status_code": new.get("status_code"),
                                                            "current_room": self.current_room})
@@ -404,7 +476,9 @@ class TapoCoordinator(DataUpdateCoordinator):
             try:
                 detail = await self.hass.async_add_executor_job(
                     self.client.get_clean_record_detail, rec.get("record_index", 0))
-                if not already:
+                # Only records picked as pending are folded; the newest one added just to redraw it
+                # may be another floor's run, to be counted when that floor is active again.
+                if not already and rec in pending:
                     done = await self.hass.async_add_executor_job(self._fold_coverage, rec, detail)
                 if rts == ts:
                     # Drawing and PNG encoding are both CPU-heavy: keep them off the event loop.
@@ -422,7 +496,7 @@ class TapoCoordinator(DataUpdateCoordinator):
                 # a transient failure is retried on later polls; a record that keeps failing is given up
                 self._record_failures[rts] = self._record_failures.get(rts, 0) + 1
                 done = self._record_failures[rts] >= 3
-            if not already and done:
+            if not already and done and rec in pending:
                 self._processed_records.add(rts)
                 self._record_failures.pop(rts, None)
                 changed = True
@@ -458,20 +532,20 @@ class TapoCoordinator(DataUpdateCoordinator):
             code = await self.hass.async_add_executor_job(self.client._status)
         except Exception:
             return True
-        return code in CLEANING_CODES or code in PAUSED_CODES or code == 4
+        return code in CLEANING_CODES or code in PAUSED_CODES or code == 4 or self._run_open()
 
-    def _ask_reload(self, why: str) -> None:
+    def _ask_reload(self, why: str, keys) -> None:
         """Entities are created once, at setup: reload the entry (once) so ones for
         settings or dock actions that only answered later get created."""
         if self._reload_asked or self.entry is None:
             return
-        self._reload_asked = True
-        # Once per entry per Home Assistant run: a getter that answers only now and then must
-        # not reload the entry every time it comes back.
-        done = self.hass.data.setdefault(f"{DOMAIN}_reloaded", set())
-        if self.entry.entry_id in done:
+        # Once per setting per Home Assistant run: a getter that answers only now and then must
+        # not reload the entry every time it comes back, but a different one still gets its entity.
+        seen = self.hass.data.setdefault(f"{DOMAIN}_reloaded", {}).setdefault(self.entry.entry_id, set())
+        if not set(keys) - seen:
             return
-        done.add(self.entry.entry_id)
+        seen |= set(keys)
+        self._reload_asked = True
         _LOGGER.info("%s: %s; reloading to add their entities", self.device_name, why)
         self.hass.config_entries.async_schedule_reload(self.entry.entry_id)
 
@@ -483,7 +557,7 @@ class TapoCoordinator(DataUpdateCoordinator):
                 self._setting_keys = keys
             return
         if keys - self._setting_keys:
-            self._ask_reload("settings that did not answer at setup now do")
+            self._ask_reload("settings that did not answer at setup now do", keys - self._setting_keys)
 
     async def _load_restore(self) -> None:
         if self._restore_loaded or self._restore_store is None:
@@ -542,7 +616,10 @@ class TapoCoordinator(DataUpdateCoordinator):
             elif self.map_busy or self.map_lock.locked() or await self._robot_working():
                 return None   # try again on a later poll, once docked
             else:
-                result = await setup_apply.apply_setup(self.hass, self, pend["map_id"], snap)
+                try:
+                    result = await setup_apply.apply_setup(self.hass, self, pend["map_id"], snap)
+                except setup_apply.MapBusy:
+                    return None   # nothing written: another map write or a clean started meanwhile
                 plan = result["plan"]
                 done = [f"{len(plan['room_names'])} room names" if plan["room_names"] else "",
                         ", ".join(f"{v} {k.replace('_', ' ')}" for k, v in plan["zones"].items()),
@@ -633,9 +710,9 @@ class TapoCoordinator(DataUpdateCoordinator):
             complete = False
             _LOGGER.debug("Dock probe failed: %s", exc)
         self._caps_attempts += 1
-        if self._caps_attempts > 1 and self.data is not None and (
-                set(self.bool_settings_supported) - before_bool or set(self.dock_actions) - before_dock):
-            self._ask_reload("a later capability probe found more settings or dock actions")
+        found = (set(self.bool_settings_supported) - before_bool) | (set(self.dock_actions) - before_dock)
+        if self._caps_attempts > 1 and self.data is not None and found:
+            self._ask_reload("a later capability probe found more settings or dock actions", found)
         if complete or self._caps_attempts >= self.CAPS_ATTEMPTS:
             if not complete:
                 _LOGGER.info("%s: capability probe still inconclusive after %d attempts; "
@@ -674,6 +751,7 @@ class TapoCoordinator(DataUpdateCoordinator):
             self.bool_settings = {**self.bool_settings, **read}
         try:
             self.presets = await self.hass.async_add_executor_job(self._read_presets)
+            self.presets_read = True
         except Exception as exc:
             _LOGGER.debug("Preset read failed: %s", exc)
 
@@ -753,8 +831,7 @@ class TapoCoordinator(DataUpdateCoordinator):
                 os.remove(os.path.join(folder, "history", f))
             if mapsnapshot.is_degraded(old, snap):
                 return "degraded"
-            with open(latest, "w") as fh:
-                json.dump(snap, fh)
+            setup_apply.write_json(latest, snap)
             return "written"
 
         try:
@@ -785,7 +862,7 @@ class TapoCoordinator(DataUpdateCoordinator):
             for p in self.presets:
                 if p["id"] == rid:
                     return p
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             pass
         wanted = fold(str(ref).strip())
         exact = [p for p in self.presets if fold(p["name"]) == wanted]
@@ -917,6 +994,11 @@ class TapoCoordinator(DataUpdateCoordinator):
         self.current_room = room_at_vac(map_data)
         self._update_path(map_data)
         if self._map_base is not None:
+            # Docked, nothing moves: drawing and encoding the same frame every poll is wasted CPU.
+            key = (id(self._map_base), tuple(map_data.get("vac_coor") or ()), len(self.path_points))
+            if key == self._frame_key and self.map_image_bytes is not None:
+                return
+            self._frame_key = key
             img = self._map_base.copy()
             draw = ImageDraw.Draw(img)
             if len(self.path_points) > 1:
@@ -925,7 +1007,7 @@ class TapoCoordinator(DataUpdateCoordinator):
             vac = map_data.get("vac_coor")
             if vac:
                 _dot(draw, *_grid_px(vac[0], vac[1], map_data["height"]), (0, 180, 255))
-            self.map_image_bytes = _png(img)
+            self.map_image_bytes = _png(img, fast=True)
 
     def _update_path(self, map_data: dict) -> None:
         """Read the run's path while the robot is active (new path_id = new run)."""
@@ -946,7 +1028,7 @@ class TapoCoordinator(DataUpdateCoordinator):
 
     async def async_request_map_refresh(self) -> None:
         """Re-render the map on the next poll (after set_map)."""
-        self._map_tick = self._map_cycles
+        self._map_read_at = None
         await self.async_refresh_soon()
 
     def _refresh_map(self) -> None:
