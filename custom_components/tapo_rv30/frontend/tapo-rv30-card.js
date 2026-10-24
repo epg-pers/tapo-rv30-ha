@@ -475,7 +475,7 @@ class TapoRV30Card extends HTMLElement {
     const cleaning = state === "cleaning", paused = state === "paused", docked = state === "docked";
     const items = [
       cleaning ? { k: "pause", i: ICONS.pause, l: "Pause", svc: "pause" } : { k: "start", i: ICONS.start, l: paused ? "Resume" : "Start", svc: "start", primary: !cleaning },
-      { k: "stop", i: ICONS.stop, l: "Stop", svc: "stop", dis: !(cleaning || paused) },
+      { k: "stop", i: ICONS.stop, l: "Stop", svc: "stop", dis: !(cleaning || paused || this._hass?.states[this._config.entity]?.attributes?.run_busy) },
       { k: "dock", i: ICONS.dock, l: "Dock", svc: "return_to_base", dis: docked },
       { k: "locate", i: ICONS.locate, l: "Locate", svc: "locate" },
     ];

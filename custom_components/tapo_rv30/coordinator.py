@@ -244,8 +244,9 @@ class TapoCoordinator(DataUpdateCoordinator):
     async def async_forget_run(self) -> None:
         """Stop pressed while docked part way through a run: the user is done with it, so it no
         longer holds back other cleans (the robot may still finish it by itself)."""
-        if self._run_phase() in ("recharge", "wash"):
-            await self._end_run(self.data or {})
+        async with self._update_lock:       # a poll must not move the run on in between
+            if self._run_phase() in ("recharge", "wash"):
+                await self._end_run(self.data or {})
 
     def _run_phase(self) -> str | None:
         """The run's phase: 'active', docked part way through it ('recharge' / 'wash'), or
@@ -283,7 +284,7 @@ class TapoCoordinator(DataUpdateCoordinator):
             # the dock): then this is a new clean.
             record = await self._fetch_new_record()
             if record is None:
-                run.update(phase="active", at=now, recharge=sign)
+                run.update(phase="active", at=now, recharge=sign, resumed=False)
                 return
             self._fire_finished(new, record)
             phase = run = self._run = None
@@ -295,7 +296,7 @@ class TapoCoordinator(DataUpdateCoordinator):
                 newest = max((_ts(r) for r in _records(self.settings.get("records"))), default=0)
                 self._last_record_ts = max(self._last_record_ts or 0, newest)
                 self._run = {"phase": "recharge" if code in DOCKED_CODES else "active", "at": now,
-                             "recharge": sign, "resumed": prev is None}
+                             "recharge": sign, "resumed": prev is None and code not in RUN_CODES}
                 if prev is not None:
                     self.hass.bus.async_fire(EVENT_CLEAN_STARTED, {
                         **self._event_base(), "status_code": code, "current_room": self.current_room})
@@ -312,7 +313,7 @@ class TapoCoordinator(DataUpdateCoordinator):
                 await self._end_run(new)
                 return
         elif active:
-            run.update(phase="active", at=now)      # left the dock again
+            run.update(phase="active", at=now, resumed=False)      # left the dock again
             return
         elif code not in DOCKED_CODES:
             await self._end_run(new)                # stopped at the dock

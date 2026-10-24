@@ -995,9 +995,9 @@ class TapoVacuumClient:
         for m, p in singles:
             try:
                 out[m] = self.send(m, p)["result"] or {}
-            except AuthError:
-                raise           # the password changed: ask for it, do not try every getter
             except Exception as exc:
+                if _is_dropout(exc):
+                    raise       # login failed or the robot dropped out: do not try every getter
                 _LOGGER.debug("%s failed: %s", m, exc)
         return out
 

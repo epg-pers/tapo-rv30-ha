@@ -10,7 +10,8 @@ plus a settings probe), so a feature the robot lacks simply has no entity.
 to Home Assistant areas in the entity's settings). Attributes: `fan_speed`, `water_level`,
 `clean_passes`, `mop_attached`, `clean_area`, `clean_time_min`, `clean_percent`,
 `position_mm`, `current_room`, `consumables` (percent life left per part), `prompts` (the
-robot's active notices, for example `dust_bag_full`).
+robot's active notices, for example `dust_bag_full`), `run_busy` (why a new clean is refused while
+the robot is docked part way through one, otherwise empty).
 
 ## Map
 

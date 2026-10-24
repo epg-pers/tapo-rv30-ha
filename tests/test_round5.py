@@ -122,3 +122,27 @@ def test_failed_session_save_removes_the_old_copy(tmp_path, monkeypatch, caplog)
 def test_dropouts_and_device_errors_are_told_apart():
     assert T._is_dropout(T.AuthError("x")) and T._is_dropout(requests.exceptions.ConnectionError())
     assert not T._is_dropout(RuntimeError("Device error -1"))
+
+
+def test_plain_auth_error_renews_the_session(tmp_path, monkeypatch):
+    c = _client(tmp_path)
+    code = next(iter(T._AUTH_ERRORS))
+    monkeypatch.setattr(c, "_post", lambda *a, **k: json.dumps({"error_code": code}).encode())
+    with pytest.raises(T._SessionLost):         # unauthenticated text does not decide the password
+        c._send_once("setSwitchClean", {"clean_on": True})
+
+
+def test_single_getters_stop_at_a_dropout(tmp_path, monkeypatch):
+    c = _client(tmp_path)
+    c._multi_supported = False
+    calls = []
+
+    def send(method, params=None):
+        calls.append(method)
+        if method == "get1":
+            raise RuntimeError("Device error -1")         # one getter refused: carry on
+        raise requests.exceptions.ConnectTimeout("gone")  # robot off Wi-Fi: stop at once
+    monkeypatch.setattr(c, "send", send)
+    with pytest.raises(requests.exceptions.ConnectTimeout):
+        c.send_multi([("get1", None), ("get2", None), ("get3", None)])
+    assert calls == ["get1", "get2"]
