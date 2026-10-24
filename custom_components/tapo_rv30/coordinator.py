@@ -111,6 +111,8 @@ class TapoCoordinator(DataUpdateCoordinator):
         self._presets_raw: list[dict] | None = None    # getCustomizationRuleData bodies; None = last read failed
         self._map_layers: dict | None = None           # {map_id, map_name, area_list, furniture_list}
         self._snapshot_hash: dict[int, str] = {}       # map_id -> content hash last written
+        self.pending_restore: dict | None = None       # lost-map restore waiting to be saved in the app
+        self._finishing = False
         self._caps_fetched = False
         self._caps_attempts = 0
         self._last_record_ts: int | None = None   # newest getCleanRecords timestamp seen
@@ -208,6 +210,7 @@ class TapoCoordinator(DataUpdateCoordinator):
                 await self._auto_snapshot()
             except Exception as exc:   # never let snapshotting break polling
                 _LOGGER.debug("Map snapshot failed: %s", exc)
+            self._check_pending_restore()
         elif self.map_id is not None:
             try:
                 await self.hass.async_add_executor_job(self._refresh_position)
@@ -349,6 +352,65 @@ class TapoCoordinator(DataUpdateCoordinator):
             if key.startswith(f"{self.map_id}:"):
                 out[v.get("name") or key] = {"last_cleaned": v.get("last_cleaned"), "coverage": v.get("coverage")}
         return out
+
+    # ---- finishing a lost-map restore ----------------------------------------------------
+    def expect_restore(self, map_id: int, name: str | None, carrier: int) -> None:
+        """A backup came back as a new, unsaved map; finish it once it is saved in the app."""
+        self.pending_restore = {"map_id": map_id, "name": name, "carrier": carrier}
+
+    def _check_pending_restore(self) -> None:
+        pend = self.pending_restore
+        if not pend or self._finishing:
+            return
+        m = next((x for x in self.maps if x["id"] == pend["map_id"]), None)
+        if m is None:
+            return
+        if m.get("saved"):
+            self._finishing = True
+            self.hass.async_create_task(self.async_finish_restore())
+
+    async def async_finish_restore(self) -> dict | None:
+        """Put the restored map's layers back from its saved setup, then tell the user."""
+        from homeassistant.components import persistent_notification
+
+        from . import setup_apply
+        pend = self.pending_restore
+        if not pend:
+            self._finishing = False
+            return None
+        name = pend.get("name") or f"map {pend['map_id']}"
+        carrier = next((x["name"] for x in self.maps if x["id"] == pend["carrier"]), None)
+        result = None
+        try:
+            snap = await self.hass.async_add_executor_job(
+                setup_apply.find_snapshot, setup_apply.snapshots_folder(self.hass), pend["map_id"], None)
+            if snap is None:
+                msg = (f"{name} is restored and saved. There was no saved map setup for it, so put room names "
+                       "and zones back by hand.")
+            elif self.busy:
+                return None   # try again on a later poll, once docked
+            else:
+                result = await setup_apply.apply_setup(self.hass, self, pend["map_id"], snap)
+                plan = result["plan"]
+                done = [f"{len(plan['room_names'])} room names" if plan["room_names"] else "",
+                        ", ".join(f"{v} {k.replace('_', ' ')}" for k, v in plan["zones"].items()),
+                        f"{plan['furniture']} furniture" if plan["furniture"] else "",
+                        ("presets: " + ", ".join(plan["presets"])) if plan["presets"] else "",
+                        f"{len(plan['schedules'])} schedule(s)" if plan["schedules"] else ""]
+                done = [d for d in done if d]
+                msg = (f"{name} is restored. Put back: {'; '.join(done) or 'nothing was missing'}."
+                       + (f" Skipped: {'; '.join(result['skipped'])}." if result.get("skipped") else ""))
+            if carrier and pend["carrier"] != pend["map_id"]:
+                msg += f" You can now delete the map \"{carrier}\" that carried the restore."
+            self.pending_restore = None
+        except setup_apply.ApplyError as exc:
+            msg = f"{name} is restored, but putting its setup back failed: {exc}. Run apply_map_setup to retry."
+            self.pending_restore = None
+        finally:
+            self._finishing = False
+        persistent_notification.async_create(self.hass, msg, title=f"{self.device_name}: map restored",
+                                             notification_id=f"{DOMAIN}_restore_{pend['map_id']}")
+        return result
 
     def consumables_percent(self) -> dict[str, int]:
         """Remaining life per consumable as a percentage, by label."""
@@ -686,8 +748,8 @@ class TapoCoordinator(DataUpdateCoordinator):
 
     def _refresh_map(self) -> None:
         current_id, map_list = self.client.get_map_info()
-        self.maps = [{"id": m["map_id"], "name": b64name(m.get("map_name", "")), "current": m["map_id"] == current_id}
-                     for m in map_list]
+        self.maps = [{"id": m["map_id"], "name": b64name(m.get("map_name", "")), "current": m["map_id"] == current_id,
+                      "saved": m.get("is_saved", True) is not False} for m in map_list]
         map_data = self.client.get_map_data(current_id)
         self.map_id = current_id
         self.map_name = b64name(map_data.get("map_name", ""))
