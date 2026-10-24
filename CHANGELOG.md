@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.26.1b1
+## v0.26.1
 
 ### Fixed
 
