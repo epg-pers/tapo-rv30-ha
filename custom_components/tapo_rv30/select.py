@@ -7,6 +7,7 @@ from homeassistant.components.select import SelectEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -38,6 +39,13 @@ async def async_setup_entry(
 class _TapoSelectBase(CoordinatorEntity[TapoCoordinator], SelectEntity):
     _attr_has_entity_name = True
 
+    async def _call(self, fn, *args) -> None:
+        """Device or network errors become a readable error instead of a traceback."""
+        try:
+            await self.hass.async_add_executor_job(fn, *args)
+        except Exception as exc:
+            raise HomeAssistantError(f"{self.coordinator.device_name} rejected the change: {exc}") from exc
+
     def __init__(self, coordinator: TapoCoordinator, entry: ConfigEntry) -> None:
         super().__init__(coordinator)
         self._entry = entry
@@ -64,9 +72,7 @@ class TapoCleanPassesSelect(_TapoSelectBase):
         return str(d.get("clean_number", 1))
 
     async def async_select_option(self, option: str) -> None:
-        await self.hass.async_add_executor_job(
-            self.coordinator.client.set_passes, int(option)
-        )
+        await self._call(self.coordinator.client.set_passes, int(option))
         await self.coordinator.async_request_refresh()
 
 
@@ -91,9 +97,7 @@ class TapoWaterLevelSelect(_TapoSelectBase):
         if value is None:
             _LOGGER.error("Unknown water level: %s", option)
             return
-        await self.hass.async_add_executor_job(
-            self.coordinator.client.set_water, value
-        )
+        await self._call(self.coordinator.client.set_water, value)
         await self.coordinator.async_request_refresh()
 
 

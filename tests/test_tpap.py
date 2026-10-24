@@ -101,3 +101,95 @@ def test_lz4_decompress_is_cached():
     block = bytes([0x30]) + b"XYZ"
     a = lz4_block_decompress(block, 3); b = lz4_block_decompress(block, 3)
     assert a == b"XYZ" and a is b
+
+
+def _client_status(status):
+    """A client that reports `status` and records the setSwitchClean / setRobotPause it sends."""
+    c = _client_with_send({"getVacStatus": {"status": status}, "setSwitchClean": {}, "setRobotPause": {},
+                           "getMapInfo": {"current_map_id": 1, "map_list": []}})
+    return c
+
+
+@pytest.mark.parametrize("status", [7, 10, 12, 14])
+def test_start_resumes_every_paused_state(status):
+    c = _client_status(status)
+    c.start()
+    assert [m for m, _ in c._calls] == ["getVacStatus", "setRobotPause"]
+    assert c._calls[1][1] == {"pause": False}
+
+
+@pytest.mark.parametrize("status", [1, 2, 13])
+def test_start_while_working_is_a_no_op(status):
+    c = _client_status(status)
+    c.start()
+    assert [m for m, _ in c._calls] == ["getVacStatus"]
+
+
+@pytest.mark.parametrize("status", [3, 11])
+def test_start_under_remote_or_go_to_says_why(status):
+    from custom_components.tapo_rv30.tpap import RobotBusy
+    c = _client_status(status)
+    with pytest.raises(RobotBusy, match="stop it before starting a clean"):
+        c.start()
+
+
+def test_start_from_dock_starts_a_clean():
+    c = _client_status(6)
+    c.start()
+    assert [m for m, _ in c._calls] == ["getVacStatus", "setSwitchClean"]
+
+
+@pytest.mark.parametrize("call", [
+    lambda c: c.clean_rooms([1], 1), lambda c: c.clean_zones(1, [[0, 0, 1, 1]], 2, 1, 1),
+    lambda c: c.clean_spot(), lambda c: c.run_preset(2, 1), lambda c: c.clean_custom_rule(2, 1)])
+@pytest.mark.parametrize("status,word", [(1, "is cleaning"), (7, "is paused"), (11, "is going to a point")])
+def test_new_cleans_refused_readably_while_busy(call, status, word):
+    from custom_components.tapo_rv30.tpap import RobotBusy
+    c = _client_status(status)
+    with pytest.raises(RobotBusy, match=word):
+        call(c)
+    assert "setSwitchClean" not in [m for m, _ in c._calls]
+
+
+def test_resend_safe_only_for_reads():
+    from custom_components.tapo_rv30.tpap import _resend_safe
+    assert _resend_safe("getVacStatus", None)
+    assert _resend_safe("multipleRequest", {"requests": [{"method": "getVacStatus"}, {"method": "getBatteryInfo"}]})
+    assert not _resend_safe("multipleRequest", {"requests": [{"method": "getVacStatus"}, {"method": "setVolume"}]})
+    assert not _resend_safe("setSwitchClean", {})
+
+
+def _timeout_client(monkeypatch):
+    import threading
+
+    import requests
+
+    from custom_components.tapo_rv30 import tpap
+    c = tpap.TapoVacuumClient.__new__(tpap.TapoVacuumClient)
+    c._lock = threading.RLock()
+    c._seq, c._cipher_id, c._key, c._base_nonce, c._session_id = 1, 0, b"", b"", "s"
+    c.posts, c.cleared = [], []
+    monkeypatch.setattr(tpap, "_encrypt", lambda *a: b"")
+    c._ensure_auth = lambda: None
+    c.authenticate = lambda: None
+    c._clear_session = lambda: c.cleared.append(1)
+
+    def post(path, body=None, binary=False):
+        c.posts.append(path)
+        raise requests.ReadTimeout("read timed out")
+    c._post = post
+    return c
+
+
+def test_write_is_not_resent_after_a_lost_reply(monkeypatch):
+    c = _timeout_client(monkeypatch)
+    with pytest.raises(RuntimeError, match="not sent again"):
+        c.send("setSwitchClean", {"clean_on": True})
+    assert len(c.posts) == 1 and c.cleared       # sent once; next call starts a fresh session
+
+
+def test_read_is_retried_after_a_lost_reply(monkeypatch):
+    c = _timeout_client(monkeypatch)
+    with pytest.raises(RuntimeError):
+        c.send("getVacStatus")
+    assert len(c.posts) == 2

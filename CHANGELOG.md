@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.26.1b1
+
+### Fixed
+
+- `vacuum.start` carries on with any paused job (mapping, going to a point and exploring too, not only a paused clean), does nothing when the robot is already cleaning, and says why when it is under remote control or going to a point, instead of passing on the robot's -3002.
+- A room, zone, spot or preset clean asked for while the robot is busy is refused with a readable reason on every path, including `vacuum.clean_area` and `vacuum.clean_spot`, not only the services.
+- A command whose reply is lost (read timeout) is no longer sent a second time, so a clean cannot start twice; the next call starts a fresh session. Reads are still retried.
+- The Clean Passes and Water Level selects, and the preset and map setup services, report device errors as a readable message instead of a traceback.
+
 ## v0.26.0
 
 ### New

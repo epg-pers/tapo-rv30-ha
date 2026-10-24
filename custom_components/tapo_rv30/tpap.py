@@ -34,7 +34,7 @@ from ecdsa import NIST256p, NIST384p, NIST521p, ellipticcurve
 from requests.adapters import HTTPAdapter
 from urllib3.exceptions import InsecureRequestWarning
 
-from .const import DOCKED_CODES
+from .const import CLEANING_CODES, DOCKED_CODES, PAUSED_CODES
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -274,6 +274,24 @@ class AuthError(Exception):
 
 class _SessionLost(Exception):
     """Internal: the encrypted session is no longer usable — re-handshake."""
+
+
+class RobotBusy(RuntimeError):
+    """A clean was asked for while the robot is already working or paused. The message
+    reads after the robot's name ("is cleaning; stop it first")."""
+
+
+# Working states a new clean cannot start from, in words.
+_WORKING = {1: "cleaning", 2: "building a map", 3: "under remote control",
+            11: "going to a point", 13: "exploring"}
+
+
+def _resend_safe(method: str, params: dict | None) -> bool:
+    """Can this request be sent again after its reply was lost? Only reads: a write
+    (a clean start above all) may already have been carried out."""
+    if method == "multipleRequest":
+        return all(str(r.get("method", "")).startswith("get") for r in (params or {}).get("requests", []))
+    return method.startswith("get")
 
 
 def _opt_int(value) -> int | None:
@@ -683,6 +701,15 @@ class TapoVacuumClient:
                               self._seq))
         try:
             raw = self._post(f"/stok={self._session_id}/ds", payload, binary=True)
+        except requests.ReadTimeout as exc:
+            # The request reached the robot but the reply did not come back. A read is
+            # safe to repeat; a write is not (it may have been carried out), so start a
+            # fresh session for the next call and report it instead of resending.
+            if _resend_safe(method, params):
+                raise _SessionLost(f"no reply: {exc}") from exc
+            self._clear_session()
+            raise RuntimeError(f"no reply to {method}; not sent again in case the robot already "
+                               "acted on it, check its state") from exc
         except requests.RequestException as exc:
             # A reset or refused connection usually means the device dropped us.
             raise _SessionLost(f"transport error: {exc}") from exc
@@ -870,6 +897,7 @@ class TapoVacuumClient:
 
     def run_preset(self, rule_id: int, map_id: int, clean_order: bool = True) -> None:
         """Start a preset exactly as the app does (clean_mode 5); switches map first if needed."""
+        self._require_idle("running a preset")
         current, _ = self.get_map_info()
         if current != map_id:
             self.set_current_map(map_id)
@@ -888,10 +916,24 @@ class TapoVacuumClient:
     def _status(self) -> int:
         return self.send("getVacStatus")["result"].get("status")
 
+    def _require_idle(self, action: str) -> None:
+        """The robot refuses a new clean (-3002) while it is working or paused; say why."""
+        status = self._status()
+        if status in PAUSED_CODES:
+            raise RobotBusy(f"is paused; resume or stop it before {action}")
+        if status in CLEANING_CODES:
+            raise RobotBusy(f"is {_WORKING.get(status, 'busy')}; stop it before {action}")
+
     def start(self) -> None:
-        # Paused mid-job: the robot rejects a new setSwitchClean (-3002), so resume the job instead.
-        if self._status() == 7:
+        status = self._status()
+        # Paused mid-job (cleaning, mapping, going to a point, exploring): the robot rejects a
+        # new setSwitchClean (-3002), so carry on with the job instead.
+        if status in PAUSED_CODES:
             return self.resume()
+        if status in (1, 2, 13):      # already cleaning, mapping or exploring: nothing to do
+            return None
+        if status in CLEANING_CODES:  # remote control, going to a point
+            raise RobotBusy(f"is {_WORKING[status]}; stop it before starting a clean")
         self.send("setSwitchClean", {
             "clean_mode": 0, "clean_on": True,
             "clean_order": True, "force_clean": False,
@@ -908,6 +950,7 @@ class TapoVacuumClient:
 
     def clean_rooms(self, room_ids: list[int], map_id: int, clean_order: bool = True,
                     levels: dict | None = None) -> None:
+        self._require_idle("starting a room clean")
         if levels:
             self.set_global_levels(**levels)
         self.send("setSwitchClean", {
@@ -924,6 +967,7 @@ class TapoVacuumClient:
         """Run a Tapo-app cleaning preset. Schedules built from a preset carry
         clean_mode 5 + custom_rule_id instead of a room_list; this sends the same
         shape setSwitchClean. Inferred from schedule data, not confirmed by the app."""
+        self._require_idle("running a preset")
         self.send("setSwitchClean", {
             "clean_mode": 5, "clean_on": True, "clean_order": clean_order,
             "force_clean": False, "map_id": map_id,
@@ -1155,6 +1199,7 @@ class TapoVacuumClient:
     def clean_zones(self, map_id: int, zones: list[list[int]],
                     suction: int, cistern: int, passes: int) -> None:
         """Zones are [x1, y1, x2, y2] rectangles in the map's real coordinates (mm)."""
+        self._require_idle("starting a zone clean")
         self.send("setSwitchClean", {
             "clean_on": True, "clean_mode": 4, "map_id": map_id,
             "clean_order": False, "force_clean": False, "start_type": 1,
@@ -1166,6 +1211,7 @@ class TapoVacuumClient:
 
     def clean_spot(self) -> None:
         """The app's spot clean: a 1.5 m square (+-750) around a point - here, the robot."""
+        self._require_idle("starting a spot clean")
         map_id, _ = self.get_map_info()
         x, y = self.get_map_data(map_id)["real_vac_coor"][:2]
         g = self.send("getCleanAttr", {"type": "global"})["result"]

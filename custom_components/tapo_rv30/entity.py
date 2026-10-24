@@ -4,12 +4,12 @@ from __future__ import annotations
 from typing import Any, Callable
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.exceptions import HomeAssistantError
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .coordinator import TapoCoordinator
-from .tpap import AuthError
+from .tpap import AuthError, RobotBusy
 
 
 class TapoEntity(CoordinatorEntity[TapoCoordinator]):
@@ -36,6 +36,8 @@ class TapoEntity(CoordinatorEntity[TapoCoordinator]):
             return await self.hass.async_add_executor_job(fn, *args)
         except AuthError as exc:
             raise HomeAssistantError(f"{self.coordinator.device_name}: authentication failed ({exc})") from exc
+        except RobotBusy as exc:
+            raise ServiceValidationError(f"{self.coordinator.device_name} {exc}") from exc
         except Exception as exc:
             raise HomeAssistantError(f"{self.coordinator.device_name} rejected the command: {exc}") from exc
 

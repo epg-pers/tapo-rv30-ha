@@ -27,7 +27,7 @@ from .const import (
 from .coordinator import TapoCoordinator
 from .frontend import STATIC_URL
 from .mapdata import b64name, decode_prompt
-from .tpap import AuthError
+from .tpap import AuthError, RobotBusy
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -146,6 +146,8 @@ class TapoVacuumEntity(CoordinatorEntity[TapoCoordinator], StateVacuumEntity):
             return await self.hass.async_add_executor_job(fn, *args)
         except AuthError as exc:
             raise HomeAssistantError(f"{self.coordinator.device_name}: authentication failed ({exc})") from exc
+        except RobotBusy as exc:
+            raise ServiceValidationError(f"{self.coordinator.device_name} {exc}") from exc
         except Exception as exc:
             raise HomeAssistantError(f"{self.coordinator.device_name} rejected the command: {exc}") from exc
 
@@ -199,12 +201,7 @@ class TapoVacuumEntity(CoordinatorEntity[TapoCoordinator], StateVacuumEntity):
                 "the vacuum can only clean rooms on one map per run"
             )
         (map_id, room_ids), = by_map.items()
-        try:
-            await self.hass.async_add_executor_job(
-                self.coordinator.client.clean_rooms, room_ids, map_id
-            )
-        except Exception as exc:
-            raise HomeAssistantError(f"Vacuum rejected the command: {exc}") from exc
+        await self._call(self.coordinator.client.clean_rooms, room_ids, map_id)
         await self.coordinator.async_refresh_soon()
 
     async def async_return_to_base(self, **kwargs: Any) -> None:
