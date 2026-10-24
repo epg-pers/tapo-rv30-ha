@@ -54,8 +54,12 @@ Same domain, so your config entry and entities carry over; see
 - **Discovery**: the robot is found on the network and its entry follows IP changes
 - Device triggers and blueprints for the automation editor; the vacuum wears its own
   state-coloured robot picture instead of a generic icon
-- **Go to point**, per-run suction / water / passes, presets as buttons, native
-  `vacuum.clean_area` with Home Assistant areas, events for start / finish / error
+- **Presets from Home Assistant**: create, edit and delete the robot's presets with per-room
+  suction, water and passes, the same way the Tapo app does; each also gets a button
+- **Robot notices** (dust bag full, area unreachable, water tank empty and the rest) as events
+  and a device trigger
+- **Go to point**, per-run suction / water / passes, native `vacuum.clean_area` with Home
+  Assistant areas, events for start / finish / error
 - Adaptive polling, hardened TPAP login, a repair issue when the robot stops answering,
   diagnostics, reconfigure and reauth from the integration page
 
@@ -108,7 +112,8 @@ the sentence.
 ## Automations
 
 Our events show up as device triggers in the automation editor ("Jarvis finished cleaning",
-"Jarvis reported an error", "Jarvis started cleaning"), no raw event trigger needed. Two
+"Jarvis reported an error", "Jarvis started cleaning", "Jarvis gave a notice"), no raw event
+trigger needed. Two
 ready-made blueprints:
 
 | Blueprint | What it does | |

@@ -151,4 +151,4 @@ So fetch your backups ahead of time, and keep the map around.
 | No-go zones, virtual walls, carpets, furniture | re-map, edit, delete, restore | `restore_map_backup` and `apply_map_setup` (exact positions) |
 | Presets and schedules | map loss | `apply_map_setup` (recreated, schedules re-pointed) |
 | Room boundaries | re-map | `restore_map_backup`; approximate via `apply_map_setup` |
-| Per-room suction/water/passes | - | preset-only on 1.3.3 firmware |
+| Per-room suction/water/passes | - | preset-only on 1.3.3 firmware (`create_preset`) |

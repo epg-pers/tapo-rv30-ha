@@ -9,7 +9,8 @@ plus a settings probe), so a feature the robot lacks simply has no entity.
 (Quiet / Standard / Turbo / Max / Ultra), and the native `vacuum.clean_area` action (map rooms
 to Home Assistant areas in the entity's settings). Attributes: `fan_speed`, `water_level`,
 `clean_passes`, `mop_attached`, `clean_area`, `clean_time_min`, `clean_percent`,
-`position_mm`, `current_room`, `consumables` (percent life left per part).
+`position_mm`, `current_room`, `consumables` (percent life left per part), `prompts` (the
+robot's active notices, for example `dust_bag_full`).
 
 ## Map
 
@@ -60,7 +61,7 @@ Voice Volume, Poll Interval, Do Not Disturb start and end.
 ## Buttons
 
 Empty Bin (self-empty docks), Wash Mop / Dry Mop / Remove Hair (Omni docks, only when the
-dock answers), one button per preset saved in the Tapo app, consumable resets, Open Matter
+dock answers), one button per preset on the robot, consumable resets (including Mop Cloth), Open Matter
 Pairing Window (diagnostic).
 
 ## Update

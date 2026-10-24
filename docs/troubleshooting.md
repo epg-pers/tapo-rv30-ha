@@ -46,8 +46,9 @@ if you were using `send_raw`, that method does not exist on your firmware. See
 **Cause.** RV30 Max Plus firmware 1.3.3 rejects the app's own per-room write; per-room
 settings only exist inside presets there.
 
-**Fix.** Give suction, water and passes to `tapo_rv30.clean_rooms` for the run, or save a
-preset in the Tapo app and use `tapo_rv30.run_preset`. Details in [protocol.md](protocol.md).
+**Fix.** Give suction, water and passes to `tapo_rv30.clean_rooms` for the run, or make a
+preset with `tapo_rv30.create_preset` (or in the Tapo app) and run it with
+`tapo_rv30.run_preset`. Details in [protocol.md](protocol.md).
 
 ## Rooms stopped matching after a new map
 

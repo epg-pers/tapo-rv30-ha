@@ -19,7 +19,8 @@ the sentence.
 ## Device triggers
 
 In the automation editor, pick the robot as a device trigger: "started cleaning", "finished
-cleaning" and "reported an error". They are the integration's events underneath; the event
+cleaning", "reported an error" and "gave a notice" (dust bag full, area unreachable and the
+other robot notices). They are the integration's events underneath; the event
 data is listed under [services and events](services.md#events).
 
 ## Blueprints

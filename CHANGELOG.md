@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.26.0b1
+## v0.26.0
 
 ### New
 
@@ -8,6 +8,10 @@
 - **Robot notices as events.** The robot's prompts (dust bag full, area unreachable, cleaning finished, emptying done, water tank empty and others) fire `tapo_rv30_prompt` once each time they appear, with `prompt`, `description` and `code`. Also available as a "gave a notice" device trigger, and the active ones are on the vacuum's `prompts` attribute.
 - **Reset Mop Cloth** button, next to the other consumable resets (the usage sensor already existed).
 - A restore of a deleted map now finishes on its own: once the restored map is saved in the Tapo app, its room names, zones, furniture, presets and schedules are put back from the saved setup and a notification says so.
+
+### Docs
+
+- Protocol notes now cover presets, status prompt codes, the clean start fields (`clean_mode`, `start_type`, `force_clean`, `clean_type`, density), `setCleanAttr` types, component gating, the calls 1.3.3 does not know, and the factory and debug calls that must never be sent.
 
 ### Fixed
 

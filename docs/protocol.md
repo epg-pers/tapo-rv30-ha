@@ -197,6 +197,58 @@ and write it back, restoring no-go zones, virtual walls, carpets and room names 
 the practical recovery the cloud restore refuses - entirely over the local API. The grid itself
 the robot re-maps on its own.
 
+## Presets (customisation rules)
+
+A preset is a "customisation rule" on the robot, stored per map. Verified live on 1.3.3 by
+creating, editing and deleting a throwaway preset.
+
+- List: `getCustomizationRulesInfo` returns `rule_list` of `{rule_id, rule_name (base64), mode,
+  map_id, invalid}`.
+- Read one: `getCustomizationRuleData {"map_id", "rule_id"}` returns the full body below.
+- Create: `addCustomizationRule` with
+  ```json
+  {"rule_name": "<base64>", "mode": "room", "map_id": <int>, "clean_order": true,
+   "area_list": [{"id": 2, "type": "room", "suction": 2, "cistern": 1, "clean_number": 1,
+                  "carpet_strategy": 1}]}
+  ```
+  `area_list` is in cleaning order; `carpet_strategy` is copied from the map's room and left out
+  when the room has none. The robot picks the next free `rule_id`.
+- Edit: the same call with `rule_id` added. The app uses one call for both.
+- Delete: `delCustomizationRule {"map_id", "rule_id"}`.
+- Run: `setSwitchClean` with `clean_mode` 5 and `custom_rule_id`. Schedules that run a preset
+  carry the same `custom_rule_id` in their `clean_attr`, so deleting a preset leaves those
+  schedules pointing at nothing.
+
+This is the only place per-room levels stick on firmware that rejects `setCleanAttr` type
+`custom`. `create_preset`, `update_preset` and `delete_preset` wrap these calls.
+
+## Status prompts
+
+`getVacStatus` carries `prompt` (a list of codes) and `promptCode_id` (a matching list of ids,
+new for each time a notice is raised). They are the notices the app shows and the robot speaks.
+Names follow the app's `RobotPromptType`; 32 and 36 come from the firmware's event table.
+
+| Code | Notice | Code | Notice |
+|---|---|---|---|
+| 1, 2 | battery too low to start | 17 | firmware update succeeded |
+| 3 | mop installed | 18 | recharged, returning to where it stopped |
+| 4 | mop removed | 19 | charging stopped |
+| 5 | emptying the dustbin | 20 | dustbin emptied |
+| 6 | cleaning finished | 21 | some of the area is unreachable |
+| 7 | low battery, returning to recharge | 22 | could not relocate, building a new map |
+| 8 | updating firmware, cannot clean | 23 | started inside a no-go zone |
+| 9 | charged, resuming the clean | 30 | stuck for too long |
+| 10 | charging state unknown | 31 | paused to recharge |
+| 11 | dust bag full | 32 | clean the charging contacts |
+| 12 | dust bag missing | 33 | water tank empty |
+| 13 | dust duct blocked | 36 | dock busy |
+| 14 | emptying too often | | |
+| 15 | battery too low, shutting down | | |
+| 16 | firmware update failed | | |
+
+The integration fires `tapo_rv30_prompt` once per new `promptCode_id` (or per new code on
+firmware that sends no ids).
+
 ## Other calls verified on the RV30 Max Plus
 
 `gotoPoint {"switch": true, "point": [x, y]}` (status becomes 11, Going To Point; `switch:
@@ -207,8 +259,11 @@ false` cancels), `getDustCollectionInfo` / `setDustCollectionInfo` (`dust_collec
 `getCurrentVoiceLanguage` (an md5 of the voice pack; changing it needs a cloud URL),
 `getMatterSetupInfo`, `getCommissionedStatus`, `startCommission` (see [matter.md](matter.md)).
 
-Omni dock actions from the cavefire and jan-tdy forks, untested here: `getBackWashMode` /
-`setWashMopSwitch`, `getDryMopMode` / `setDryMopSwitch`, `getCutHairMode` / `setCutHairSwitch`.
+Omni dock actions: `getBackWashMode` / `setWashMopSwitch`, `getDryMopMode` / `setDryMopSwitch`,
+`getCutHairMode` / `setCutHairSwitch`. The app sends `{"switch": true}` to all three setters
+(`BaseStationSwitchCommandParams` and `RobotCutHairStatus` both serialise their one field as
+`switch`); the per-action keys some forks use are not what the app sends. Untested here (no
+Omni dock on the RV30 Max Plus).
 
 Unknown on this firmware (-1002): voice pack listing, lifetime statistics beyond
 `getCleanRecords` totals, `getCleanOrder`, `getCleanTaskGroupList`.
@@ -226,7 +281,8 @@ knows it but rejected the call (wrong parameters or state).
 `getMapInfo` / `setMapInfo`, `getMapData`, `getPathData`, `getAreaInfo` / `setAreaInfo`,
 `getFurnitureInfo` / `setFurnitureInfo`, `getCleanRecords` / `getCleanRecordExtraInfo`,
 `getScheduleRules` / `addScheduleRule` / `editScheduleRule` / `removeScheduleRules`,
-`getCustomizationRulesInfo` / `getCustomizationRuleData`, `getConsumablesInfo` /
+`getCustomizationRulesInfo` / `getCustomizationRuleData` / `addCustomizationRule` /
+`delCustomizationRule`, `getConsumablesInfo` /
 `resetConsumablesTime`, `getVolume` / `setVolume`, `getDoNotDisturb` / `setDoNotDisturb`,
 `getDustCollectionInfo` / `setDustCollectionInfo` / `setSwitchDustCollection`, `getMopState`,
 `getChildLockInfo` / `setChildLockInfo`, `getCarpetAutoBoost` / `setCarpetAutoBoost`,
@@ -263,14 +319,56 @@ supervised live testing before shipping):**
   `fan_level`, `water_level`, `clean_number`, `clean_order`, `clean_interval_type`, `clean_type`,
   `start_type` and `clean_mode`; the integration currently drives the same outcomes through
   `setCleanAttr` + `setSwitchClean`.
-- `addCustomizationRule` - create a preset (the integration can run and read presets, but not yet
-  create them).
 - `saveMap` / `startUpdateMapData` - map build lifecycle, used around mapping runs.
 - `deleteCleanRecord` - remove a single run from history.
 
 **Not supported on this firmware (-1002):** `getLidarFreqPercent` / `setLidarEnabled`,
 `getSupportVoiceLanguage`, `getNextEvent` (-1001; present but rejected bare), `getCleanOrder`,
 `getCleanTaskGroupList`.
+
+## Firmware details
+
+Learned from the RVSD30 firmware build, the Tapo app and live calls on 1.3.3.
+
+**Clean start fields** (`setSwitchClean`, and `runCleanTask` which takes the same keys):
+
+- `clean_mode`: 0 whole house, 1 whole house with per-room settings, 2 spot, 3 rooms, 4 zones,
+  5 preset.
+- `start_type`: who started it. 0 the robot's button, 1 the app (what the integration sends),
+  4 a schedule; other values exist. Clean records report the same field.
+- `force_clean`: `true` starts the new job over one that is already running instead of being
+  refused.
+- `clean_type` (per job or per room, also in clean records): 0 vacuum and mop, 1 mop only,
+  2 vacuum only, 3 vacuum then mop, 4 AI.
+- Cleaning density, logged by the firmware as `clean_density`: 1 daily, 2 fast (skips the edge
+  pass), 3 meticulous.
+- `setCleanAttr` `type`: `global` (the default levels), `pose` (spot and go-to levels),
+  `running` (the job in progress), `custom` (per-room, rejected on 1.3.3).
+
+**Other read calls:** `getCleanStatus` returns `{clean_status, is_working, is_mapping,
+is_relocating}`. `getCleanAttr {"type": "pose"}` works. `getCarpetClean` returns
+`{carpet_clean_prefer}`. `getConsumablesInfo` includes `rag_time` (mop cloth minutes), reset
+with `resetConsumablesTime {"reset_list": ["rag"]}` like the other parts.
+
+**`playSelectAudio`** only accepts `"seek_me"` (the "find my robot" call) and `"test"`.
+
+**Component gating.** `getComponentList` returns `{id, ver_code}` pairs and the app hides
+features by them. On an RV30 Max Plus (1.3.3): `clean` 3, `map` 2, `auto_change_map` 2,
+`map_lock` 1, `continue_breakpoint_sweep` 1, `charge_pose_clean` 1. A missing component means
+the app does not offer the feature, even when the method answers.
+
+**Unknown on 1.3.3 (-1002), though other firmware has them:** `getContinueThreshold`,
+`getCliffDetectMode`, `getCarpetDefVal`, `getCarpetThreshold`, `getCarpetDeepSwitch`,
+`getPetAreaDeepInfo`, `getMopPrefer`, `getValleyChargingTime`, `getOfflineMapSwitch`,
+`getHiddenArea`.
+
+**Status, error and level tables** in the firmware (status codes 0 to 19, error codes, fan,
+water and auto-empty values) match the tables the integration already uses.
+
+**Never send these.** The dispatcher holds 162 methods, including factory and debug ones
+(`exec_atcmd`, `erase_flash`) and the onboarding, reset, reboot, firmware and Wi-Fi families.
+`send_raw` refuses them, even with `force`. `setInheritInfo` and the quick-setup calls are on
+that list: a batch of setup and inherit calls came minutes before one robot lost every map.
 
 **No camera/video endpoints exist** - the RV30 navigates by LiDAR and structured light, so there
 is no live-view or snapshot stream to expose (the dispatcher has nothing of the sort).
