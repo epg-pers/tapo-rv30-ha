@@ -193,3 +193,21 @@ def test_read_is_retried_after_a_lost_reply(monkeypatch):
     with pytest.raises(RuntimeError):
         c.send("getVacStatus")
     assert len(c.posts) == 2
+
+
+@pytest.mark.parametrize("tls,tport,url,verify", [
+    (0, 4433, "https://10.0.0.5:4433", False),    # RV30 Max Plus Gen2: tls 0 on the https port
+    (0, None, "https://10.0.0.5:4433", False),
+    (0, 80, "http://10.0.0.5:80", False),         # plain http only on a different port it names
+    (1, 4433, "https://10.0.0.5:4433", False),
+    (2, None, "https://10.0.0.5:4433", True),
+])
+def test_tls_mode_keeps_https_on_the_discovery_port(tls, tport, url, verify):
+    import requests
+
+    from custom_components.tapo_rv30.tpap import TapoVacuumClient
+    c = TapoVacuumClient.__new__(TapoVacuumClient)
+    c.host, c.port, c._http = "10.0.0.5", 4433, requests.Session()
+    c._tls_mode, c._tpap_port = tls, tport
+    c._apply_tls_mode()
+    assert c.base_url == url and c._verify is verify

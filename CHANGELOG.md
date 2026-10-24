@@ -1,9 +1,10 @@
 # Changelog
 
-## v0.26.2b1
+## v0.26.2b2
 
 ### Fixed
 
+- Robots that report `tls: 0` on port 4433 (seen on an RV30 Max Plus Gen2) connect again. TLS mode 0 was taken to mean plain http, which the robot drops on that port; https is now kept on the port discovery answered on, and plain http is only used for a different port the robot names. Device attestation (DAC) is still checked for these robots.
 - The websocket commands that change things (planner settings and actions, including matching areas, and applying map edits) now need an admin user. Reading stays open to every user.
 - The vacuum client is created off the event loop (its constructor makes the session cache folder).
 - The last clean map is PNG-encoded in the executor instead of on the event loop.

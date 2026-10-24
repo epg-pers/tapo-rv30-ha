@@ -400,16 +400,16 @@ class TapoVacuumClient:
     def _apply_tls_mode(self) -> None:
         """Re-target the base URL and TLS trust from the discovered tls/port hints.
 
-        tls 0 = plain http, 1 = https with an untrusted (self-signed) cert,
-        2 = https validated against the pinned TP-Link root CA.
+        tls 0 = no certificate trust (the device proves itself with DAC instead),
+        1 = https with an untrusted (self-signed) cert, 2 = https validated against
+        the pinned TP-Link root CA.
+
+        tls 0 does not mean plain http on the port discovery just answered over https:
+        an RV30 Max Plus Gen2 reports tls 0 with port 4433 and drops plain http there.
+        So http is only used for a different port the device names.
         """
-        scheme = "http" if self._tls_mode == 0 else "https"
-        if self._tpap_port and self._tpap_port > 0:
-            port = self._tpap_port
-        elif scheme == "https":
-            port = 4433
-        else:
-            port = self.port
+        port = self._tpap_port if self._tpap_port and self._tpap_port > 0 else self.port
+        scheme = "http" if self._tls_mode == 0 and port != self.port else "https"
         self.base_url = f"{scheme}://{self.host}:{port}"
 
         self._verify = self._tls_mode == 2
