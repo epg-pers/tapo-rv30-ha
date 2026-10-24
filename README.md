@@ -38,6 +38,7 @@ Same domain, so your config entry and entities carry over; see
 - **Bundled map card**: tap-to-clean rooms through a lossless room mask (no calibration),
   zone drawing, saved zones, floors, presets, controls, theme-aware, visual editor
 - **Live cleaning path** on the map, and a **Last Clean Map** of where the robot actually went
+- **Clean map history**: every run's map kept in Home Assistant (no extra robot calls), viewable and downloadable from the History tab even while the robot is cleaning, with retention you choose
 - **Per-room "last cleaned"**: worked out from the robot's own run maps, shown when you hold a room, and available to automations
 - **Sidebar page**: map, a schedules editor for the robot's own schedules, history and statistics, rooms with freshness, maintenance and settings, no dashboard needed (switch it off in the integration options if you prefer)
 - **Smart cleaning planner**: keeps each room within a target like "every 2 days" and cleans the due rooms when nobody is home, inside your time window, leaving out rooms whose motion sensors say they are in use; starts in preview mode

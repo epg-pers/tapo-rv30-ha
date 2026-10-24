@@ -40,6 +40,12 @@ async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: ConfigE
         out["reply_numbering"] = {k: st.get(k) for k in ("equal", "different", "repeated", "last_mismatch")}
     # The raw status and settings carry the device info (MAC, IP, Wi-Fi, location) and the
     # Matter setup code, so they are redacted like everything else.
+    hist = coord.history()
+    try:
+        usage = await hass.async_add_executor_job(hist.usage) if hist else None
+    except Exception as exc:
+        usage = {"error": str(exc)}
+    out["clean_map_history"] = {"retention": coord.history_retention, "limit": coord.history_limit, "usage": usage}
     out["status"] = async_redact_data(coord.data, TO_REDACT) if coord.data else None
     out["settings"] = async_redact_data(coord.settings, TO_REDACT)
     out["map"] = {

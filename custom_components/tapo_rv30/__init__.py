@@ -25,6 +25,7 @@ from .const import (
 )
 from .coordinator import TapoCoordinator
 from .frontend import async_remove_panel_if_present, async_setup_frontend, async_setup_panel
+from .history_ws import async_setup_history_ws
 from .map_edit_ws import async_setup_map_edit_ws
 from .map_restore import async_setup_map_restore
 from .planner import TapoPlanner
@@ -91,6 +92,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         async_setup_map_edit_ws(hass)
         async_setup_map_restore(hass)
         async_setup_backup_ws(hass)
+        async_setup_history_ws(hass)
         coordinator.planner.async_start()
         entry.async_on_unload(coordinator.planner.async_stop)
     except BaseException:

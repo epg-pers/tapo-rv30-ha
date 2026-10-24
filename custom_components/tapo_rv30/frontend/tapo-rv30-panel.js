@@ -187,6 +187,15 @@ canvas.chart { width: 100%; height: 140px; display: block; }
 .log .e:last-child { border-bottom: none; }
 .log .e b { font-weight: 400; color: var(--secondary-text-color); width: 96px; flex: none; }
 .empty { padding: 24px; text-align: center; color: var(--secondary-text-color); }
+.keep { font-size: .8em; font-weight: 400; color: var(--secondary-text-color); display: inline-flex; align-items: center; gap: 6px; }
+.keep select { padding: 5px 8px; border-radius: 8px; border: 1px solid color-mix(in srgb, var(--primary-text-color) 20%, transparent);
+  background: var(--card-background-color); color: var(--primary-text-color); font: inherit; }
+.keepnote { font-size: .8em; color: var(--secondary-text-color); margin: -4px 0 6px; }
+.runmap { padding: 4px 0 12px; border-bottom: 1px solid color-mix(in srgb, var(--primary-text-color) 10%, transparent); }
+.runmap .runimg { display: block; max-width: 100%; max-height: 420px; margin: 0 auto 8px; border-radius: 10px; }
+.runmap .acts { display: flex; gap: 8px; justify-content: center; }
+.runmap a.btn { text-decoration: none; }
+.mapbtn { flex: none; padding: 7px 10px; }
 .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .err { color: var(--error-color, #db4437); font-size: .86em; }
 .bkgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; }
@@ -291,6 +300,7 @@ class TapoRV30Panel extends HTMLElement {
       switches: all("switch."), selects: all("select."), numbers: all("number."), times: all("time."),
       buttons: all("button.").filter((id) => !isPreset(id)),
       totals: { cleans: find("sensor.", "total_cleans"), area: find("sensor.", "total_area_cleaned"), time: find("sensor.", "total_cleaning_time") },
+      history: find("select.", "clean_map_history"),
     };
   }
   // An entity's name without the robot's name in front; the entity id when it has no name.
@@ -334,7 +344,7 @@ class TapoRV30Panel extends HTMLElement {
   _selectRobot(id) {
     this._teardownDrive();
     this._entered = false;
-    this._robot = id; this._editing = null; this._records = null; this._recTok = null; this._planOpen = null; this._paneDirty = false;
+    this._robot = id; this._editing = null; this._records = null; this._hist = null; this._recTok = null; this._planOpen = null; this._paneDirty = false;
     this._robotGen = (this._robotGen || 0) + 1;   // replies still in flight for the old robot are dropped
     const pane = this.shadowRoot.querySelector(".pane"); if (pane) pane.innerHTML = "";
   }
@@ -585,17 +595,22 @@ class TapoRV30Panel extends HTMLElement {
       <h5>Cleans per day, last 30 days</h5><canvas class="chart days"></canvas>
       <h5>Minutes per week, last 8 weeks</h5><canvas class="chart weeks"></canvas>
     </div></ha-card>
-    <ha-card><div class="card"><h3><span>Recent runs</span></h3><div class="runs"><div class="empty">Loading</div></div></div></ha-card>`;
+    <ha-card><div class="card"><h3><span>Recent runs</span><span class="keepbox"></span></h3><div class="keepnote"></div>
+      <div class="runs"><div class="empty">Loading</div></div></div></ha-card>`;
     // Refetched when the robot finishes a clean (its total moves), and each time the tab opens.
     const robot = this._robot, key = `${robot}|${tot(r.totals.cleans)}`;
     if (!this._records || this._recordsKey !== key) {
       const tok = this._recTok = {};
-      let recs = null;
-      try {
-        const resp = await this._hass.connection.sendMessagePromise({ type: "call_service", domain: DOMAIN, service: "get_clean_records",
-          service_data: { entity_id: robot, limit: 100 }, return_response: true });
-        recs = (resp && resp.response && resp.response.records) || [];
-      } catch (e) { /* recs stays null: said so below, and fetched again on the next redraw */ }
+      let recs = null, hist = null;
+      // The robot's records feed the charts; the kept clean maps (and the robot's runs not kept)
+      // feed the list. An integration without clean map history just lists the records.
+      const [recResp, histResp] = await Promise.allSettled([
+        this._hass.connection.sendMessagePromise({ type: "call_service", domain: DOMAIN, service: "get_clean_records",
+          service_data: { entity_id: robot, limit: 100 }, return_response: true }),
+        this._hass.callWS({ type: `${DOMAIN}/history/list`, entity_id: robot }),
+      ]);
+      if (recResp.status === "fulfilled") recs = (recResp.value && recResp.value.response && recResp.value.response.records) || [];
+      if (histResp.status === "fulfilled") hist = histResp.value;
       // A reply for a robot no longer shown, or one a newer request has overtaken, is dropped.
       if (this._recTok !== tok || this._robot !== robot) return;
       if (!recs) {
@@ -603,19 +618,79 @@ class TapoRV30Panel extends HTMLElement {
         const runs = pane.querySelector(".runs"); if (runs) runs.innerHTML = `<div class="empty">Could not load history</div>`;
         return;
       }
-      this._records = recs; this._recordsFor = robot; this._recordsKey = key;
+      this._records = recs; this._hist = hist; this._recordsFor = robot; this._recordsKey = key;
     }
     const recs = this._records;
     const runs = pane.querySelector(".runs");
     if (!runs) return;     // the tab changed while the records were loading
-    runs.innerHTML = recs.length ? recs.slice(0, 20).map((x) => {
-      const d = x.started ? new Date(x.started * 1000) : null;
-      const when = d ? d.toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" }) + " " + d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" }) : "";
-      const meta = [x.area != null ? `${x.area} m²` : null, x.minutes != null ? `${x.minutes} min` : null, START[x.start_type] || null, x.rule_name || null, x.emptied_bin ? "bin emptied" : null].filter(Boolean).join(" · ");
-      return `<div class="row"><ha-icon icon="${x.error ? "mdi:alert-circle" : "mdi:robot-vacuum"}" style="color:${x.error ? "var(--error-color,#db4437)" : "var(--primary-color)"}"></ha-icon><div class="main"><div class="t">${esc(when)}</div><div class="s">${esc(meta)}${x.error ? ` · error ${esc(x.error)}` : ""}</div></div></div>`;
-    }).join("") : `<div class="empty">No runs recorded yet.</div>`;
+    this._renderRuns(pane, r, recs);
     this._chart(pane.querySelector("canvas.days"), this._perDay(recs, 30), (i) => (i % 7 === 0 ? `${29 - i}d` : ""));
     this._chart(pane.querySelector("canvas.weeks"), this._perWeek(recs, 8), (i) => (i === 7 ? "this wk" : `-${7 - i}`));
+  }
+
+  _renderRuns(pane, r, recs) {
+    const runs = pane.querySelector(".runs"), hist = this._hist;
+    const list = hist ? hist.runs : recs;
+    const keep = hist ? hist.retention : null;
+    // How long maps are kept, set here or as the Clean Map History entity (automations, Settings tab).
+    const box = pane.querySelector(".keepbox"), note = pane.querySelector(".keepnote");
+    if (hist && r.history) {
+      box.innerHTML = `<label class="keep">Keep maps <select>${hist.retention_options.map((o) => `<option ${o === keep ? "selected" : ""}>${esc(o)}</option>`).join("")}</select></label>`;
+      const sel = box.querySelector("select");
+      sel.onchange = async () => {
+        const kept = hist.usage.runs;
+        if (sel.value === "Off" && kept && !confirm(`Turn clean map history off? The ${kept} kept map${kept === 1 ? "" : "s"} will be deleted.`)) { sel.value = keep; return; }
+        if (await this._call("select", "select_option", { option: sel.value }, { entity_id: r.history })) { this._records = null; this._paneHistory(pane); }
+        else sel.value = keep;
+      };
+    }
+    if (note) note.textContent = !hist ? "" : keep === "Off" ? "Clean maps are not kept; a run's map can still be read from the robot while it has the run."
+      : `${hist.usage.runs} map${hist.usage.runs === 1 ? "" : "s"} kept (${(hist.usage.bytes / 1048576).toFixed(1)} MB), at most ${hist.limit}.`;
+    runs.innerHTML = list.length ? list.slice(0, 40).map((x) => {
+      const d = x.started ? new Date(x.started * 1000) : null;
+      const when = d ? d.toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" }) + " " + d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" }) : "";
+      const meta = [x.area != null ? `${x.area} m²` : null, x.minutes != null ? `${x.minutes} min` : null, START[x.start_type] || null, x.rule_name || null, x.map_name || null, x.emptied_bin ? "bin emptied" : null].filter(Boolean).join(" · ");
+      const tag = !hist ? "" : x.kept ? "" : `<span class="src">on robot</span>`;
+      const mapBtn = hist && x.started ? `<button class="btn mapbtn" data-ts="${x.started}" aria-expanded="false"><ha-icon icon="mdi:map-search-outline"></ha-icon>Map</button>` : "";
+      return `<div class="row"><ha-icon icon="${x.error ? "mdi:alert-circle" : "mdi:robot-vacuum"}" style="color:${x.error ? "var(--error-color,#db4437)" : "var(--primary-color)"}"></ha-icon><div class="main"><div class="t">${esc(when)} ${tag}</div><div class="s">${esc(meta)}${x.error ? ` · error ${esc(x.error)}` : ""}</div></div>${mapBtn}</div>
+        <div class="runmap" data-for="${x.started}" hidden></div>`;
+    }).join("") : `<div class="empty">No runs recorded yet.</div>`;
+    runs.querySelectorAll(".mapbtn").forEach((b) => b.onclick = () => this._toggleRunMap(runs, list, Number(b.dataset.ts), b));
+  }
+
+  async _toggleRunMap(runs, list, ts, btn) {
+    const box = runs.querySelector(`.runmap[data-for="${ts}"]`);
+    if (!box) return;
+    const open = box.hidden;
+    box.hidden = !open; btn.setAttribute("aria-expanded", String(open));
+    if (!open) return;
+    const robot = this._robot, run = list.find((x) => x.started === ts) || {};
+    this._runImg = this._runImgFor === robot ? (this._runImg || {}) : {};
+    this._runImgFor = robot;
+    if (!this._runImg[ts]) {
+      box.innerHTML = `<div class="empty">Drawing the map</div>`;
+      try {
+        const res = await this._hass.callWS({ type: `${DOMAIN}/history/image`, entity_id: robot, started: ts });
+        this._runImg[ts] = res.image;
+      } catch (e) {
+        box.innerHTML = `<div class="err">${esc((e && e.message) || "Could not draw that clean")}</div>`;
+        return;
+      }
+      if (this._robot !== robot) return;
+    }
+    const d = new Date(ts * 1000), pad = (n) => String(n).padStart(2, "0");
+    const name = `${objectId(robot)}-clean-${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}.png`;
+    box.innerHTML = `<img class="runimg" alt="Map of this clean" src="${this._runImg[ts]}">
+      <div class="acts"><a class="btn" download="${esc(name)}" href="${this._runImg[ts]}"><ha-icon icon="mdi:download"></ha-icon>Download</a>
+      ${run.kept ? `<button class="btn danger forget"><ha-icon icon="mdi:delete-outline"></ha-icon>Forget</button>` : ""}</div>`;
+    const f = box.querySelector(".forget");
+    if (f) f.onclick = async () => {
+      if (!confirm("Forget this clean's map? The run stays in the robot's own history while it has it.")) return;
+      try { await this._hass.callWS({ type: `${DOMAIN}/history/delete`, entity_id: robot, started: ts }); }
+      catch (e) { this.dispatchEvent(new CustomEvent("hass-notification", { detail: { message: (e && e.message) || "Could not forget that map" }, bubbles: true, composed: true })); return; }
+      delete this._runImg[ts]; this._records = null;
+      const pane = runs.closest(".pane"); if (pane) this._paneHistory(pane);
+    };
   }
 
   _perDay(recs, n) {

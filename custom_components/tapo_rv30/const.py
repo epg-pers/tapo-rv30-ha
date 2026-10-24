@@ -212,4 +212,6 @@ UNREACHABLE_AFTER = 600     # seconds of failed polls (after having worked) befo
 
 # Integration options (options flow)
 OPT_SHOW_PANEL = "show_panel"     # sidebar panel on / off (default on)
+OPT_HISTORY_KEEP = "history_keep"     # how long clean maps are kept (cleanhistory.RETENTION_DAYS)
+OPT_HISTORY_LIMIT = "history_limit"   # most clean maps kept
 PANEL_URL_PATH = "tapo-vacuum"

@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.32.0b1
+
+### Added
+
+- **Clean map history.** The History tab's runs each have a **Map** button: where the robot went on that run (cleaned cells, path, start, end and dock), with **Download** and **Forget**.
+  - A run's map is kept when the integration reads the run anyway (for the Last Clean Map and room freshness), so it costs no extra calls to the robot.
+  - Kept maps open from Home Assistant's disk, so they work while the robot is cleaning or offline, and they outlast the robot's own short list of recent runs.
+  - Only what drawing needs is kept, compressed (typically under 100 KB a run), under `config/tapo_rv30/clean_history/<robot>/`. Drawn maps are held in memory for quick reopening.
+  - A run still on the robot but not kept is marked "on robot" and read from it when opened (once it is docked), then kept.
+- **Retention controls.** The **Clean Map History** select (Off, 1 week, 1 month, 3 months (default), 1 year, Forever) and the **Clean Map History Limit** number (200 by default, 10 to 1000) decide how long and how many. They are on the History tab and in Settings, and work from automations. Off deletes the kept maps. Diagnostics show how many are kept and the space used.
+
 ## v0.31.1
 
 ### Fixed

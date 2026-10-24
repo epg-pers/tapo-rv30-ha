@@ -40,6 +40,22 @@ It starts off and in preview mode. Everything about it is on [the planner](plann
 Lifetime totals, cleans per day for the last 30 days, minutes per week for the last 8
 weeks, and the recent runs with how they were started.
 
+**Clean map history.** Press **Map** on a run to see where the robot went on it: cleaned
+cells, the path, start, end and dock. **Download** saves it as a PNG; **Forget** deletes a kept
+one. Each run's map is kept in Home Assistant when the integration reads the run (it already
+does, to draw the Last Clean Map and work out room freshness), so keeping it costs the robot
+nothing. Kept maps can be opened while the robot is cleaning or offline, and stay after the
+robot drops the run from its own list (it only holds its most recent ones). A run that was not
+kept but is still on the robot is marked "on robot" and is read from it when you open it,
+once it is docked.
+
+Choose how long maps are kept with **Keep maps** (Off, 1 week, 1 month, 3 months (the
+default), 1 year, Forever) and how many at most with the **Clean Map History Limit** number
+(200 by default, the oldest go first). Both are also entities on the device, so the Settings
+tab and automations can change them. Turning history off deletes the kept maps. They are
+stored compressed under `config/tapo_rv30/clean_history/<robot>/`, only the parts needed to
+draw them, typically under 100 KB a run.
+
 ![History and statistics](panel-history.png){ width="760" }
 
 ### Rooms

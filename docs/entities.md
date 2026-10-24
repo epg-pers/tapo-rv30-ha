@@ -57,11 +57,14 @@ Map. The planner adds its own switch and status sensor, see [planner.md](planner
 ## Selects
 
 Water Level (Off / Low / Medium / High), Clean Passes (1 / 2 / 3), Auto Empty Mode (Smart /
-Light / Balanced / Max, self-empty docks).
+Light / Balanced / Max, self-empty docks), Clean Map History (how long each run's map is kept
+in Home Assistant: Off / 1 week / 1 month / 3 months / 1 year / Forever; Off deletes the kept
+maps; see [the sidebar page](panel.md#history)).
 
 ## Numbers and times
 
-Volume, Poll Interval, Do Not Disturb start and end.
+Volume, Poll Interval, Clean Map History Limit (most run maps kept, 10 to 1000), Do Not Disturb
+start and end.
 
 ## Buttons
 

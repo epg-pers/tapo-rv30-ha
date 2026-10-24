@@ -1,4 +1,4 @@
-"""Number entities for Tapo RV30: voice volume, poll interval."""
+"""Number entities for Tapo RV30: voice volume, poll interval, clean map history limit."""
 from __future__ import annotations
 
 from homeassistant.components.number import NumberEntity, NumberMode
@@ -7,6 +7,7 @@ from homeassistant.const import EntityCategory, UnitOfTime
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
+from .cleanhistory import MAX_LIMIT, MIN_LIMIT
 from .const import DOMAIN, MAX_POLL_INTERVAL, MIN_POLL_INTERVAL
 from .entity import TapoEntity
 
@@ -14,7 +15,8 @@ from .entity import TapoEntity
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry,
                             async_add_entities: AddEntitiesCallback) -> None:
     c = hass.data[DOMAIN][entry.entry_id]
-    entities = [TapoPollInterval(c, entry, "poll_interval", "Poll Interval")]
+    entities = [TapoPollInterval(c, entry, "poll_interval", "Poll Interval"),
+                TapoHistoryLimit(c, entry, "clean_map_history_limit", "Clean Map History Limit")]
     if "volume" in c.settings:
         entities.append(TapoVolume(c, entry, "volume", "Volume"))
     async_add_entities(entities)
@@ -54,3 +56,20 @@ class TapoPollInterval(TapoEntity, NumberEntity):
 
     async def async_set_native_value(self, value: float) -> None:
         await self.coordinator.async_set_poll_interval(int(value))
+
+
+class TapoHistoryLimit(TapoEntity, NumberEntity):
+    """The most clean maps kept (the oldest go first), whatever Clean Map History allows."""
+    _attr_icon = "mdi:map-clock-outline"
+    _attr_entity_category = EntityCategory.CONFIG
+    _attr_native_min_value = MIN_LIMIT
+    _attr_native_max_value = MAX_LIMIT
+    _attr_native_step = 10
+    _attr_mode = NumberMode.BOX
+
+    @property
+    def native_value(self) -> float:
+        return self.coordinator.history_limit
+
+    async def async_set_native_value(self, value: float) -> None:
+        await self.coordinator.async_set_history(limit=int(value))
