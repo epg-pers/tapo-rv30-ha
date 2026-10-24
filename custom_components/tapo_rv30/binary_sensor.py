@@ -6,7 +6,6 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.util import dt as dt_util
 
 from .const import CONSUMABLE_LABELS, CONSUMABLE_LIMITS_H, CONSUMABLE_WARN_FRACTION, DOMAIN, ERROR_CODES
 from .entity import TapoEntity
@@ -55,7 +54,7 @@ class TapoDndActive(TapoEntity, BinarySensorEntity):
         dnd = self.settings.get("dnd")
         if dnd is None:
             return None
-        now = dt_util.now()
+        now = self.coordinator.robot_now()     # DND times are in the robot's own region
         return dnd_active(dnd, now.hour * 60 + now.minute)
 
 

@@ -30,8 +30,10 @@ def _coord(hass: HomeAssistant, entity_id: str):
     return hass.data.get(DOMAIN, {}).get(entry.config_entry_id)
 
 
-def _folder(hass: HomeAssistant) -> str:
-    return hass.config.path(DOMAIN, "map_backups")
+def _folders(hass: HomeAssistant, coord) -> list[str]:
+    """This robot's backups, then the shared folder older versions saved every robot's to."""
+    from .setup_apply import backup_folders
+    return backup_folders(hass, coord)
 
 
 def async_setup_backup_ws(hass: HomeAssistant) -> None:
@@ -52,13 +54,14 @@ async def ws_backups_list(hass: HomeAssistant, connection: websocket_api.ActiveC
     if coord is None:
         connection.send_error(msg["id"], "not_found", f"No Tapo vacuum for {msg['entity_id']}")
         return
-    folder = _folder(hass)
+    folders = _folders(hass, coord)
+    folder = folders[0]
     names = {m["id"]: m["name"] for m in (coord.maps or [])}
 
     def build() -> list[dict]:
         out = []
-        for e in backupstore.scan(folder):
-            png, mime = backupstore.image_png(folder, e)
+        for e in backupstore.scan_all(folders):
+            png, mime = backupstore.image_png(e["dir"], e)
             out.append({
                 "file": e["file"], "source": e["source"], "map_id": e["map_id"],
                 "map_name": names.get(e["map_id"]) or f"Map {e['map_id']}",
@@ -66,7 +69,7 @@ async def ws_backups_list(hass: HomeAssistant, connection: websocket_api.ActiveC
                 "when": time.strftime("%Y-%m-%d %H:%M", time.localtime(e["ts"])),
                 "has_image": png is not None,
                 "thumb": backupstore.thumb(png, mime) if png else None,
-                "facts": backupstore.facts_for(folder, e),
+                "facts": backupstore.facts_for(e["dir"], e),
             })
         return out
 
@@ -85,18 +88,18 @@ async def ws_backups_image(hass: HomeAssistant, connection: websocket_api.Active
     if coord is None:
         connection.send_error(msg["id"], "not_found", f"No Tapo vacuum for {msg['entity_id']}")
         return
-    folder = _folder(hass)
+    folders = _folders(hass, coord)
 
     def build() -> dict | None:
         # All file access (path checks, the folder scan, decoding) runs in the executor.
-        if backupstore.safe_path(folder, msg["file"]) is None:
+        if backupstore.locate(folders, msg["file"]) is None:
             return None
-        entry = next((e for e in backupstore.scan(folder) if e["file"] == msg["file"]), None)
+        entry = next((e for e in backupstore.scan_all(folders) if e["file"] == msg["file"]), None)
         if entry is None:
             return None
-        png, mime = backupstore.image_png(folder, entry)
+        png, mime = backupstore.image_png(entry["dir"], entry)
         return {"file": entry["file"], "image": backupstore.data_uri(png, mime) if png else None,
-                "facts": backupstore.facts_for(folder, entry)}
+                "facts": backupstore.facts_for(entry["dir"], entry)}
 
     result = await hass.async_add_executor_job(build)
     if result is None:

@@ -129,3 +129,41 @@ def test_summary_is_readable():
     assert s["room_names"] == ["Hallway", "Lounge"]
     assert s["zones"] == {"forbid": 2} and s["furniture"] == 1
     assert s["presets"] == ["All downstairs"] and s["schedules"] == [510]
+
+
+def test_zones_are_matched_by_outline_and_new_ones_kept():
+    renumbered = dict(Z1, id=9)                                       # same shape, robot renumbered it
+    drawn_since = {"type": "forbid", "id": 10, "vertexs": [[500, 0], [600, 0], [600, 100], [500, 100]]}
+    p = ms.plan(good(), MAP, [room(4, "Hallway"), room(5, "Lounge", carpet_strategy=1), renumbered, drawn_since],
+                [TABLE], [PRESET], [SCHED])
+    zones = p["zones"]["forbid"]
+    assert [z["vertexs"] for z in zones] == [renumbered["vertexs"], drawn_since["vertexs"], Z2["vertexs"]]
+    assert len({z["id"] for z in zones}) == 3                         # the added zone gets a free id
+    same = ms.plan(good(), MAP, [room(4, "Hallway"), room(5, "Lounge", carpet_strategy=1), dict(Z1, id=7),
+                                 dict(Z2, id=8)], [TABLE], [PRESET], [SCHED])
+    assert not same["zones"]                                          # renumbering alone is not a change
+
+
+def test_whole_house_schedule_without_map_id_is_not_added_twice():
+    whole = {"id": "S2", "enable": True, "mode": "repeat", "week_day": 2, "s_min": 700,
+             "clean_attr": {"clean_mode": 0, "suction": 2, "cistern": 1, "clean_number": 1}}
+    snap = ms.build(MAP, "Downstairs", GOOD_AREAS, [TABLE], [PRESET], [SCHED, whole], "t")
+    p = ms.plan(snap, MAP, GOOD_AREAS, [TABLE], [PRESET], [SCHED, whole])
+    assert not p["schedules"]
+    q = ms.plan(snap, MAP, GOOD_AREAS, [TABLE], [PRESET], [SCHED])     # missing: put back, still map-less
+    assert len(q["schedules"]) == 1 and "map_id" not in q["schedules"][0]["rule"]["clean_attr"]
+
+
+def test_schedule_for_rooms_not_on_the_target_is_skipped_and_said():
+    rooms_sched = {"id": "S3", "enable": True, "mode": "repeat", "week_day": 2, "s_min": 600,
+                   "clean_attr": {"clean_mode": 3, "map_id": MAP, "room_list": [4, 9]}}
+    snap = ms.build(MAP, "Downstairs", GOOD_AREAS, [TABLE], [PRESET], [rooms_sched], "t")
+    p = ms.plan(snap, MAP, GOOD_AREAS, [TABLE], [PRESET], [])
+    assert not p["schedules"]
+    assert any("10:00" in s and "[9]" in s for s in p["skipped"])
+
+
+def test_preset_that_lost_rooms_is_reported():
+    p = ms.plan(good(), MAP, [room(4, "Hallway"), Z1, Z2], [TABLE], [], [SCHED])
+    assert p["presets"] and [a["id"] for a in p["presets"][0]["area_list"]] == [4]
+    assert any("recreated without them" in s for s in p["skipped"])

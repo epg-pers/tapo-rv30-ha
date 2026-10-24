@@ -7,10 +7,10 @@ robot in it is refused with a clear message. With one vacuum set up the target i
 
 | Service | What it does |
 |---|---|
-| `clean_rooms` | Clean named rooms (partial match). Optional `map`, `suction`, `water`, `passes` for this run. |
+| `clean_rooms` | Clean named rooms (partial match; a name that fits several rooms is refused). Or give `room_ids` (room numbers on the map, as the card sends them) for unnamed rooms or rooms that share a name. Optional `map` (else the current map), `suction`, `water`, `passes` for this run. |
 | `clean_zone` | Clean rectangles given in map mm, same frame as the `position_mm` attribute. |
 | `set_room_settings` | Per-room suction / water / passes stored on the robot. Rejected by RV30 Max Plus firmware 1.3.3 (see [protocol.md](protocol.md)); use `clean_rooms` with levels, or `create_preset` to keep per-room levels. |
-| `run_schedule` | Replay a saved schedule's rooms and settings now. The vacuum has no "run schedule by id" call, so the settings are re-sent and the clean started. |
+| `run_schedule` | Replay a saved schedule's rooms and settings now, by its id (like `S1`). The vacuum has no "run schedule by id" call, so the schedule's suction, water and passes become the robot's default levels and the clean is started; if the start fails, the previous levels are put back. |
 | `run_preset` | Start a preset saved in the Tapo app, by name or id. |
 | `create_preset` | Make a preset on the robot: `name`, `rooms` (in cleaning order), optional `map`, `suction`, `water`, `passes`, `clean_order`. Levels not given are the robot's current ones. It shows in the Tapo app and runs with `run_preset`. Returns its id. |
 | `update_preset` | Change a preset by name or id: new `name`, `rooms` (same map), `suction`, `water`, `passes` or `clean_order`. Anything not given is kept. |
@@ -24,9 +24,9 @@ robot in it is refused with a clear message. With one vacuum set up the target i
 | `go_to` | Drive to a point (x, y in map mm) on robots with go-to-point; `vacuum.stop` cancels it. |
 | `get_clean_records` | Cleaning history and lifetime totals as a service response. |
 | `send_raw` | Send any device method with params and get the response back (use with "Return response" in Developer Tools). Refused while the robot is working unless `force: true`; see [protocol.md](protocol.md) for why. |
-| `save_map_setup` | Snapshot a map's room names, no-go zones, virtual walls, carpets, furniture, presets and schedules to `config/tapo_rv30/map_setups` now (this also happens automatically as the map changes). See [map-recovery.md](map-recovery.md). |
+| `save_map_setup` | Snapshot a map's room names, no-go zones, virtual walls, carpets, furniture, presets and schedules to `config/tapo_rv30/map_setups/<robot>` now (this also happens automatically as the map changes). See [map-recovery.md](map-recovery.md). |
 | `apply_map_setup` | Put back whatever the map is missing from its saved setup: room names, zones, walls, carpets, furniture, presets and schedules (robot docked and idle, `confirm: true`; `dry_run: true` only reports). `source_map` applies another map's setup, for a re-mapped floor. See [map-recovery.md](map-recovery.md). |
-| `fetch_cloud_map_backups` | Download your TP-Link cloud map backups to `config/tapo_rv30/map_backups` for safe keeping. See [map-recovery.md](map-recovery.md). |
+| `fetch_cloud_map_backups` | Download your TP-Link cloud map backups to `config/tapo_rv30/map_backups/<robot>` for safe keeping. See [map-recovery.md](map-recovery.md). |
 | `restore_map_backup` | Restore a whole map backup to the robot, locally - Home Assistant serves it on the LAN and the robot fetches and applies it (robot docked and idle, `confirm: true`). Works even when the map is gone from the robot: `map` can be the lost map's name or id, and any existing map carries the restore. See [map-recovery.md](map-recovery.md). |
 
 Bad input (unknown room, map, option) raises an error with the available

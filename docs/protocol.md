@@ -144,9 +144,9 @@ The one real constraint is the robot's HTTP client, and it caused a long detour 
   to `status: 13`. This looked like an apply-step rejection but is an unfinished download; the
   direct-LAN URL fixes it. (A TP-Link S3 presigned URL also works, for the same reason - clean
   `Content-Length`.)
-- Error codes seen: `-3016` the map no longer exists (recovery overwrites an existing map, it
-  does not recreate a deleted id), `-3002` the robot is mid-task, `-3022`/`-3023` on other
-  preconditions.
+- Error codes seen: `-3016` the `map_id` sent is not on the robot (the carrier must exist; the
+  backup itself may be of a deleted map, see below), `-3002` the robot is mid-task,
+  `-3022`/`-3023` on other preconditions.
 
 The recovery logic itself was read from firmware. TP-Link also publishes unencrypted *debug*
 builds (`RVSD30_<ver>_Build_<n>.bin.gz`) whose build numbers track the shipping firmware; the
@@ -158,8 +158,8 @@ AES-encrypted, but the recovery path does not live there.)
 
 **Conclusion: a map backup can be restored to the robot entirely locally.**
 `tapo_rv30.restore_map_backup` does this, serving a backup that `tapo_rv30.fetch_cloud_map_backups`
-has downloaded. Note that deleting a map in the app deletes its cloud backup too, and recovery
-overwrites a map the robot still has - so fetch backups ahead of time and keep the map around.
+has downloaded. Deleting a map in the app deletes its cloud backup too, so fetch backups ahead
+of time.
 
 **Restoring a map that no longer exists.** `mapRecovery` only accepts a `map_id` the robot
 currently has (otherwise -3016, the same "no such map" code `getMapData` uses). But the backup

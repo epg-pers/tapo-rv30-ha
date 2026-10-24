@@ -92,7 +92,7 @@ async def ws_edit_apply(hass: HomeAssistant, connection: websocket_api.ActiveCon
     if coord is None:
         connection.send_error(msg["id"], "not_found", f"No Tapo vacuum for {msg['entity_id']}")
         return
-    if coord.busy:
+    if coord.map_busy:
         connection.send_error(msg["id"], "busy", f"{coord.device_name} must be docked and idle to edit the map")
         return
     map_id = msg["map_id"]

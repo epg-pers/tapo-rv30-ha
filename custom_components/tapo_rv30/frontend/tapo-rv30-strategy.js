@@ -42,13 +42,20 @@ function robotViews(hass, device, used) {
   const cards = [
     { type: "custom:tapo-rv30-card", entity: vac.entity_id },
   ];
-  if (rooms.length) {
+  // The map camera knows each room's id: cleaning by id works for unnamed rooms and for two rooms
+  // with the same name. Without it (map not read yet) the vacuum's room names are all there is.
+  const geom = byDomain(ents, "camera").map((e) => hass.states[e.entity_id]?.attributes?.room_geometry)
+    .find((g) => Array.isArray(g) && g.length && g.every((r) => r && r.id != null)) || [];
+  const roomButtons = geom.length
+    ? geom.map((g) => ({ name: g.name || `Room ${g.id}`, data: { room_ids: [g.id] } }))
+    : rooms.map((r) => ({ name: r, data: { rooms: [r] } }));
+  if (roomButtons.length) {
     cards.push({
       type: "grid", columns: 2, square: false, title: "Rooms",
-      cards: rooms.map((r) => ({
-        type: "button", name: r, icon: "mdi:floor-plan", show_state: false,
+      cards: roomButtons.map((b) => ({
+        type: "button", name: b.name, icon: "mdi:floor-plan", show_state: false,
         tap_action: { action: "perform-action", perform_action: "tapo_rv30.clean_rooms",
-                      target: { entity_id: vac.entity_id }, data: { rooms: [r] } },
+                      target: { entity_id: vac.entity_id }, data: b.data },
       })),
     });
   }

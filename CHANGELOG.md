@@ -1,5 +1,33 @@
 # Changelog
 
+## v0.28.0b1
+
+A second full bug hunt, by five fresh reviewers. Every finding was checked by a separate reviewer trying to disprove it, and by tests on a robot where possible; only what held up was fixed.
+
+### Changed
+
+- **Each robot keeps its own map backups and saved map setups**, in `config/tapo_rv30/map_backups/<robot>` and `map_setups/<robot>` (the robot's MAC). With two robots, one could be offered, and sent, the other's backup. Files saved by earlier versions are still found.
+- **Services stay registered while a robot is still being set up**, so an automation gets a clear error instead of "action not found" during a setup retry.
+- Area sensors always report m2 (what the robot measures) with the area device class, so Home Assistant can show them in ft2 if you prefer. Before, a ft2 setting in the app only changed the label.
+- `clean_rooms` accepts `room_ids`, which the card and sidebar page now send: unnamed rooms (as after a restore) and rooms that share a name can be cleaned. A partial room name that fits several rooms is refused rather than cleaning them all.
+- Voice: say the robot's name ("tell Jarvis to clean the kitchen", "send Jarvis home", "stop Jarvis", "vacuum the kitchen with Jarvis"). With several robots and no name, the one that has the rooms (or is working) is used, or Assist asks which. "Vacuum pause" pauses and a trailing "please" is ignored.
+
+### Fixed
+
+- Robot schedules and Do Not Disturb are compared with the robot's own clock (its region), not Home Assistant's, and a schedule just after midnight counts as soon.
+- Map writes (restore, apply setup, the editor, the automatic restore finish) also wait while the robot is driving home, and the automatic finish asks the robot itself before switching maps, so it can never run under a cleaning robot after a restart.
+- `apply_map_setup` / the restore finish: zones are matched by outline, so renumbered zones are not rewritten and zones drawn since are kept; a schedule whose rooms are not on the map is skipped and said; a preset recreated without some rooms says so; whole-house schedules are not added twice; a refused or lost map switch is reported properly and the map is switched back.
+- Restore: one missed progress read no longer ends it, and if the robot is still applying when polling ends, the backup stays served and the automatic finish still happens.
+- Planner: a run in progress and a preview survive a restart; changes made just before a reload are not lost; "finish the room, then dock" waits until the robot is in a room (unnamed rooms count); a failed "Clean due rooms now" is reported instead of looking like it worked.
+- `set_schedule` can change app-made one-off schedules and keeps the app's pre-start reminder. `run_schedule` puts the previous default levels back if the start fails.
+- Level writes send only what changed (verified on 1.3.3); a status the robot did not report shows as unknown instead of 0% battery or Max.
+- Setup: a failure part way through (voice, the sidebar page or later) no longer leaves the integration half set up and unable to reload; deleting the integration removes its stored planner, room history and session; a robot whose cached certificate mode was pinned is re-discovered through the pin.
+- Two robots that swap network addresses each keep following their own robot.
+- RV30C (AES): a write whose connection was refused outright is sent again (it never reached the robot).
+- Room freshness waits for a run's own map instead of dropping runs from another floor, and does not re-download records while no map is loaded. `vacuum.clean_area` works when another floor's map cannot be read.
+- Sidebar page and card: driving stops and is rebuilt after the page is hidden and shown again; editing a schedule whose preset was deleted no longer moves it to another preset; planner window times keep both ends; the card uses the map image even if the map image entity is disabled; History and planner replies cannot show the wrong robot, and History refreshes after new runs; keyboard focus survives polls; the map editor handles a drag released outside the map; switches have accessible names; primary buttons are styled.
+- Docs: local restore, deleted map ids and schedule id examples corrected; admin-only services apply to scripts run by non-admin users too.
+
 ## v0.27.0
 
 A full bug hunt across the integration. Everything below was found by reading and testing the code, then fixed.

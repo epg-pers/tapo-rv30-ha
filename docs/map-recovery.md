@@ -68,11 +68,14 @@ missing, and the presets and schedules pointing at the map had gone with it. So 
 keeps a **map setup snapshot** of each map: room names, no-go zones, virtual walls, carpets,
 furniture, and the presets and schedules for that map.
 
-- It is written to `config/tapo_rv30/map_setups/<map_id>.json` **automatically** whenever any of
-  that changes, from data the integration already reads. No extra calls to the robot.
+- It is written to `config/tapo_rv30/map_setups/<robot>/<map_id>.json` **automatically** whenever
+  any of that changes on the map the robot is using, from data the integration already reads. No
+  extra calls to the robot. Another floor's snapshot is brought up to date when that floor is next
+  in use. `<robot>` is the robot's MAC address, so two robots never share or swap files; setups
+  saved by versions before 0.28 (directly in `map_setups`) are still found.
 - A snapshot that looks like a lost or freshly restored map (no rooms, or fewer named rooms)
   **never replaces a good one**; a warning is logged instead. Every distinct snapshot is also
-  kept in `map_setups/history/` (the last 30 per map).
+  kept in that robot's `history/` folder (the last 30 per map).
 - **Save setup** (`tapo_rv30.save_map_setup`) on the sidebar page's **Maintenance** tab takes one
   right now.
 
@@ -133,14 +136,15 @@ those, and other system and factory calls, outright.
 ## Keep local copies of your cloud backups
 
 The Tapo app's "back up map" uploads your map to TP-Link's cloud. `tapo_rv30.fetch_cloud_map_backups`
-logs in to your TP-Link account and downloads those backups into `config/tapo_rv30/map_backups`,
+logs in to your TP-Link account and downloads those backups into `config/tapo_rv30/map_backups/<robot>`,
 so you keep a copy even if TP-Link's is ever lost - and so `restore_map_backup` has something to
 serve. The first run may e-mail you a two-step code; run it again with `verification_code` set to
 it, and Home Assistant becomes a trusted device.
 
-Keep in mind: **deleting a map in the app deletes its cloud backup too**, and `restore_map_backup`
-recovers *into* a map your account still has (the robot won't recreate a map id it has deleted).
-So fetch your backups ahead of time, and keep the map around.
+Keep in mind: **deleting a map in the app deletes its cloud backup too**, so fetch your backups
+ahead of time. `mapRecovery` needs a map on the robot to carry the restore; when the map itself is
+gone, any other map carries it and the backup comes back under its own id (see "Lost every map"
+above).
 
 ## What's recoverable, at a glance
 

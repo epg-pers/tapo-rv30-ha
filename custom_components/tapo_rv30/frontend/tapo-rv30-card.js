@@ -10,7 +10,7 @@
  * the vacuum's device automatically.
  */
 
-const CARD_VERSION = "0.27.0";
+const CARD_VERSION = "0.28.0";
 const ROOM_COLORS = ["#ffb3ba", "#bae1ff", "#baffc9", "#ffffba", "#dcbaff", "#ffdcba", "#baffff"];
 
 const ICONS = {
@@ -215,7 +215,9 @@ class TapoRV30Card extends HTMLElement {
     }
     const find = (prefix, suffix) => ids.find((id) => id.startsWith(prefix) && (!suffix || id.endsWith(suffix)));
     return {
-      image: this._config.image_entity || find("image."),
+      // The live map, never the Last Clean Map (Map Image disabled: fall back to the camera).
+      image: this._config.image_entity || ids.find((id) => id.startsWith("image.") && id.endsWith("_map_image"))
+        || ids.find((id) => id.startsWith("image.") && !id.includes("last_clean")),
       camera: this._config.camera_entity || find("camera."),
       battery: find("sensor.", "_battery"),
       status: find("sensor.", "_status"),
@@ -286,6 +288,7 @@ class TapoRV30Card extends HTMLElement {
       mapwrap: root.querySelector(".mapwrap"), floors: root.querySelector(".floors"), stage: root.querySelector(".stage"),
       missing: root.querySelector(".missing"), body: root.querySelector(".body"),
     };
+    this._chipsKey = null; this._controlsKey = null; this._floorsKey = null;   // fresh DOM: render everything
     this._el.tRooms.onclick = () => this._setMode("rooms");
     this._el.tZone.onclick = () => this._setMode("zone");
     this._el.tGoto.onclick = () => this._setMode("goto");
@@ -396,7 +399,11 @@ class TapoRV30Card extends HTMLElement {
   _renderFloors() {
     const el = this._el.floors, maps = this._mapAttrs().maps || [];
     if (maps.length < 2) { el.hidden = true; return; }
-    el.hidden = false; el.innerHTML = "";
+    el.hidden = false;
+    // Rebuilding unchanged buttons on every poll would drop keyboard focus.
+    const key = JSON.stringify(maps.map((m) => [m.id, m.name, !!m.current]));
+    if (key === this._floorsKey) return;
+    this._floorsKey = key; el.innerHTML = "";
     for (const m of maps) {
       const b = document.createElement("button"); b.textContent = m.name || `Map ${m.id}`; b.className = m.current ? "on" : "";
       b.onclick = () => { if (!m.current) this._call("tapo_rv30", "set_map", { map: String(m.id) }, { entity_id: this._config.entity }); };
@@ -414,15 +421,19 @@ class TapoRV30Card extends HTMLElement {
     const el = this._el.chips, r = this._related;
     if (!this._config.show_presets || !r.presets.length) { el.hidden = true; return; }
     el.hidden = false;
+    // A preset deleted on the robot leaves an unavailable button behind: no chip for it.
+    const chips = r.presets.map((id) => [id, this._st(id)]).filter(([, s]) => s && s.state !== "unavailable")
+      .map(([id, s]) => ({ id, label: (s.attributes.friendly_name || id).replace(/^.*?Preset\s*/i, ""), title: (s.attributes.rooms || []).join(", ") }));
+    // Rebuilding unchanged chips on every poll would drop keyboard focus.
+    const key = JSON.stringify(chips);
+    if (key === this._chipsKey) return;
+    this._chipsKey = key;
     el.innerHTML = "";
-    for (const id of r.presets) {
-      // A preset deleted on the robot leaves an unavailable button behind: no chip for it.
-      const s = this._st(id); if (!s || s.state === "unavailable") continue;
-      const label = (s.attributes.friendly_name || id).replace(/^.*?Preset\s*/i, "");
+    for (const c of chips) {
       const b = document.createElement("button"); b.className = "chip";
-      b.innerHTML = `<ha-icon icon="${ICONS.preset}"></ha-icon><span>${esc(label)}</span>`;
-      b.title = (s.attributes.rooms || []).join(", ");
-      b.onclick = () => this._call("button", "press", {}, { entity_id: id });
+      b.innerHTML = `<ha-icon icon="${ICONS.preset}"></ha-icon><span>${esc(c.label)}</span>`;
+      b.title = c.title;
+      b.onclick = () => this._call("button", "press", {}, { entity_id: c.id });
       el.appendChild(b);
     }
   }
@@ -438,6 +449,10 @@ class TapoRV30Card extends HTMLElement {
       { k: "locate", i: ICONS.locate, l: "Locate", svc: "locate" },
     ];
     if (r.bin) items.push({ k: "bin", i: ICONS.bin, l: "Empty bin", btn: r.bin, dis: !docked });
+    // Rebuilding unchanged controls on every poll would drop keyboard focus.
+    const key = JSON.stringify(items);
+    if (key === this._controlsKey) return;
+    this._controlsKey = key;
     el.innerHTML = "";
     for (const it of items) {
       const b = document.createElement("button"); b.className = "ctl" + (it.primary ? " primary" : "");
@@ -570,7 +585,8 @@ class TapoRV30Card extends HTMLElement {
     for (const r of g) if (this._selected.has(r.id)) {
       ctx.fillStyle = "rgba(255,255,255,.92)"; ctx.strokeStyle = "rgba(0,0,0,.6)"; ctx.lineWidth = 3;
       ctx.font = "bold 15px sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
-      ctx.strokeText("✓ " + r.name, r.centre[0], r.centre[1]); ctx.fillText("✓ " + r.name, r.centre[0], r.centre[1]);
+      const label = "✓ " + (r.name || `Room ${r.id}`);
+      ctx.strokeText(label, r.centre[0], r.centre[1]); ctx.fillText(label, r.centre[0], r.centre[1]);
     }
   }
 
@@ -632,11 +648,12 @@ class TapoRV30Card extends HTMLElement {
     const seg = (key, opts) => `<div class="opt"><span>${{ suction: "Suction", water_level: "Water", passes: "Passes" }[key]}</span><div class="seg" data-key="${key}">` +
       opts.map(([v, l]) => `<button data-v="${v}" class="${cur[key] === v ? "on" : ""}">${l}</button>`).join("") + `</div></div>`;
     const fresh = g.last_cleaned ? `<div class="fresh"><ha-icon icon="${ICONS.history}"></ha-icon><span>Last cleaned ${FRESH(g.last_cleaned)}${g.coverage != null ? `, ${esc(g.coverage)}% covered` : ""}</span></div>` : "";
-    sheet.innerHTML = `<div class="panel"><h4><span>${esc(g.name)}</span><button class="x"><ha-icon icon="${ICONS.clear}"></ha-icon></button></h4>` + fresh +
+    const label = this._roomName(id);
+    sheet.innerHTML = `<div class="panel"><h4><span>${esc(label)}</span><button class="x" title="Close" aria-label="Close"><ha-icon icon="${ICONS.clear}"></ha-icon></button></h4>` + fresh +
       seg("suction", [[1, "Quiet"], [2, "Standard"], [3, "Turbo"], [4, "Max"], [5, "Ultra"]]) +
       seg("water_level", [[0, "Off"], [1, "Low"], [2, "Medium"], [3, "High"]]) +
       seg("passes", [[1, "1"], [2, "2"], [3, "3"]]) +
-      `<button class="save">Clean ${esc(g.name)} now</button></div>`;
+      `<button class="save">Clean ${esc(label)} now</button></div>`;
     sheet.onclick = (e) => { if (e.target === sheet) sheet.remove(); };
     sheet.querySelector(".x").onclick = () => sheet.remove();
     sheet.querySelectorAll(".seg button").forEach((b) => b.onclick = () => {
@@ -645,7 +662,8 @@ class TapoRV30Card extends HTMLElement {
     });
     const fan = ["", "quiet", "standard", "turbo", "max", "ultra"], water = ["off", "low", "medium", "high"];
     sheet.querySelector(".save").onclick = () => {
-      this._call("tapo_rv30", "clean_rooms", { rooms: [g.name], suction: fan[cur.suction], water: water[cur.water_level], passes: cur.passes }, { entity_id: this._config.entity });
+      // By id: an unnamed room, or two rooms with the same name, cannot be picked by name.
+      this._call("tapo_rv30", "clean_rooms", { room_ids: [g.id], suction: fan[cur.suction], water: water[cur.water_level], passes: cur.passes }, { entity_id: this._config.entity });
       sheet.remove();
     };
     this._el.mapwrap.appendChild(sheet);
@@ -727,8 +745,8 @@ class TapoRV30Card extends HTMLElement {
   _go() {
     const target = { entity_id: this._config.entity };
     if (this._mode === "rooms" && this._selected.size) {
-      const rooms = [...this._selected].map((id) => this._roomName(id));
-      this._call("tapo_rv30", "clean_rooms", { rooms }, target);
+      // By id: an unnamed room, or two rooms with the same name, cannot be picked by name.
+      this._call("tapo_rv30", "clean_rooms", { room_ids: [...this._selected] }, target);
     } else if (this._mode === "zone" && this._zone) {
       const z = this._zone;
       if (z.saved) {

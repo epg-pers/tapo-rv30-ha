@@ -111,20 +111,27 @@ class TapoRV30ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     # the TPAP port, so other TP-Link gear on the same prefix is ignored.
     async def async_step_dhcp(self, discovery_info: DhcpServiceInfo):
         ip, mac = discovery_info.ip, dr.format_mac(discovery_info.macaddress)
-        for entry in self._async_current_entries(include_ignore=False):
-            if entry.data.get(CONF_HOST) == ip:
-                return self.async_abort(reason="already_configured")
+        # The MAC decides which robot this is; the address alone can belong to another robot
+        # that had it before (two robots swapping leases).
         dev_reg = dr.async_get(self.hass)
         device = dev_reg.async_get_device(connections={(dr.CONNECTION_NETWORK_MAC, mac)})
         if device:
             for entry_id in device.config_entries:
                 entry = self.hass.config_entries.async_get_entry(entry_id)
                 if entry and entry.domain == DOMAIN and entry.data.get(CONF_HOST) != ip:
+                    for other in self._async_current_entries(include_ignore=False):
+                        if other.entry_id != entry.entry_id and other.unique_id == ip:
+                            # Its robot has moved too; its own lease update will set this.
+                            self.hass.config_entries.async_update_entry(
+                                other, unique_id=f"moved-{other.entry_id}")
                     self.hass.config_entries.async_update_entry(
                         entry, data={**entry.data, CONF_HOST: ip}, unique_id=ip,
                         title=f"Tapo Vacuum ({ip})")
                     self.hass.config_entries.async_schedule_reload(entry.entry_id)
             return self.async_abort(reason="already_configured")
+        for entry in self._async_current_entries(include_ignore=False):
+            if entry.data.get(CONF_HOST) == ip:
+                return self.async_abort(reason="already_configured")
         if not await _tpap_port_open(ip):
             return self.async_abort(reason="not_tapo_vacuum")
         await self.async_set_unique_id(ip)

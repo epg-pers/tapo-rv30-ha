@@ -5,7 +5,7 @@ clean_rooms:
       integration: tapo_rv30
   fields:
     rooms:
-      required: true
+      required: false
       example:
       - Kitchen
       - Hallway
@@ -16,6 +16,13 @@ clean_rooms:
       example: Downstairs
       selector:
         text: {}
+    room_ids:
+      required: false
+      example:
+      - 2
+      - 4
+      selector:
+        object: {}
     suction:
       example: Turbo
       selector:
@@ -126,7 +133,7 @@ run_schedule:
   fields:
     schedule_id:
       required: true
-      example: 1
+      example: S1
       selector:
         text: {}
 send_raw:

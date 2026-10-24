@@ -14,7 +14,7 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import PERCENTAGE, EntityCategory, UnitOfTime
+from homeassistant.const import PERCENTAGE, EntityCategory, UnitOfArea, UnitOfTime
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -38,10 +38,6 @@ class TapoSensorDescription(SensorEntityDescription):
     value_fn: Callable[[dict], Any] = lambda d: None
     attrs_fn: Callable[[dict], dict] | None = None
     unit_fn: Callable[[dict], str | None] | None = None
-
-
-def _area_unit(d: dict) -> str:
-    return {0: "m²", 1: "ft²", 2: "坪"}.get(d.get("area_unit", 0), "m²")
 
 
 _PROGRESS_SENSOR = TapoSensorDescription(
@@ -109,7 +105,8 @@ _TOTAL_RUNS = TapoSensorDescription(
 _TOTAL_AREA = TapoSensorDescription(
     key="total_area", name="Total Area Cleaned", icon="mdi:texture-box",
     state_class=SensorStateClass.TOTAL_INCREASING, value_fn=lambda d: _records(d).get("total_area"),
-    unit_fn=_area_unit,
+    # The robot always reports m2 (the app converts for display); HA converts too, if wanted.
+    native_unit_of_measurement=UnitOfArea.SQUARE_METERS, device_class=SensorDeviceClass.AREA,
 )
 _TOTAL_TIME = TapoSensorDescription(
     key="total_time", name="Total Cleaning Time", icon="mdi:timer-outline",
@@ -182,7 +179,7 @@ _AREA_SENSOR = TapoSensorDescription(
     icon="mdi:texture-box",
     state_class=SensorStateClass.MEASUREMENT,
     value_fn=lambda d: d.get("clean_area"),
-    unit_fn=_area_unit,
+    native_unit_of_measurement=UnitOfArea.SQUARE_METERS, device_class=SensorDeviceClass.AREA,
 )
 
 

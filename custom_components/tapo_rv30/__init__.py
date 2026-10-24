@@ -7,6 +7,8 @@ from functools import partial
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_HOST, CONF_PASSWORD, CONF_USERNAME, Platform
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers.storage import Store
 from homeassistant.loader import async_get_integration
 
 from .aes import AesVacuumClient
@@ -18,16 +20,24 @@ from .map_edit_ws import async_setup_map_edit_ws
 from .map_restore import async_setup_map_restore
 from .planner import TapoPlanner
 from .planner_ws import async_setup_planner_ws
-from .services import async_setup_services, async_unload_services
+from .services import async_setup_services
 from .voice import async_setup_voice
 
 VOICE_KEY = f"{DOMAIN}_voice"
 from .tpap import TapoVacuumClient
 
 _LOGGER = logging.getLogger(__name__)
+CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 PLATFORMS = [Platform.VACUUM, Platform.SENSOR, Platform.BINARY_SENSOR, Platform.CAMERA, Platform.IMAGE,
              Platform.SELECT, Platform.BUTTON, Platform.SWITCH, Platform.TIME, Platform.NUMBER,
              Platform.UPDATE]
+
+
+async def async_setup(hass: HomeAssistant, config: dict) -> bool:
+    """Services are registered once, for the whole run: automations calling them while a robot
+    is still being set up (or retrying) get a clear error instead of "action not found"."""
+    async_setup_services(hass)
+    return True
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -51,21 +61,34 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # Setup is retried with a new client; release this one (the AES client owns a thread).
         await hass.async_add_executor_job(client.close)
         raise
-    coordinator.planner = TapoPlanner(hass, coordinator, entry)
-    await coordinator.planner.async_load()
-
-    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
-    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
-    async_setup_services(hass)
-    async_setup_planner_ws(hass)
-    async_setup_map_edit_ws(hass)
-    async_setup_map_restore(hass)
-    async_setup_backup_ws(hass)
-    coordinator.planner.async_start()
-    entry.async_on_unload(coordinator.planner.async_stop)
-    if VOICE_KEY not in hass.data:
-        hass.data[VOICE_KEY] = async_setup_voice(hass)
-    await _async_apply_panel_option(hass, integration.version or "0")
+    forwarded = False
+    try:
+        coordinator.planner = TapoPlanner(hass, coordinator, entry)
+        await coordinator.planner.async_load()
+        hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
+        await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+        forwarded = True
+        async_setup_planner_ws(hass)
+        async_setup_map_edit_ws(hass)
+        async_setup_map_restore(hass)
+        async_setup_backup_ws(hass)
+        coordinator.planner.async_start()
+        entry.async_on_unload(coordinator.planner.async_stop)
+    except BaseException:
+        # Undo what was set up so a retry or reload starts clean instead of finding the
+        # platforms "already set up" and a client nobody closes.
+        if forwarded:
+            await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+        hass.data.get(DOMAIN, {}).pop(entry.entry_id, None)
+        await hass.async_add_executor_job(client.close)
+        raise
+    # Extras that must never fail the robot's setup. Voice is registered again whenever a
+    # robot is added or removed, so its sentences know every robot's name.
+    _async_register_voice(hass)
+    try:
+        await _async_apply_panel_option(hass, integration.version or "0")
+    except Exception as exc:
+        _LOGGER.warning("Sidebar page not set up: %s", exc)
     entry.async_on_unload(entry.add_update_listener(_async_options_updated))
     return True
 
@@ -93,10 +116,37 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if ok:
         coordinator = hass.data[DOMAIN].pop(entry.entry_id, None)
         if coordinator is not None:
+            planner = getattr(coordinator, "planner", None)
+            if planner is not None:
+                await planner.async_flush()
             await hass.async_add_executor_job(coordinator.client.close)
         if not hass.data[DOMAIN]:
-            async_unload_services(hass)
             async_remove_panel_if_present(hass)
-            if (unregister := hass.data.pop(VOICE_KEY, None)) is not None:
-                unregister()
+        _async_register_voice(hass)
     return ok
+
+
+def _async_register_voice(hass: HomeAssistant) -> None:
+    if (unregister := hass.data.pop(VOICE_KEY, None)) is not None:
+        unregister()
+    if not hass.data.get(DOMAIN):
+        return
+    try:
+        hass.data[VOICE_KEY] = async_setup_voice(hass)
+    except Exception as exc:
+        _LOGGER.warning("Voice sentences not registered: %s", exc)
+
+
+async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """The integration entry was deleted: drop its stored planner, room history, pending
+    restore and session cache. Map setups and backups are kept (they are the user's)."""
+    for key in ("planner", "rooms", "restore"):
+        await Store(hass, 1, f"{DOMAIN}.{entry.entry_id}.{key}").async_remove()
+    cache_dir = hass.config.path(".storage", "tapo_rv30")
+
+    def _rm() -> None:     # _cache_path touches the disk, so it runs here too
+        try:
+            TapoVacuumClient._cache_path(entry.data.get(CONF_HOST, ""), cache_dir).unlink()
+        except Exception:   # nothing to clean up is fine
+            pass
+    await hass.async_add_executor_job(_rm)

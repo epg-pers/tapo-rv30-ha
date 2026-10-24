@@ -331,7 +331,7 @@ def room_at_vac(map_data: dict) -> str | None:
     room_id = pixels[gy * width + gx]
     for a in map_data.get("area_list", []):
         if a.get("type") == "room" and a.get("id") == room_id:
-            return b64name(a.get("name", ""))
+            return b64name(a.get("name", "")) or f"Room {room_id}"   # unnamed after a restore
     return None
 
 
@@ -342,16 +342,23 @@ def resolve_rooms(
     get_map_data: Callable[[int], dict],
     name_patterns: list[str],
     map_name: str | None = None,
+    map_id: int | None = None,
+    room_ids: list[int] | None = None,
 ) -> tuple[list[int], int]:
     """Resolve room names -> (room_ids, map_id).
 
-    Uses map_name (exact, then partial match) if given, otherwise the current
-    map. Names are normalised with norm() first. Raises MapNotFound /
-    RoomNotFound (both ValueError) with the available names in the message.
+    Uses map_id if given, else map_name (exact, then partial match), otherwise the
+    current map. Names are normalised with norm() first. With room_ids, those ids are
+    checked against the map instead of matching names (unnamed or same-named rooms).
+    Raises MapNotFound / RoomNotFound (both ValueError) with the available names.
     """
     map_names = {m["map_id"]: b64name(m.get("map_name", "")) for m in map_list}
 
-    if map_name is not None:
+    if map_id is not None:
+        if map_id not in map_names:
+            raise MapNotFound(f"Map {map_id} is not on the vacuum. Available maps: {sorted(map_names.values())}")
+        target_id = map_id
+    elif map_name is not None:
         wanted = norm(map_name)
         if not wanted:
             raise MapNotFound(
@@ -377,8 +384,16 @@ def resolve_rooms(
 
     map_data = get_map_data(target_id)
     rooms = [a for a in map_data.get("area_list", []) if a.get("type") == "room"]
-    decoded = [b64name(r.get("name", "")) for r in rooms]
+    decoded = [b64name(r.get("name", "")) or f"Room {r.get('id')}" for r in rooms]
     target_name = map_names.get(target_id, str(target_id))
+
+    if room_ids is not None:
+        have = {r.get("id") for r in rooms}
+        bad = [i for i in room_ids if i not in have]
+        if bad or not room_ids:
+            raise RoomNotFound(f"No room with id {bad or room_ids} on map '{target_name}'. "
+                               f"Available rooms: {[(r.get('id'), n) for r, n in zip(rooms, decoded)]}")
+        return list(dict.fromkeys(room_ids)), target_id
 
     matched: list[int] = []
     seen: set[int] = set()

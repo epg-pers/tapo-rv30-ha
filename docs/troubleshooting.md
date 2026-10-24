@@ -72,8 +72,10 @@ clean history starts from zero.
 while it was mid-run and lost everything within seconds. The integration now refuses such
 calls through `send_raw` while the robot is working.
 
-**Fix.** There is no local restore. Remap, name the rooms, redraw zones and furniture.
-Never probe a working robot; see the warning in [protocol.md](protocol.md).
+**Fix.** Restore the map from a backup with `tapo_rv30.restore_map_backup`, then let the saved
+map setup put back room names, zones, furniture, presets and schedules; the whole procedure is in
+[map-recovery.md](map-recovery.md). Without a backup, remap and run `apply_map_setup`. Never
+probe a working robot; see the warning in [protocol.md](protocol.md).
 
 ## The card does not appear in the card picker
 

@@ -21,6 +21,8 @@ const inDnd = (dnd, hhmm) => {
 };
 const dndText = (dnd) => `Do Not Disturb (${dnd.start} to ${dnd.end})`;
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+// A .switch toggle that names what it controls and says whether it is on (screen readers see nothing else).
+const toggle = (on, label, attrs = "") => `<button class="switch ${on ? "on" : ""}" aria-pressed="${on ? "true" : "false"}" aria-label="${esc(label)}" ${attrs}></button>`;
 // Local calendar day number (DST-safe), so charts bucket runs by the viewer's own midnight.
 const localDay = (ms) => { const d = new Date(ms); return Math.round(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) / 86400000); };
 // Attributes that change on every poll while the robot runs; none of the panes show them, and
@@ -221,6 +223,7 @@ class TapoRV30Panel extends HTMLElement {
     this.shadowRoot.querySelector(".menu").onclick = () =>
       this.dispatchEvent(new CustomEvent("hass-toggle-menu", { bubbles: true, composed: true }));
     this._layout();
+    this._robotsHtml = null;
     this._booted = true;
     this._update(true);
   }
@@ -275,8 +278,12 @@ class TapoRV30Panel extends HTMLElement {
     if (!robots.length) { this.shadowRoot.querySelector(".left").innerHTML = `<div class="empty">No Tapo robot vacuum is set up yet.</div>`; return; }
     if (!this._robot || !robots.some((r) => r.entity_id === this._robot)) { this._selectRobot(robots[0].entity_id); first = true; }
     const rb = this.shadowRoot.querySelector(".robots");
-    rb.innerHTML = robots.length > 1 ? robots.map((r) => `<button data-id="${esc(r.entity_id)}" class="${r.entity_id === this._robot ? "on" : ""}">${esc(r.attributes.friendly_name || r.entity_id)}</button>`).join("") : "";
-    rb.querySelectorAll("button").forEach((b) => b.onclick = () => { if (b.dataset.id === this._robot) return; this._selectRobot(b.dataset.id); this._update(true); });
+    const html = robots.length > 1 ? robots.map((r) => `<button data-id="${esc(r.entity_id)}" class="${r.entity_id === this._robot ? "on" : ""}" aria-pressed="${r.entity_id === this._robot ? "true" : "false"}">${esc(r.attributes.friendly_name || r.entity_id)}</button>`).join("") : "";
+    // Rebuilding unchanged buttons on every state change would drop keyboard focus.
+    if (html !== this._robotsHtml) {
+      this._robotsHtml = html; rb.innerHTML = html;
+      rb.querySelectorAll("button").forEach((b) => b.onclick = () => { if (b.dataset.id === this._robot) return; this._selectRobot(b.dataset.id); this._update(true); });
+    }
     this._renderCard(first);
     this._renderRight(first);
   }
@@ -286,7 +293,8 @@ class TapoRV30Panel extends HTMLElement {
   _selectRobot(id) {
     this._teardownDrive();
     this._entered = false;
-    this._robot = id; this._editing = null; this._records = null; this._planOpen = null; this._paneDirty = false;
+    this._robot = id; this._editing = null; this._records = null; this._recTok = null; this._planOpen = null; this._paneDirty = false;
+    this._robotGen = (this._robotGen || 0) + 1;   // replies still in flight for the old robot are dropped
     const pane = this.shadowRoot.querySelector(".pane"); if (pane) pane.innerHTML = "";
   }
 
@@ -324,6 +332,7 @@ class TapoRV30Panel extends HTMLElement {
       right.innerHTML = `<div class="tabs">${tabs.map(([k, i, l]) => `<button data-tab="${k}"><ha-icon icon="${i}"></ha-icon>${l}</button>`).join("")}</div><div class="pane"></div>`;
       right.querySelectorAll(".tabs button").forEach((b) => b.onclick = () => {
         this._teardownDrive(); this._tab = b.dataset.tab; this._editing = null; this._planOpen = null;
+        if (this._tab === "history") this._records = null;   // fetched afresh each time the tab opens
         if (this._tab === "drive") right.querySelector(".pane").innerHTML = "";   // rebuilt with fresh listeners
         this._renderRight(true);
       });
@@ -350,7 +359,9 @@ class TapoRV30Panel extends HTMLElement {
     const r = this._related(this._robot);
     const stable = (a) => Object.keys(a).filter((k) => !VOLATILE.has(k)).sort().map((k) => [k, a[k]]);
     const pick = (ids) => ids.map((id) => { const s = this._st(id); return s ? s.state + JSON.stringify(stable(s.attributes)) : ""; }).join("|");
-    return pick([this._robot, r.camera, r.schedules, r.status, ...r.switches, ...r.selects, ...r.numbers, ...r.times, ...r.presets]);
+    // History redraws (and refetches its records) when a clean finishes and the totals move.
+    const totals = this._tab === "history" ? [r.totals.cleans, r.totals.area, r.totals.time] : [];
+    return pick([this._robot, r.camera, r.schedules, r.status, ...r.switches, ...r.selects, ...r.numbers, ...r.times, ...r.presets, ...totals]);
   }
 
   // ---- schedules ----------------------------------------------------------------------
@@ -360,12 +371,13 @@ class TapoRV30Panel extends HTMLElement {
     const rows = list.map((s) => {
       const blocked = s.blocked_by_dnd != null ? s.blocked_by_dnd : inDnd(dnd, s.time);
       const warn = blocked && dnd ? `<div class="warn"><ha-icon icon="mdi:bell-sleep"></ha-icon>Inside ${esc(dndText(dnd))}: the robot will skip it</div>` : "";
-      const target = s.preset_id != null ? `Preset ${esc((this._presets(r).find((p) => p.id === s.preset_id) || {}).name || s.preset_id)}`
+      const pr = s.preset_id != null ? this._presets(r).find((p) => p.id === s.preset_id) : null;
+      const target = s.preset_id != null ? (pr ? `Preset ${esc(pr.name || s.preset_id)}` : `(deleted preset ${esc(s.preset_id)})`)
         : (s.rooms && s.rooms.length ? esc(s.rooms.join(", ")) : "Whole house");
       const days = (s.days || []).length === 7 ? "Daily" : (s.days || []).join(" ");
       const levels = [s.suction != null ? FAN[s.suction - 1] : null, s.water_level != null ? `water ${WATER[s.water_level]}` : null, s.clean_passes ? `${s.clean_passes}x` : null].filter(Boolean).join(", ");
       return `<div class="row ${s.enabled ? "" : "off"}" data-id="${esc(s.id)}">
-        <button class="switch ${s.enabled ? "on" : ""}" data-act="toggle" title="${s.enabled ? "Disable" : "Enable"}"></button>
+        ${toggle(s.enabled, `${s.time} schedule`, `data-act="toggle" title="${s.enabled ? "Disable" : "Enable"}"`)}
         <div class="main"><div class="t">${esc(s.time)} &middot; ${esc(days)}</div><div class="s">${target}${levels ? " &middot; " + esc(levels) : ""}</div>${warn}</div>
         <button class="icon-btn" data-act="edit" title="Edit"><ha-icon icon="mdi:pencil"></ha-icon></button>
         <button class="icon-btn" data-act="delete" title="${this._isAdmin() ? "Delete" : "Only an administrator can delete schedules"}" ${this._isAdmin() ? "" : "disabled"}><ha-icon icon="mdi:delete"></ha-icon></button>
@@ -413,6 +425,12 @@ class TapoRV30Panel extends HTMLElement {
     const own = s.map_id != null ? maps.find((m) => m.id === s.map_id) : null;
     const foreign = !isNew && s.map_id != null && curMap != null && s.map_id !== curMap;
     const ownName = own && own.name && maps.filter((m) => m.name === own.name).length === 1 ? own.name : null;
+    // A schedule can point at a preset since deleted on the robot: show it as such, never as another one.
+    const presetIds = new Set(presets.map((p) => String(p.id)));
+    const deadPreset = state.preset !== "" && !presetIds.has(state.preset);
+    // "Robot default" cannot be sent to an existing schedule (an edit sends only what changed, and
+    // there is no value that clears a level), so it is offered only where it is already the value.
+    const dflt = (cur, none) => (isNew || cur === none ? `<option value="${none}">Robot default</option>` : "");
     const roomChips = () => rooms.map((n) => `<button class="chip ${state.rooms.has(n) ? "on" : ""}" data-room="${esc(n)}">${esc(n)}</button>`).join("");
     pane.innerHTML = `<ha-card><div class="card form">
       <h3><span>${isNew ? "New schedule" : `Edit schedule ${esc(s.id)}`}</span></h3>
@@ -425,14 +443,14 @@ class TapoRV30Panel extends HTMLElement {
         <button data-mode="preset" class="${state.mode === "preset" ? "on" : ""}" ${presets.length && !foreign ? "" : "disabled"}>Preset</button></div>
         ${foreign ? `<div class="note">This schedule is for the map ${own && own.name ? `"${esc(own.name)}"` : esc(s.map_id)}, not the one the robot is on. It keeps that map; switch the robot to it to change what it cleans.</div>` : ""}</div>
       <div class="rooms-box" ${state.mode === "rooms" && !foreign ? "" : "hidden"}><div class="chips rooms">${roomChips()}</div></div>
-      <div class="preset-box" ${state.mode === "preset" && !foreign ? "" : "hidden"}><select class="preset">${presets.map((p) => `<option value="${p.id}" ${String(p.id) === state.preset ? "selected" : ""}>${esc(p.name)}</option>`).join("")}</select></div>
+      <div class="preset-box" ${state.mode === "preset" && !foreign ? "" : "hidden"}><select class="preset">${deadPreset ? `<option value="${esc(state.preset)}" selected>(deleted preset ${esc(state.preset)})</option>` : ""}${presets.map((p) => `<option value="${esc(p.id)}" ${String(p.id) === state.preset ? "selected" : ""}>${esc(p.name)}</option>`).join("")}</select></div>
       <div class="grid2">
-        <div><label>Suction</label><select class="suction"><option value="0">Robot default</option>${FAN.map((f, i) => `<option value="${i + 1}" ${state.suction === i + 1 ? "selected" : ""}>${f}</option>`).join("")}</select></div>
-        <div><label>Water</label><select class="water"><option value="-1">Robot default</option>${WATER.map((w, i) => `<option value="${i}" ${state.water === i ? "selected" : ""}>${w}</option>`).join("")}</select></div>
+        <div><label>Suction</label><select class="suction">${dflt(state.suction, 0)}${FAN.map((f, i) => `<option value="${i + 1}" ${state.suction === i + 1 ? "selected" : ""}>${f}</option>`).join("")}</select></div>
+        <div><label>Water</label><select class="water">${dflt(state.water, -1)}${WATER.map((w, i) => `<option value="${i}" ${state.water === i ? "selected" : ""}>${w}</option>`).join("")}</select></div>
       </div>
       <div class="grid2">
-        <div><label>Passes</label><select class="passes"><option value="0">Robot default</option>${[1, 2, 3].map((n) => `<option value="${n}" ${state.passes === n ? "selected" : ""}>${n}</option>`).join("")}</select></div>
-        <div><label>Enabled</label><button class="switch enabled ${state.enabled ? "on" : ""}" style="margin-top:6px"></button></div>
+        <div><label>Passes</label><select class="passes">${dflt(state.passes, 0)}${[1, 2, 3].map((n) => `<option value="${n}" ${state.passes === n ? "selected" : ""}>${n}</option>`).join("")}</select></div>
+        <div><label>Enabled</label><button class="switch enabled ${state.enabled ? "on" : ""}" aria-pressed="${state.enabled ? "true" : "false"}" aria-label="Schedule enabled" style="margin-top:6px"></button></div>
       </div>
       <div class="err" hidden></div>
       <div class="actions"><button class="btn cancel">Cancel</button><button class="btn primary save"><ha-icon icon="mdi:content-save"></ha-icon>${isNew ? "Add to robot" : "Save"}</button></div>
@@ -460,7 +478,8 @@ class TapoRV30Panel extends HTMLElement {
       state.mode = b.dataset.mode; q(".mode").querySelectorAll("button").forEach((o) => o.classList.toggle("on", o === b));
       q(".rooms-box").hidden = state.mode !== "rooms"; q(".preset-box").hidden = state.mode !== "preset";
     });
-    q(".enabled").onclick = () => { state.enabled = !state.enabled; q(".enabled").classList.toggle("on", state.enabled); };
+    q(".enabled").onclick = () => { state.enabled = !state.enabled; q(".enabled").classList.toggle("on", state.enabled); q(".enabled").setAttribute("aria-pressed", String(state.enabled)); };
+    q(".preset").onchange = () => { state.preset = q(".preset").value; };
     q(".cancel").onclick = () => { this._editing = null; this._renderRight(true); };
     q(".save").onclick = async () => {
       const err = q(".err"); err.hidden = true;
@@ -469,7 +488,7 @@ class TapoRV30Panel extends HTMLElement {
       if (!state.days.size) { err.textContent = "Pick at least one day (the robot only keeps repeating schedules)."; err.hidden = false; return; }
       if (state.mode === "rooms" && !state.rooms.size) { err.textContent = "Pick at least one room."; err.hidden = false; return; }
       const su = Number(q(".suction").value), wa = Number(q(".water").value), pa = Number(q(".passes").value);
-      const preset = state.mode === "preset" ? q(".preset").value : "";
+      const preset = state.mode === "preset" ? state.preset : "";
       // A new schedule gets everything; an edit sends only what changed, so the rest of the
       // robot's rule (its map above all) is kept as it is.
       const changed = (k, v) => isNew || orig[k] !== v;
@@ -479,6 +498,7 @@ class TapoRV30Panel extends HTMLElement {
       if (changed("enabled", state.enabled)) data.enabled = state.enabled;
       const targetChanged = !foreign && (changed("mode", state.mode) || (state.mode === "rooms" && changed("rooms", [...state.rooms].sort().join("\n")))
         || (state.mode === "preset" && changed("preset", preset)));
+      if (targetChanged && state.mode === "preset" && !presetIds.has(preset)) { err.textContent = "Pick a preset."; err.hidden = false; return; }
       if (targetChanged) {
         if (state.mode === "rooms") { data.rooms = [...state.rooms]; if (ownName) data.map = ownName; }
         else if (state.mode === "preset") data.preset = preset;
@@ -513,12 +533,19 @@ class TapoRV30Panel extends HTMLElement {
       <h5>Minutes per week, last 8 weeks</h5><canvas class="chart weeks"></canvas>
     </div></ha-card>
     <ha-card><div class="card"><h3><span>Recent runs</span></h3><div class="runs"><div class="empty">Loading</div></div></div></ha-card>`;
-    if (!this._records || this._recordsFor !== this._robot) {
+    // Refetched when the robot finishes a clean (its total moves), and each time the tab opens.
+    const robot = this._robot, key = `${robot}|${tot(r.totals.cleans)}`;
+    if (!this._records || this._recordsKey !== key) {
+      const tok = this._recTok = {};
+      let recs;
       try {
         const resp = await this._hass.connection.sendMessagePromise({ type: "call_service", domain: DOMAIN, service: "get_clean_records",
-          service_data: { entity_id: this._robot, limit: 100 }, return_response: true });
-        this._records = (resp && resp.response && resp.response.records) || []; this._recordsFor = this._robot;
-      } catch (e) { this._records = []; }
+          service_data: { entity_id: robot, limit: 100 }, return_response: true });
+        recs = (resp && resp.response && resp.response.records) || [];
+      } catch (e) { recs = []; }
+      // A reply for a robot no longer shown, or one a newer request has overtaken, is dropped.
+      if (this._recTok !== tok || this._robot !== robot) return;
+      this._records = recs; this._recordsFor = robot; this._recordsKey = key;
     }
     const recs = this._records;
     const runs = pane.querySelector(".runs");
@@ -567,14 +594,18 @@ class TapoRV30Panel extends HTMLElement {
     const r = this._related(this._robot), cam = this._st(r.camera), geom = (cam && cam.attributes.room_geometry) || [];
     const fresh = (cam && cam.attributes.rooms_last_cleaned) || {};
     const rows = geom.map((g) => {
-      const f = fresh[g.name] || {}, cov = f.coverage || 0, d = f.last_cleaned ? (Date.now() / 1000 - f.last_cleaned) / 86400 : null;
+      // The room's own geometry entry carries its freshness; the name-keyed map is only a fallback
+      // (it cannot tell an unnamed room, or two rooms with the same name, apart).
+      const f = (g.last_cleaned != null || g.coverage != null ? g : fresh[g.name]) || {}, label = g.name || `Room ${g.id}`, cov = f.coverage || 0, d = f.last_cleaned ? (Date.now() / 1000 - f.last_cleaned) / 86400 : null;
       const cls = d == null ? "bad" : d > 7 ? "warn" : "";
-      return `<div class="bar-row ${cls}"><span>${esc(g.name)}</span><div class="track"><div style="width:${cov}%"></div></div><span class="r">${esc(ago(f.last_cleaned))}</span></div>
-        <div class="actions" style="justify-content:flex-start;margin:-2px 0 6px"><button class="btn" data-room="${esc(g.name)}"><ha-icon icon="mdi:play"></ha-icon>Clean ${esc(g.name)}</button>
+      return `<div class="bar-row ${cls}"><span>${esc(label)}</span><div class="track"><div style="width:${Number(cov) || 0}%"></div></div><span class="r">${esc(ago(f.last_cleaned))}</span></div>
+        <div class="actions" style="justify-content:flex-start;margin:-2px 0 6px"><button class="btn" data-room="${esc(g.name)}" data-room-id="${esc(g.id ?? "")}"><ha-icon icon="mdi:play"></ha-icon>Clean ${esc(label)}</button>
         <span class="s" style="font-size:.8em;color:var(--secondary-text-color);align-self:center">${f.coverage != null ? `${esc(f.coverage)}% covered last time` : "not cleaned since the map was made"}${g.suction ? ` · ${FAN[g.suction - 1]}` : ""}${g.passes ? ` · ${g.passes}x` : ""}</span></div>`;
     }).join("");
     pane.innerHTML = `<ha-card><div class="card"><h3><span>Rooms and freshness</span></h3>${rows || `<div class="empty">No rooms on the current map.</div>`}</div></ha-card>`;
-    pane.querySelectorAll("[data-room]").forEach((b) => b.onclick = () => this._call(DOMAIN, "clean_rooms", { rooms: [b.dataset.room] }, { entity_id: this._robot }));
+    // By id where the map gives one: names cannot pick an unnamed room or one of two same-named rooms.
+    pane.querySelectorAll("[data-room]").forEach((b) => b.onclick = () => this._call(DOMAIN, "clean_rooms",
+      b.dataset.roomId !== "" ? { room_ids: [Number(b.dataset.roomId)] } : { rooms: [b.dataset.room] }, { entity_id: this._robot }));
   }
 
   // ---- map editor ----------------------------------------------------------------------
@@ -597,7 +628,7 @@ class TapoRV30Panel extends HTMLElement {
       <div class="ebtns">
         <button class="btn eundo"><ha-icon icon="mdi:undo"></ha-icon>Undo</button>
         <button class="btn ecancel"><ha-icon icon="mdi:refresh"></ha-icon>Discard</button>
-        <button class="go esave"><ha-icon icon="mdi:content-save"></ha-icon>Save to robot</button>
+        <button class="btn primary esave"><ha-icon icon="mdi:content-save"></ha-icon>Save to robot</button>
       </div>
       <div class="s estatus"></div>
     </div></ha-card>`;
@@ -618,13 +649,19 @@ class TapoRV30Panel extends HTMLElement {
     c.onpointerdown = (e) => this._editDown(e);
     c.onpointermove = (e) => this._editMove(e);
     c.onpointerup = (e) => this._editUp(e);
+    // With the pointer captured, a drag released outside the canvas still ends in _editUp; a
+    // cancelled pointer (or a capture lost any other way) drops the drag instead of leaving it open.
+    c.onpointercancel = c.onlostpointercapture = () => this._editCancel();
     this._editLoad();
   }
 
   _editGeom() { return this._edit.geom; }
   _editMm2Px(x, y) { const g = this._edit.geom, s = g.scale_px_per_cell, r = g.resolution_mm, [ox, oy] = g.real_origin_mm, gh = g.grid_size[1]; return [((x - ox) / r) * s + s / 2, (gh - 1 - (y - oy) / r) * s + s / 2]; }
   _editPx2Mm(x, y) { const g = this._edit.geom, s = g.scale_px_per_cell, r = g.resolution_mm, [ox, oy] = g.real_origin_mm, gh = g.grid_size[1]; return [Math.round(ox + ((x - s / 2) / s) * r), Math.round(oy + (gh - 1 - (y - s / 2) / s) * r)]; }
-  _editPoint(e) { const c = this._editEl.canvas, b = c.getBoundingClientRect(); return [(e.clientX - b.left) / b.width * c.width, (e.clientY - b.top) / b.height * c.height]; }
+  _editPoint(e) {
+    const c = this._editEl.canvas, b = c.getBoundingClientRect(), clamp = (v, max) => Math.max(0, Math.min(max, v));
+    return [clamp((e.clientX - b.left) / b.width * c.width, c.width), clamp((e.clientY - b.top) / b.height * c.height, c.height)];
+  }
 
   async _editLoad() {
     const r = this._related(this._robot), cam = this._st(r.camera);
@@ -688,6 +725,7 @@ class TapoRV30Panel extends HTMLElement {
   _editReady() { return !!(this._edit && this._edit.img && this._edit.geom && this._edit.areas); }
   _editDown(e) {
     if (!this._editReady()) return;     // nothing to draw on until the map has loaded
+    try { this._editEl.canvas.setPointerCapture(e.pointerId); } catch (err) { /* the pointer is already gone */ }
     const [x, y] = this._editPoint(e); const t = this._edit.tool;
     if (t === "select") { this._edit.sel = this._editHit(x, y); if (this._edit.sel) this._edit.moveFrom = this._editPx2Mm(x, y); this._editDraw(); return; }
     if (t === "furniture") { this._editSnapshot(); const [mx, my] = this._editPx2Mm(x, y); const hw = 350, hh = 250; const type = Number(this._editEl.furn.value); this._edit.furniture.push({ type, id: 0, angle: 0, vertexs: [[mx - hw, my - hh], [mx + hw, my - hh], [mx + hw, my + hh], [mx - hw, my + hh]] }); this._edit.sel = { kind: "furniture", i: this._edit.furniture.length - 1 }; this._editDraw(); return; }
@@ -712,6 +750,12 @@ class TapoRV30Panel extends HTMLElement {
     if (this._edit.tool === "virtual_wall") { (this._edit.areas.virtual_wall ||= []).push({ id: 0, vertexs: [[ax, ay], [bx, by]] }); }
     else { const t = this._edit.tool; (this._edit.areas[t] ||= []).push({ id: 0, vertexs: [[ax, ay], [bx, ay], [bx, by], [ax, by]] }); }
     this._editDraw();
+  }
+
+  _editCancel() {
+    if (!this._edit) return;
+    this._edit.moving = false; this._edit.moveFrom = null;
+    if (this._edit.drag) { this._edit.drag = null; this._editDraw(); }
   }
 
   _editHit(x, y) {
@@ -746,7 +790,9 @@ class TapoRV30Panel extends HTMLElement {
     const supported = vac.attributes.remote_control !== false;
     const text = st ? st.state : vac.state, remote = text === "Remote Control";
     const sweep = r.switches.find((id) => /sweep_walk|clean_while/.test(id)), sw = sweep ? this._st(sweep) : null;
-    if (!pane.querySelector(".dpad")) {
+    // Rebuilt when its stop handlers were torn down (robot or tab switch, or the panel detached),
+    // so a held direction always has a blur and stop path back.
+    if (!pane.querySelector(".dpad") || !this._stopDrive) {
       if (!supported) { pane.innerHTML = `<ha-card><div class="card"><div class="empty">This robot has no remote control.</div></div></ha-card>`; return; }
       pane.innerHTML = `<ha-card><div class="card" tabindex="0">
         <h3><span>Drive</span><span class="actions"><button class="btn primary take"><ha-icon icon="mdi:gamepad-variant"></ha-icon>Take control</button><button class="btn give" hidden><ha-icon icon="mdi:hand-back-left"></ha-icon>Hand back</button></span></h3>
@@ -849,19 +895,30 @@ class TapoRV30Panel extends HTMLElement {
     if (this._planUnsub) { try { this._planUnsub(); } catch (e) { /* already closed */ } }
     this._planUnsub = null; this._planFor = null; this._planTok = null;
   }
-  connectedCallback() { if (this._booted && this._hass && this._tab === "planner") this._ensurePlanSub(); }
-  disconnectedCallback() { this._dropPlanSub(); this._teardownDrive(); }
+  connectedCallback() {
+    if (!this._booted || !this._hass) return;
+    if (this._tab === "planner") this._ensurePlanSub();
+    else if (this._tab === "drive") this._update(true);   // the drive pane was emptied on detach: rebuild it with fresh listeners
+  }
+  disconnectedCallback() {
+    this._dropPlanSub();
+    this._teardownDrive();   // stops any driving
+    if (this._tab === "drive") { const pane = this.shadowRoot.querySelector(".pane"); if (pane) pane.innerHTML = ""; }
+  }
 
   async _planWS(msg) {
+    // A reply that lands after a robot switch belongs to the old robot: never draw it under the new one.
+    const robot = this._robot, gen = this._robotGen, stale = () => this._robot !== robot || this._robotGen !== gen;
     try {
-      const res = await this._hass.callWS({ entity_id: this._robot, ...msg });
+      const res = await this._hass.callWS({ entity_id: robot, ...msg });
+      if (stale()) return res;
       const view = res && (res.view || (res.rooms ? res : null));
       if (view) { this._plan = view; this._planRev = (this._planRev || 0) + 1; this._renderRight(false); }
       return res;
     } catch (e) {
       this.dispatchEvent(new CustomEvent("hass-notification", { detail: { message: (e && e.message) || "The planner refused that" }, bubbles: true, composed: true }));
       // Put the controls back to what the planner really holds, so a refused change does not look saved.
-      if (this._tab === "planner") this._renderRight(true);
+      if (!stale() && this._tab === "planner") this._renderRight(true);
       return null;
     }
   }
@@ -893,7 +950,7 @@ class TapoRV30Panel extends HTMLElement {
       if (this._planOpen === r.key) {
         const chosen = new Set(r.sensors.map((s) => s.entity_id));
         editor = `<div class="sensors"><div class="chips">${v.sensors.map((s) => `<button class="chip ${chosen.has(s.entity_id) ? "on" : ""}" data-sensor="${esc(s.entity_id)}" data-room="${esc(r.key)}">${esc(s.name)}${s.area ? ` <span style="opacity:.7">(${esc(s.area)})</span>` : ""}</button>`).join("") || `<span class="note">No motion, occupancy or presence sensors in Home Assistant.</span>`}</div>
-          <div class="c" style="display:flex;justify-content:space-between;align-items:center;margin-top:10px;font-size:.88em"><span>Ignore motion for this room</span><button class="switch ${r.ignore_occupancy ? "on" : ""}" data-ignore="${esc(r.key)}"></button></div>
+          <div class="c" style="display:flex;justify-content:space-between;align-items:center;margin-top:10px;font-size:.88em"><span>Ignore motion for this room</span>${toggle(r.ignore_occupancy, `Ignore motion for ${r.name}`, `data-ignore="${esc(r.key)}"`)}</div>
           <p class="note">Sensors from the room's area are picked for you; tap to add others or drop one (a sensor the pets set off, say).</p></div>`;
       }
       return `<div class="proom">
@@ -912,7 +969,7 @@ class TapoRV30Panel extends HTMLElement {
       return `<div class="e"><b>${esc(when)}</b><span>${esc(e.text)}</span></div>`; }).join("");
     pane.innerHTML = `
       <ha-card><div class="card">
-        <h3><span>Planner</span><button class="switch ${on ? "on" : ""}" data-set="enabled"></button></h3>
+        <h3><span>Planner</span>${toggle(on, "Planner", `data-set="enabled"`)}</h3>
         <div class="plan-next">${esc(v.status)}</div>
         ${admin ? "" : `<div class="note" style="margin:0 0 6px">Only an administrator can change the planner.</div>`}
         <div class="plan-sub">${on ? "Keeps each room within its target: it cleans the due rooms when the conditions below allow." : "Turn it on to keep rooms clean by how long ago they were done, instead of fixed times."}</div>
@@ -920,18 +977,18 @@ class TapoRV30Panel extends HTMLElement {
         <div class="actions" style="justify-content:flex-start;margin-top:12px;flex-wrap:wrap">
           <button class="btn primary" data-act="clean_now" ${v.due.length ? "" : "disabled"}><ha-icon icon="mdi:play"></ha-icon>Clean due rooms now</button>
           <button class="btn" data-act="skip_today" data-on="${v.skip_today ? "0" : "1"}"><ha-icon icon="mdi:calendar-remove"></ha-icon>${v.skip_today ? "Back on today" : "Skip today"}</button></div>
-        <div class="banner" ${c.preview ? "" : "hidden"}><ha-icon icon="mdi:eye-outline"></ha-icon><span class="grow">Preview mode: the planner logs what it would do and never starts the robot. Turn preview off when the log looks right.</span><button class="switch on" data-set="preview"></button></div>
-        <div class="banner" ${c.preview ? "hidden" : ""}><ha-icon icon="mdi:robot-vacuum"></ha-icon><span class="grow">The planner starts the robot when rooms are due. Preview mode only logs instead.</span><button class="switch" data-set="preview"></button></div>
+        <div class="banner" ${c.preview ? "" : "hidden"}><ha-icon icon="mdi:eye-outline"></ha-icon><span class="grow">Preview mode: the planner logs what it would do and never starts the robot. Turn preview off when the log looks right.</span>${toggle(true, "Preview mode", `data-set="preview"`)}</div>
+        <div class="banner" ${c.preview ? "hidden" : ""}><ha-icon icon="mdi:robot-vacuum"></ha-icon><span class="grow">The planner starts the robot when rooms are due. Preview mode only logs instead.</span>${toggle(false, "Preview mode", `data-set="preview"`)}</div>
       </div></ha-card>
       ${v.unmapped.length ? `<ha-card><div class="card"><div class="banner" style="margin:0"><ha-icon icon="mdi:link-variant"></ha-icon><span class="grow">Not linked to a Home Assistant area: ${esc(v.unmapped.join(", "))}. Linked rooms use the motion sensors in their area.</span></div>
         <div class="actions" style="justify-content:flex-start;margin-top:10px;flex-wrap:wrap"><button class="btn" data-act="match_areas"><ha-icon icon="mdi:auto-fix"></ha-icon>Match by name</button><button class="btn" data-mapping><ha-icon icon="mdi:cog"></ha-icon>Map rooms to areas</button></div></div></ha-card>` : ""}
       <ha-card><div class="card"><h3><span>Rooms</span><span class="plan-sub">how fresh each room is against its target</span></h3>${rooms || `<div class="empty">No rooms on the current map.</div>`}</div></ha-card>
       <ha-card><div class="card"><h3><span>Only clean when</span></h3><div class="cond">
-        <div class="c"><span>Nobody is home<small>${v.people.length ? "tap people to leave someone out" : "no people in Home Assistant"}</small></span><button class="switch ${c.require_away ? "on" : ""}" data-set="require_away"></button></div>
+        <div class="c"><span>Nobody is home<small>${v.people.length ? "tap people to leave someone out" : "no people in Home Assistant"}</small></span>${toggle(c.require_away, "Only clean when nobody is home", `data-set="require_away"`)}</div>
         ${c.require_away && v.people.length ? `<div class="chips people">${people}</div>` : ""}
-        <div class="c"><span>Leave out rooms in use<small>motion counts as in use for a while after it stops</small></span><span class="ctl"><select data-num="clear_minutes">${opt([0, 5, 10, 15, 30, 60], c.clear_minutes, (n) => `${n} min`)}</select><button class="switch ${c.skip_in_use ? "on" : ""}" data-set="skip_in_use"></button></span></div>
+        <div class="c"><span>Leave out rooms in use<small>motion counts as in use for a while after it stops</small></span><span class="ctl"><select data-num="clear_minutes">${opt([0, 5, 10, 15, 30, 60], c.clear_minutes, (n) => `${n} min`)}</select>${toggle(c.skip_in_use, "Leave out rooms in use", `data-set="skip_in_use"`)}</span></div>
         <div class="c"><span>Battery at least<small>it waits on the dock below this</small></span><select data-num="min_battery">${opt([0, 20, 30, 40, 50, 60, 80], c.min_battery, (n) => (n ? `${n}%` : "any"))}</select></div>
-        <div class="c"><span>Not near the robot's own schedules<small>holds off when one starts within the hour</small></span><button class="switch ${c.avoid_schedules ? "on" : ""}" data-set="avoid_schedules"></button></div>
+        <div class="c"><span>Not near the robot's own schedules<small>holds off when one starts within the hour</small></span>${toggle(c.avoid_schedules, "Not near the robot's own schedules", `data-set="avoid_schedules"`)}</div>
         <div class="c"><span>Outside Do Not Disturb<small>always: the robot would refuse anyway</small></span><span class="plan-sub">always</span></div>
         <div class="c"><span>Weekdays<small>when it may start</small></span><span class="ctl"><input type="time" data-win="weekdays" data-i="0" value="${esc(w.weekdays[0])}"> to <input type="time" data-win="weekdays" data-i="1" value="${esc(w.weekdays[1])}"></span></div>
         <div class="c"><span>Weekends</span><span class="ctl"><input type="time" data-win="weekends" data-i="0" value="${esc(w.weekends[0])}"> to <input type="time" data-win="weekends" data-i="1" value="${esc(w.weekends[1])}"></span></div>
@@ -947,8 +1004,9 @@ class TapoRV30Panel extends HTMLElement {
     q("[data-num]").forEach((s) => s.onchange = () => this._planSet({ [s.dataset.num]: Number(s.value) }));
     q("[data-win]").forEach((i) => i.onchange = () => {
       if (!i.value) return;
-      const pair = [...w[i.dataset.win]]; pair[Number(i.dataset.i)] = i.value;
-      this._planSet({ windows: { [i.dataset.win]: pair } });
+      // Both ends as the inputs hold them now: the pair captured at render is stale after the first change.
+      const win = i.dataset.win, pair = [0, 1].map((n) => (pane.querySelector(`[data-win="${win}"][data-i="${n}"]`) || {}).value || w[win][n]);
+      this._planSet({ windows: { [win]: pair } });
     });
     q("[data-ret]").forEach((b) => b.onclick = () => this._planSet({ on_return: b.dataset.ret }));
     q("[data-edit]").forEach((b) => b.onclick = () => { this._planOpen = this._planOpen === b.dataset.edit ? null : b.dataset.edit; this._renderRight(false); });
@@ -1004,7 +1062,7 @@ class TapoRV30Panel extends HTMLElement {
           <div class="s">${esc(b.when)} · ${kb} KB${sub ? " · " + esc(sub) : ""}</div>
           <div class="acts">
             <button class="btn bkview" data-i="${i}"><ha-icon icon="mdi:eye"></ha-icon>View</button>
-            <button class="go bkrestore" data-i="${i}"><ha-icon icon="mdi:backup-restore"></ha-icon>Restore</button>
+            <button class="btn primary bkrestore" data-i="${i}"><ha-icon icon="mdi:backup-restore"></ha-icon>Restore</button>
           </div></div></div>`;
     }).join("");
     grid.querySelectorAll(".thumb[data-i], .bkview").forEach((el) => el.onclick = () => this._backupView(list[+el.dataset.i]));
@@ -1105,7 +1163,7 @@ class TapoRV30Panel extends HTMLElement {
   // ---- settings ------------------------------------------------------------------------
   _paneSettings(pane) {
     const r = this._related(this._robot), vac = this._st(this._robot), strip = (n) => n.replace(vac.attributes.friendly_name + " ", "");
-    const sw = r.switches.map((id) => { const s = this._st(id); return `<div class="row"><div class="main"><div class="t">${esc(strip(s.attributes.friendly_name))}</div></div><button class="switch ${s.state === "on" ? "on" : ""}" data-sw="${esc(id)}"></button></div>`; }).join("");
+    const sw = r.switches.map((id) => { const s = this._st(id); return `<div class="row"><div class="main"><div class="t">${esc(strip(s.attributes.friendly_name))}</div></div>${toggle(s.state === "on", strip(s.attributes.friendly_name), `data-sw="${esc(id)}"`)}</div>`; }).join("");
     const sel = r.selects.map((id) => { const s = this._st(id); return `<div class="row"><div class="main"><div class="t">${esc(strip(s.attributes.friendly_name))}</div></div><select data-sel="${esc(id)}">${(s.attributes.options || []).map((o) => `<option ${o === s.state ? "selected" : ""}>${esc(o)}</option>`).join("")}</select></div>`; }).join("");
     const num = r.numbers.map((id) => { const s = this._st(id); return `<div class="row"><div class="main"><div class="t">${esc(strip(s.attributes.friendly_name))}</div><div class="s">${esc(s.state)} ${esc(s.attributes.unit_of_measurement || "")}</div></div><input type="range" data-num="${esc(id)}" min="${s.attributes.min}" max="${s.attributes.max}" step="${s.attributes.step || 1}" value="${esc(s.state)}"></div>`; }).join("");
     const tim = r.times.map((id) => { const s = this._st(id); return `<div class="row"><div class="main"><div class="t">${esc(strip(s.attributes.friendly_name))}</div></div><input type="time" data-time="${esc(id)}" value="${esc(String(s.state).slice(0, 5))}"></div>`; }).join("");

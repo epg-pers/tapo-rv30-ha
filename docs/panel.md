@@ -69,7 +69,7 @@ are view-only for now. Behind the scenes this is the robot's own editing API (`s
 
 Every map backup Home Assistant holds, as a grid of thumbnails. Tap one to see it full size, or
 press **Restore** to put it back on the robot (docked and idle). **Fetch from cloud** downloads
-your latest TP-Link backups into `config/tapo_rv30/map_backups` without leaving the page. Each
+your latest TP-Link backups into `config/tapo_rv30/map_backups/<robot>` without leaving the page. Each
 backup is pictured from the robot's own snapshot or the saved map drawn like the live map, and
 its `.bkmap` is decoded to show the explored floor area, dock and room count. See
 [map backup and recovery](map-recovery.md) for the detail.

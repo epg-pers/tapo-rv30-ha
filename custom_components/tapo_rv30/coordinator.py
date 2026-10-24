@@ -15,6 +15,7 @@ from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+from homeassistant.util import dt as dt_util
 from PIL import Image, ImageDraw
 
 from . import mapsnapshot
@@ -122,6 +123,8 @@ class TapoCoordinator(DataUpdateCoordinator):
         self._setting_keys: set[str] | None = None     # settings keys the entities were set up with
         self._reload_asked = False
         self._room_name_cache: dict[int, dict[int, str]] = {}
+        self._robot_region: str | None = None
+        self._robot_tz = None                          # the robot's own time zone, when it says
         self._finishing = False
         self._caps_fetched = False
         self._caps_attempts = 0
@@ -156,6 +159,16 @@ class TapoCoordinator(DataUpdateCoordinator):
     @property
     def status_code(self) -> int | None:
         return (self.data or {}).get("status_code")
+
+    def robot_now(self):
+        """Now on the robot's own clock: its schedules and Do Not Disturb are kept in its
+        region, which need not be Home Assistant's."""
+        return dt_util.now(self._robot_tz) if self._robot_tz else dt_util.now()
+
+    @property
+    def map_busy(self) -> str | None:
+        """Like busy, but for writes to the robot's maps: also refused while it drives home."""
+        return self.busy or ("returning" if self.status_code == 4 else None)
 
     @property
     def busy(self) -> str | None:
@@ -337,8 +350,14 @@ class TapoCoordinator(DataUpdateCoordinator):
             return
         newest = max(recs, key=lambda r: r.get("timestamp", 0))
         ts = newest.get("timestamp", 0)
-        pending = sorted((r for r in recs if int(r.get("timestamp") or 0) not in self._processed_records),
+        # Records are folded into the active map's rooms. Runs on another map wait (unmarked)
+        # until that map is active again, and nothing is folded while no map is loaded, so
+        # their details are not downloaded again on every poll.
+        pending = sorted((r for r in recs if int(r.get("timestamp") or 0) not in self._processed_records
+                          and r.get("map_id") in (None, self.map_id)),
                          key=lambda r: r.get("timestamp", 0))
+        if self._live_pixels is None:
+            pending = []
         if ts == self._record_rendered_ts and not pending:
             return
         changed = False
@@ -381,6 +400,15 @@ class TapoCoordinator(DataUpdateCoordinator):
             await self._freshness_store.async_save(
                 {"algo": _FRESHNESS_ALGO, "rooms": self.rooms_last_cleaned, "processed": keep})
 
+    def room_freshness_by_id(self) -> dict[int, dict]:
+        """{room id: {last_cleaned, coverage}} for the current map (ids, unlike names, are unique)."""
+        out = {}
+        for key, v in self.rooms_last_cleaned.items():
+            mid, _, rid = key.partition(":")
+            if mid == str(self.map_id) and rid.isdigit():
+                out[int(rid)] = {"last_cleaned": v.get("last_cleaned"), "coverage": v.get("coverage")}
+        return out
+
     def room_freshness(self) -> dict[str, dict]:
         """{room name: {last_cleaned, coverage}} for the current map."""
         out = {}
@@ -390,6 +418,16 @@ class TapoCoordinator(DataUpdateCoordinator):
         return out
 
     # ---- finishing a lost-map restore ----------------------------------------------------
+    async def _robot_working(self) -> bool:
+        """Ask the robot itself: the finish can start before this poll's status is stored
+        (on the first poll after a restart there is none), and it must never switch maps
+        under a robot that is cleaning or driving home."""
+        try:
+            code = await self.hass.async_add_executor_job(self.client._status)
+        except Exception:
+            return True
+        return code in CLEANING_CODES or code in PAUSED_CODES or code == 4
+
     def _ask_reload(self, why: str) -> None:
         """Entities are created once, at setup: reload the entry (once) so ones for
         settings or dock actions that only answered later get created."""
@@ -436,7 +474,7 @@ class TapoCoordinator(DataUpdateCoordinator):
             return
         if m.get("saved"):
             self._finishing = True
-            self.hass.async_create_task(self.async_finish_restore())
+            self._background(self.async_finish_restore(), "finish restore")
 
     async def async_finish_restore(self) -> dict | None:
         """Put the restored map's layers back from its saved setup, then tell the user."""
@@ -452,11 +490,11 @@ class TapoCoordinator(DataUpdateCoordinator):
         result = None
         try:
             snap = await self.hass.async_add_executor_job(
-                setup_apply.find_snapshot, setup_apply.snapshots_folder(self.hass), pend["map_id"], None)
+                setup_apply.find_snapshot, setup_apply.snapshot_folders(self.hass, self), pend["map_id"], None)
             if snap is None:
                 msg = (f"{name} is restored and saved. There was no saved map setup for it, so put room names "
                        "and zones back by hand.")
-            elif self.busy:
+            elif self.map_busy or await self._robot_working():
                 return None   # try again on a later poll, once docked
             else:
                 result = await setup_apply.apply_setup(self.hass, self, pend["map_id"], snap)
@@ -572,6 +610,10 @@ class TapoCoordinator(DataUpdateCoordinator):
         fw = (self.settings.get("device") or {}).get("fw_ver")
         if fw:
             self.fw_version = fw
+        region = (self.settings.get("clock") or {}).get("region")
+        if region and region != self._robot_region:
+            self._robot_region = region
+            self._robot_tz = await dt_util.async_get_time_zone(region)
         self._note_setting_keys()
         other_maps = await self.hass.async_add_executor_job(self._schedule_map_names)
         self._decode_schedules(other_maps)
@@ -627,7 +669,8 @@ class TapoCoordinator(DataUpdateCoordinator):
         digest = mapsnapshot.content_hash(snap)
         if self._snapshot_hash.get(snap["map_id"]) == digest:
             return
-        folder = self.hass.config.path(DOMAIN, "map_setups")
+        from . import setup_apply
+        folder = setup_apply.snapshots_folder(self.hass, self)
 
         def _write() -> str:
             import json
@@ -635,12 +678,15 @@ class TapoCoordinator(DataUpdateCoordinator):
             os.makedirs(os.path.join(folder, "history"), exist_ok=True)
             latest = os.path.join(folder, f"{snap['map_id']}.json")
             old = None
-            if os.path.exists(latest):
-                try:
-                    with open(latest) as fh:
-                        old = json.load(fh)
-                except (OSError, ValueError):
-                    old = None
+            # Before 0.28 setups lived in the shared folder; that copy still guards against
+            # a degraded snapshot replacing a good one.
+            for path in (latest, os.path.join(os.path.dirname(folder), f"{snap['map_id']}.json")):
+                if old is None and os.path.exists(path):
+                    try:
+                        with open(path) as fh:
+                            old = json.load(fh)
+                    except (OSError, ValueError):
+                        old = None
             if old is not None and mapsnapshot.content_hash(old) == digest:
                 return "unchanged"
             stamp = time.strftime("%Y%m%d-%H%M%S")
@@ -896,14 +942,24 @@ class TapoCoordinator(DataUpdateCoordinator):
         for m in map_list:
             map_id = m["map_id"]
             names[map_id] = b64name(m.get("map_name", ""))
-            data = self.client.get_map_data(map_id)
+            try:
+                data = self.client.get_map_data(map_id)
+            except Exception as exc:
+                # One unreadable map (the robot refuses reads while moving) must not stop a
+                # clean of rooms on another; its rooms are simply not offered this time.
+                if map_id == current_id:
+                    raise
+                _LOGGER.debug("Map %s unreadable for clean_area: %s", map_id, exc)
+                continue
             known[map_id] = {a["id"] for a in data.get("area_list", []) if a.get("type") == "room"}
         return current_id, known, names
 
     def resolve_rooms_live(
-        self, name_patterns: list[str], map_name: str | None = None
+        self, name_patterns: list[str], map_name: str | None = None,
+        map_id: int | None = None, room_ids: list[int] | None = None,
     ) -> tuple[list[int], int]:
-        """Resolve room names against the vacuum's live map list -> (room_ids, map_id)."""
+        """Resolve room names (or check room ids) against the vacuum's live maps ->
+        (room_ids, map_id)."""
         current_map_id, map_list = self.client.get_map_info()
         return resolve_rooms(current_map_id, map_list, self.client.get_map_data,
-                             name_patterns, map_name)
+                             name_patterns, map_name, map_id, room_ids)

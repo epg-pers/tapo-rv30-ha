@@ -106,8 +106,8 @@ Assist understands the robot out of the box, no sentences to write:
 - "stop the vacuum", "pause the robot"
 
 Room names are matched against the robot's current map (partial matches work), and the reply
-says what it did or which room it did not recognise. With more than one robot, say its name in
-the sentence.
+says what it did or which room it did not recognise. With more than one robot, say its name
+("tell Jarvis to clean the kitchen", "send Jarvis home"); see [automations](docs/automations.md).
 
 ## Automations
 

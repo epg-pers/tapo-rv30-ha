@@ -69,7 +69,7 @@ class TapoCleanPassesSelect(_TapoSelectBase):
         d = self.coordinator.data
         if d is None:
             return None
-        return str(d.get("clean_number", 1))
+        return None if d.get("clean_number") is None else str(d["clean_number"])
 
     async def async_select_option(self, option: str) -> None:
         await self._call(self.coordinator.client.set_passes, int(option))
@@ -90,7 +90,7 @@ class TapoWaterLevelSelect(_TapoSelectBase):
         d = self.coordinator.data
         if d is None:
             return None
-        return WATER_INT_TO_NAME.get(d.get("cistern", 0), "off")
+        return None if d.get("cistern") is None else WATER_INT_TO_NAME.get(d["cistern"], "off")
 
     async def async_select_option(self, option: str) -> None:
         value = WATER_NAME_TO_INT.get(option)

@@ -495,11 +495,24 @@ class TapoVacuumClient:
 
     # ---- SPAKE2+ auth --------------------------------------------------------
     def _discover(self) -> None:
-        # Discovery always starts from the configured https port: a TLS mode or port cached
-        # from before a firmware update must not keep every new handshake failing.
-        self._tls_mode, self._tpap_port = None, None
+        # Discovery always starts from the configured https port: a port cached from before a
+        # firmware update must not keep every new handshake failing. A robot last seen with the
+        # pinned certificate (mode 2) is asked through the pin first, so a re-handshake cannot
+        # be steered by someone answering discovery in its place; only if the pin no longer
+        # matches is it asked again without (and the downgrade logged).
+        was_pinned = self._tls_mode == 2
+        self._tls_mode, self._tpap_port = (2 if was_pinned else None), None
         self._apply_tls_mode()
-        d = self._post("/", {"method": "login", "params": {"sub_method": "discover"}})
+        try:
+            d = self._post("/", {"method": "login", "params": {"sub_method": "discover"}})
+        except requests.exceptions.SSLError:
+            if not was_pinned:
+                raise
+            _LOGGER.warning("TPAP: %s no longer presents the pinned TP-Link certificate; "
+                            "continuing without certificate checks", self.host)
+            self._tls_mode = None
+            self._apply_tls_mode()
+            d = self._post("/", {"method": "login", "params": {"sub_method": "discover"}})
         _raise_for_error(d, "discover")
         r = d["result"]
         tpap = r.get("tpap") or {}
@@ -808,10 +821,11 @@ class TapoVacuumClient:
             "error_codes":  vac.get("err_status") or [0],
             "prompts":      list(vac.get("prompt") or []),
             "prompt_ids":   list(vac.get("promptCode_id") or []),
-            "battery":      batt.get("battery_percentage", 0),
-            "suction":      attr.get("suction", 4),
-            "cistern":      attr.get("cistern", 0),
-            "clean_number": attr.get("clean_number", 1),
+            # None when the robot did not answer: shown as unknown, not as an invented 0% / Max.
+            "battery":      batt.get("battery_percentage"),
+            "suction":      attr.get("suction"),
+            "cistern":      attr.get("cistern"),
+            "clean_number": attr.get("clean_number"),
             "mop_attached": mop.get("mop_state", False),
             "clean_area":   info.get("clean_area", 0),
             "clean_time":   info.get("clean_time", 0),
@@ -973,10 +987,10 @@ class TapoVacuumClient:
         """suction / cistern / clean_number for the next runs (what the app's clean page sets).
         Read and write under the session lock so two entity writes running in parallel
         executor threads cannot put a stale copy of each other's field back."""
-        with self._lock:
-            cur = self.send("getCleanAttr", {"type": "global"})["result"]
-            cur.update(levels); cur["type"] = "global"
-            self.send("setCleanAttr", cur)
+        # Only the changed keys: a partial body is accepted (verified on 1.3.3), and echoing
+        # the whole read back could carry flags such as is_custom that make the robot
+        # ignore the levels.
+        self.send("setCleanAttr", {"type": "global", **levels})
 
     def clean_rooms(self, room_ids: list[int], map_id: int, clean_order: bool = True,
                     levels: dict | None = None) -> None:
@@ -1064,23 +1078,31 @@ class TapoVacuumClient:
         # Before the default levels are changed: a busy robot would refuse the clean anyway.
         self._require_idle("running a schedule")
         attr = rule.get("clean_attr") or {}
+        # The schedule's levels go in as the robot's defaults (there is no per-run setting for
+        # a replayed schedule); if the start then fails, the previous defaults are put back.
         with self._lock:
-            cur = self.send("getCleanAttr", {"type": "global"})["result"]
-            for key in ("suction", "cistern", "clean_number"):
-                if attr.get(key) is not None:
-                    cur[key] = attr[key]
-            cur["type"] = "global"
-            self.send("setCleanAttr", cur)
-        map_id = attr.get("map_id")
-        if map_id is None:
-            map_id, _ = self.get_map_info()
-        order = attr.get("clean_order", True)
-        if attr.get("custom_rule_id") is not None:
-            self.clean_custom_rule(attr["custom_rule_id"], map_id, order)
-        elif attr.get("room_list"):
-            self.clean_rooms(attr["room_list"], map_id, order)
-        else:
-            self.start()
+            before = self.send("getCleanAttr", {"type": "global"})["result"]
+            levels = {k: attr[k] for k in ("suction", "cistern", "clean_number") if attr.get(k) is not None}
+            if levels:
+                self.send("setCleanAttr", {"type": "global", **levels})
+        try:
+            map_id = attr.get("map_id")
+            if map_id is None:
+                map_id, _ = self.get_map_info()
+            order = attr.get("clean_order", True)
+            if attr.get("custom_rule_id") is not None:
+                self.clean_custom_rule(attr["custom_rule_id"], map_id, order)
+            elif attr.get("room_list"):
+                self.clean_rooms(attr["room_list"], map_id, order)
+            else:
+                self.start()
+        except Exception:
+            if levels:
+                try:
+                    self.send("setCleanAttr", {"type": "global", **{k: before[k] for k in levels if k in before}})
+                except Exception as exc:
+                    _LOGGER.debug("Could not put the default levels back: %s", exc)
+            raise
 
     def pause(self) -> None:
         if self._status() == 4:
@@ -1152,7 +1174,8 @@ class TapoVacuumClient:
                  ("schedules", "get_schedule_rules", {"start_index": 0}),
                  ("firmware", "get_latest_fw", None), ("device", "get_device_info", None),
                  ("auto_update", "getAutoUpdateInfo", None),
-                 ("matter_status", "getCommissionedStatus", None), ("matter_setup", "getMatterSetupInfo", None))
+                 ("matter_status", "getCommissionedStatus", None), ("matter_setup", "getMatterSetupInfo", None),
+                 ("clock", "getDeviceTime", None))
 
     def get_settings(self) -> dict:
         """Slow-changing settings; a getter the model doesn't support is just left out."""

@@ -6,6 +6,7 @@ import asyncio
 import glob
 import json
 import os
+import re
 from typing import Any
 
 from . import mapsnapshot
@@ -20,29 +21,56 @@ class ApplyError(Exception):
         self.written = written
 
 
-def snapshots_folder(hass) -> str:
-    return hass.config.path(DOMAIN, "map_setups")
+def robot_key(coord) -> str:
+    """Folder name for one robot's files: its MAC (stable across re-adding the integration),
+    else its config entry id."""
+    mac = ((coord.settings or {}).get("device") or {}).get("mac") or coord.device_mac
+    if mac:
+        return re.sub(r"[^0-9a-f]", "", str(mac).lower())
+    return coord.entry.entry_id if coord.entry else "robot"
 
 
-def find_snapshot(folder: str, map_id: int | None, ref=None) -> dict | None:
-    """The saved snapshot for map_id, or (ref given) the one whose saved id or name matches.
-    Blocking."""
+def snapshots_folder(hass, coord) -> str:
+    """Where this robot's map setups are written."""
+    return os.path.join(hass.config.path(DOMAIN, "map_setups"), robot_key(coord))
+
+
+def snapshot_folders(hass, coord) -> list[str]:
+    """Where this robot's map setups are read from: its own folder, then the shared folder
+    versions before 0.28 wrote every robot's setups to."""
+    return [snapshots_folder(hass, coord), hass.config.path(DOMAIN, "map_setups")]
+
+
+def backups_folder(hass, coord) -> str:
+    return os.path.join(hass.config.path(DOMAIN, "map_backups"), robot_key(coord))
+
+
+def backup_folders(hass, coord) -> list[str]:
+    return [backups_folder(hass, coord), hass.config.path(DOMAIN, "map_backups")]
+
+
+def find_snapshot(folders, map_id: int | None, ref=None) -> dict | None:
+    """The saved snapshot for map_id, or (ref given) the one whose saved id or name matches,
+    looking in each folder in turn. Blocking."""
     from .mapdata import fold
-    if ref in (None, ""):
-        p = os.path.join(folder, f"{map_id}.json")
-        if not os.path.exists(p):
-            return None
-        with open(p) as fh:
-            return json.load(fh)
-    want = fold(str(ref).strip())
-    for p in sorted(glob.glob(os.path.join(folder, "*.json"))):
-        try:
-            with open(p) as fh:
-                d = json.load(fh)
-        except (OSError, ValueError):
+    if isinstance(folders, str):
+        folders = [folders]
+    for folder in folders:
+        if ref in (None, ""):
+            p = os.path.join(folder, f"{map_id}.json")
+            if os.path.exists(p):
+                with open(p) as fh:
+                    return json.load(fh)
             continue
-        if str(d.get("map_id")) == want or fold(d.get("map_name") or "") == want:
-            return d
+        want = fold(str(ref).strip())
+        for p in sorted(glob.glob(os.path.join(folder, "*.json"))):
+            try:
+                with open(p) as fh:
+                    d = json.load(fh)
+            except (OSError, ValueError):
+                continue
+            if str(d.get("map_id")) == want or fold(d.get("map_name") or "") == want:
+                return d
     return None
 
 
@@ -72,16 +100,17 @@ async def apply_setup(hass, coord, map_id: int, snap: dict, dry_run: bool = Fals
         return result
     # setAreaInfo writes the active map; switch to the target first, and back afterwards so
     # the next clean does not start on the wrong floor.
-    info = await hass.async_add_executor_job(client.send, "getMapInfo")
-    current = (info.get("result") or {}).get("current_map_id")
-    previous = None
-    if current != map_id:
-        previous = current
-        await hass.async_add_executor_job(client.set_current_map, map_id)
-        await asyncio.sleep(5)
     written: dict[str, int] = {}
     skipped = list(plan["skipped"])
+    previous = None
     try:
+        info = await hass.async_add_executor_job(client.send, "getMapInfo")
+        current = (info.get("result") or {}).get("current_map_id")
+        if current != map_id:
+            # Remembered before the switch: if its reply is lost the robot may have switched.
+            previous = current
+            await hass.async_add_executor_job(client.set_current_map, map_id)
+            await asyncio.sleep(5)
         if plan["rooms"]:
             written["room"] = await hass.async_add_executor_job(client.set_areas, map_id, "room", plan["rooms"])
         for t, items in plan["zones"].items():

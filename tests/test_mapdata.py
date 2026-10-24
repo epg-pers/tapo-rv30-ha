@@ -159,3 +159,20 @@ def test_pick_segments_drops_stale_and_prefers_active_map():
         pick_segments(["99:1", "5"], known, 10)
     # duplicates collapse
     assert pick_segments(["10:1", "10:1"], known, 10)[1] == [1]
+
+
+def test_resolve_by_room_ids_and_map_id():
+    from custom_components.tapo_rv30.mapdata import RoomNotFound
+    assert resolve_rooms(3, MAPS, get_map_data, [], None, None, [2, 2, 4]) == ([2, 4], 3)
+    assert resolve_rooms(3, MAPS, get_map_data, ["Landing"], None, 7) == ([2], 7)   # by id, not name
+    with pytest.raises(RoomNotFound, match="No room with id"):
+        resolve_rooms(3, MAPS, get_map_data, [], None, None, [9])
+
+
+def test_schedule_soon_sees_a_schedule_just_after_midnight():
+    from datetime import datetime
+
+    from custom_components.tapo_rv30.planlogic import schedule_soon
+    s = {"enabled": True, "time": "00:15", "days": ["Tue"]}
+    assert schedule_soon(datetime(2026, 10, 26, 23, 45), [s]) == s       # Monday 23:45
+    assert schedule_soon(datetime(2026, 10, 25, 23, 45), [s]) is None    # Sunday: not tomorrow's day

@@ -20,6 +20,17 @@ from .tpap import AuthError, TapoVacuumClient, _resend_safe
 _LOGGER = logging.getLogger(__name__)
 
 
+def _never_sent(exc: BaseException) -> bool:
+    """A refused or timed-out connect: the request never reached the robot, so even a write
+    may be sent again. A connection lost after sending is not this."""
+    try:
+        import aiohttp
+    except ImportError:
+        return False
+    kinds = (aiohttp.ClientConnectorError, aiohttp.ConnectionTimeoutError)
+    return any(isinstance(c, kinds) for c in (exc.__cause__, exc.__context__, *exc.args))
+
+
 class _LoopThread:
     """One private asyncio loop per client, so the blocking API the
     coordinator and entities use (via the executor) can drive python-kasa."""
@@ -127,13 +138,13 @@ class AesVacuumClient(TapoVacuumClient):
                 raise
             except Exception as exc:
                 await self._drop()
-                if not safe:
+                if not safe and not _never_sent(exc):
                     raise RuntimeError(f"no reply to {method}; not sent again in case the robot "
                                        "already acted on it, check its state") from exc
-                # Reboot or transient network: reconnect once for a read.
+                # Reboot or transient network (or a write that never left): reconnect, send once more.
                 _LOGGER.debug("%s failed (%s), reconnecting", method, exc)
                 dev = await self._connect()
-                resp = await dev.protocol.query(request)
+                resp = await dev.protocol.query(request, retry_count=3 if safe else 0)
         except AuthenticationError as exc:
             raise AuthError(str(exc)) from exc
         except DeviceError as exc:

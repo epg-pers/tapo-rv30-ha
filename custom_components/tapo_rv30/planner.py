@@ -101,12 +101,22 @@ class TapoPlanner:
         self.room_skips = dict(data.get("room_skips") or {})
         self.ran_window = data.get("ran_window")
         self.preview_names = list(data.get("preview_names") or [])
+        self._preview_window = data.get("preview_window")
+        self._run = data.get("run") or None     # a run in progress survives a restart
+
+    def _data(self) -> dict:
+        return {"config": self.config, "log": self.log, "skip_today": self.skip_today,
+                "room_skips": self.room_skips, "ran_window": self.ran_window,
+                "preview_names": self.preview_names, "preview_window": self._preview_window,
+                "run": self._run}
 
     def _save(self) -> None:
-        self._store.async_delay_save(lambda: {
-            "config": self.config, "log": self.log, "skip_today": self.skip_today,
-            "room_skips": self.room_skips, "ran_window": self.ran_window,
-            "preview_names": self.preview_names}, 2)
+        self._store.async_delay_save(self._data, 2)
+
+    async def async_flush(self) -> None:
+        """Write now (unload): a reload builds a new planner that would otherwise read the
+        file before the delayed save lands, then overwrite it."""
+        await self._store.async_save(self._data())
 
     @callback
     def async_start(self) -> None:
@@ -161,7 +171,9 @@ class TapoPlanner:
         if self._evaluating:
             self._again = True
             return
-        self.hass.async_create_task(self.async_evaluate(reason))
+        # Tied to the config entry so unloading cancels an evaluation in flight.
+        self.entry.async_create_background_task(self.hass, self.async_evaluate(reason),
+                                                f"{DOMAIN} planner {reason}")
 
     # ---- the house ---------------------------------------------------------------------
     @property
@@ -277,7 +289,8 @@ class TapoPlanner:
             robot_error=(data.get("error_codes") or [0])[0] not in (0, None),
             battery=data.get("battery"), dnd=self.coordinator.settings.get("dnd"),
             people_home=home, schedules=list(self.coordinator.schedules or []),
-            skip_today=self.skip_today == today, ran_window=self.ran_window, rooms=rooms)
+            skip_today=self.skip_today == today, ran_window=self.ran_window, rooms=rooms,
+            robot_now=self.coordinator.robot_now())
 
     async def async_evaluate(self, reason: str = "") -> None:
         if self._evaluating:
@@ -318,16 +331,19 @@ class TapoPlanner:
         self.view = self._build_view(snap, d)
         self._notify()
 
-    async def _start(self, snap: Snapshot, keys: list[str], names: list[str], chips: list[str], by: str) -> None:
+    async def _start(self, snap: Snapshot, keys: list[str], names: list[str], chips: list[str], by: str) -> bool:
         map_id = self.coordinator.map_id
         room_ids = [int(k.split(":", 1)[1]) for k in keys]
         try:
             await self.hass.async_add_executor_job(self.coordinator.client.clean_rooms, room_ids, map_id)
         except Exception as exc:
-            self._retry_at = time.time() + RETRY_AFTER_FAILURE
-            self._log("error", f"Could not start cleaning {self._and(names)}: {exc}. Trying again in 15 minutes.")
+            if by == "user":     # a press of Clean now: say so, and do not hold off the planner
+                self._log("error", f"Could not start cleaning {self._and(names)}: {exc}.")
+            else:
+                self._retry_at = time.time() + RETRY_AFTER_FAILURE
+                self._log("error", f"Could not start cleaning {self._and(names)}: {exc}. Trying again in 15 minutes.")
             self._save()
-            return
+            return False
         self.ran_window = window_key(snap.now)
         self._run = {"names": names, "started": time.time(), "dock_after": None, "docked": False,
                      "by": by, "home_at_start": sorted(snap.people_home)}
@@ -337,6 +353,7 @@ class TapoPlanner:
         self._fire("start", None, names=names, by=by)
         self._save()
         await self.coordinator.async_refresh_soon()
+        return True
 
     async def _follow_run(self, snap: Snapshot) -> None:
         """While a planner run is going: notice the end, and dock if someone comes home."""
@@ -347,8 +364,8 @@ class TapoPlanner:
         if code in DOCKED_CODES and time.time() - run["started"] > 120:
             if not run["docked"]:
                 self._log("done", f"Finished cleaning {self._and(run['names'])}.")
-                self._save()
             self._run = None
+            self._save()
             return
         if run["docked"] or self.config.get("on_return") != "finish_room" or not self.config.get("require_away"):
             return
@@ -357,7 +374,9 @@ class TapoPlanner:
         arrived = [p for p in snap.people_home if p not in run.get("home_at_start", [])]
         if code not in CLEANING_CODES or not arrived or run.get("by") == "user":
             return
-        room = self.coordinator.current_room or ""
+        room = self.coordinator.current_room
+        if not room:
+            return      # between rooms: decide once the robot is in one
         if run["dock_after"] is None:
             run["dock_after"] = room
             self._log("return", f"{self._and(arrived)} came home: finishing "
@@ -386,7 +405,8 @@ class TapoPlanner:
                      key=lambda t: -t[0])
         if not due:
             raise PlannerError("Nothing is due")
-        await self._start(snap, [r.key for _, r in due], [r.name for _, r in due], [], by="user")
+        if not await self._start(snap, [r.key for _, r in due], [r.name for _, r in due], [], by="user"):
+            raise PlannerError("The robot did not start; see the planner log")
         await self.async_evaluate("clean_now")
 
     async def async_skip_today(self, on: bool) -> None:

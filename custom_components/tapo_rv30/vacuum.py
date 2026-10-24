@@ -109,7 +109,9 @@ class TapoVacuumEntity(CoordinatorEntity[TapoCoordinator], StateVacuumEntity):
         d = self.coordinator.data
         if d is None:
             return None
-        return FAN_INT_TO_NAME.get(d.get("suction", 4), "Max").capitalize()
+        if d.get("suction") is None:
+            return None
+        return FAN_INT_TO_NAME.get(d["suction"], "Max").capitalize()
 
     @property
     def entity_picture(self) -> str | None:
@@ -125,7 +127,7 @@ class TapoVacuumEntity(CoordinatorEntity[TapoCoordinator], StateVacuumEntity):
         d = self.coordinator.data or {}
         rooms = [b64name(r.get("name", "")) for r in self.coordinator.rooms]
         return {
-            "water_level":   WATER_INT_TO_NAME.get(d.get("cistern", 0), "off"),
+            "water_level":   None if d.get("cistern") is None else WATER_INT_TO_NAME.get(d["cistern"], "off"),
             "clean_passes":  d.get("clean_number", 1),
             "mop_attached":  d.get("mop_attached", False),
             "clean_area":    d.get("clean_area", 0),

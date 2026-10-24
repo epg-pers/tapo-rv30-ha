@@ -35,6 +35,28 @@ def safe_path(folder: str, name: str) -> str | None:
     return path if os.path.isfile(path) else None
 
 
+def scan_all(folders: list[str]) -> list[dict[str, Any]]:
+    """scan() over several folders (the robot's own first, then the shared one older versions
+    used); each entry's "dir" says where it lives. A name seen in an earlier folder wins."""
+    seen, out = set(), []
+    for folder in folders:
+        for e in scan(folder):
+            if e["file"] not in seen:
+                seen.add(e["file"])
+                out.append(e)
+    out.sort(key=lambda e: e["ts"], reverse=True)
+    return out
+
+
+def locate(folders: list[str], name: str) -> str | None:
+    """safe_path() in the first folder that has the file."""
+    for folder in folders:
+        p = safe_path(folder, name)
+        if p:
+            return p
+    return None
+
+
 def scan(folder: str) -> list[dict[str, Any]]:
     """Group the files in the backup folder into one entry per backup, newest first."""
     try:
@@ -62,7 +84,7 @@ def scan(folder: str) -> list[dict[str, Any]]:
         except OSError:
             continue
         entries.append({
-            "file": n, "source": source, "map_id": int(map_id), "ts": int(ts), "size": size,
+            "dir": folder, "file": n, "source": source, "map_id": int(map_id), "ts": int(ts), "size": size,
             "snapshot": snaps.get((map_id, ts)),
             "local_json": locals_.get(map_id, (None,))[0],
         })

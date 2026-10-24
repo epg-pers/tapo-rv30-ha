@@ -71,6 +71,10 @@
         "passes": {
           "name": "Passes",
           "description": "Passes for this run, 1 to 3 (optional)."
+        },
+        "room_ids": {
+          "name": "Room ids",
+          "description": "Room numbers on the map instead of names (as the card sends them); works for unnamed rooms and rooms that share a name."
         }
       }
     },

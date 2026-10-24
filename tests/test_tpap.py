@@ -89,11 +89,12 @@ def test_probe_bool_settings_reports_inconclusive():
     assert complete is False and items[1][0] not in out
 
 
-def test_set_water_reads_and_writes_under_the_lock():
-    c = _client_with_send({"getCleanAttr": {"suction": 2, "cistern": 0, "clean_number": 1},
-                           "setCleanAttr": {}})
+def test_set_water_sends_only_the_changed_level():
+    # A partial setCleanAttr body is accepted (verified on an RV30 Max Plus, 1.3.3); echoing the
+    # read back could carry flags that make the robot ignore the levels.
+    c = _client_with_send({"setCleanAttr": {}})
     c.set_water(3)
-    assert c._calls[-1] == ("setCleanAttr", {"suction": 2, "cistern": 3, "clean_number": 1, "type": "global"})
+    assert c._calls == [("setCleanAttr", {"type": "global", "cistern": 3})]
 
 
 def test_lz4_decompress_is_cached():

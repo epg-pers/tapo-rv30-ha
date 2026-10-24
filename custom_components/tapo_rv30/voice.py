@@ -7,6 +7,7 @@ local or cloud speech front end. Room names are matched against the robot's curr
 from __future__ import annotations
 
 import logging
+import re
 
 from homeassistant.core import HomeAssistant, callback
 
@@ -22,6 +23,8 @@ SENTENCES_ROOMS = [
     f"{CLEAN} [the] {{rooms}}",
     f"[please] {CLEAN} [the] {{rooms}} [please]",
     f"(tell|ask|get) [the] {ROBOT} to {CLEAN} [the] {{rooms}}",
+    # A robot by name ("tell Jarvis to clean the kitchen") is added at registration, from the
+    # names of the robots set up, so it can never catch "send the parcel home".
 ]
 SENTENCES_ALL = [
     f"{CLEAN} (everywhere|everything|[the] (whole|entire) (house|home|flat|floor|place))",
@@ -41,23 +44,54 @@ _WHOLE = {"everywhere", "everything", "whole house", "entire house", "whole home
 _HOME = {"go home", "home", "dock", "return to dock", "return to the dock", "return to base",
          "return to the base", "back"}
 _STOP = {"stop", "halt"}
+_PAUSE = {"pause"}
 
 
 def _coordinators(hass: HomeAssistant) -> list:
     return list((hass.data.get(DOMAIN) or {}).values())
 
 
-def _pick(hass: HomeAssistant, text: str):
-    """The robot the sentence is about: by name if several, else the only one."""
+def _named(coords: list, text: str):
+    low = fold(text or "")
+    hits = [c for c in coords if fold(c.device_name) and fold(c.device_name) in low]
+    return hits[0] if len(hits) == 1 else None
+
+
+def _pick(hass: HomeAssistant, text: str, rooms: list[str] | None = None, active: bool = False):
+    """The robot the sentence is about: the only one; or the one named in it; or, with
+    several, the only one that has all the rooms asked for (or, for stop / pause / home, the
+    only one that is working). None when that still leaves a choice."""
     coords = _coordinators(hass)
-    if not coords:
-        return None
-    if len(coords) > 1:
-        low = fold(text)
-        for c in coords:
-            if fold(c.device_name) in low:
-                return c
-    return coords[0]
+    if len(coords) <= 1:
+        return coords[0] if coords else None
+    named = _named(coords, text)
+    if named is not None:
+        return named
+    if rooms:
+        have = [c for c in coords
+                if all(any(fold(w) in fold(r.get("name_text") or "") for r in c.rooms_named()) for w in rooms)]
+        if len(have) == 1:
+            return have[0]
+    if active:
+        working = [c for c in coords if c.busy or c.status_code == 4]
+        if len(working) == 1:
+            return working[0]
+    return None
+
+
+def _which(hass: HomeAssistant) -> str:
+    names = [c.device_name for c in _coordinators(hass)]
+    return (f"Which robot: {' or '.join(names)}? Say its name, for example "
+            f"\"tell {names[0]} to clean the kitchen\" or \"send {names[0]} home\".")
+
+
+def _clean_phrase(phrase: str, hass: HomeAssistant) -> str:
+    """Drop a trailing "please" and a "with <robot>" naming the robot from a room phrase."""
+    p = re.sub(r"[\s,]+please[.!]*$", "", phrase.strip(), flags=re.I)
+    m = re.search(r"\s+(with|using)\s+(the\s+)?(.+)$", p, flags=re.I)
+    if m and _named(_coordinators(hass), m.group(3)) is not None:
+        p = p[:m.start()]
+    return p.strip()
 
 
 async def _clean_rooms(hass: HomeAssistant, coord, phrase: str) -> str:
@@ -97,12 +131,14 @@ def async_setup_voice(hass: HomeAssistant):
         _LOGGER.debug("Voice sentences not registered: %s", exc)
         return None
 
+    def _robot_text(user_input, result) -> str:
+        return user_input.text
+
     async def on_rooms(user_input, result):
-        coord = _pick(hass, user_input.text)
-        if coord is None:
+        if not _coordinators(hass):
             return "No Tapo robot is set up."
         ent = result.entities.get("rooms")
-        phrase = (ent.text if ent is not None else "").strip()
+        phrase = _clean_phrase((ent.text if ent is not None else "").strip(), hass)
         key = " ".join(fold(phrase).replace("the ", " ").split())
         if key in _WHOLE:
             return await on_all(user_input, result)
@@ -110,32 +146,45 @@ def async_setup_voice(hass: HomeAssistant):
             return await on_home(user_input, result)
         if key in _STOP:
             return await on_stop(user_input, result)
+        if key in _PAUSE:
+            return await on_pause(user_input, result)
+        coord = _pick(hass, _robot_text(user_input, result), rooms=split_room_phrase(phrase))
+        if coord is None:
+            return _which(hass)
         return await _clean_rooms(hass, coord, phrase)
 
     async def on_all(user_input, result):
-        coord = _pick(hass, user_input.text)
-        if coord is None:
+        if not _coordinators(hass):
             return "No Tapo robot is set up."
+        coord = _pick(hass, _robot_text(user_input, result), active=False)
+        if coord is None:
+            return _which(hass)
         if coord.busy:
             return f"{coord.device_name} is already {coord.busy}."
         return await _do(coord, coord.client.start, "is cleaning the whole house")
 
     async def on_home(user_input, result):
-        coord = _pick(hass, user_input.text)
-        if coord is None:
+        if not _coordinators(hass):
             return "No Tapo robot is set up."
+        coord = _pick(hass, _robot_text(user_input, result), active=True)
+        if coord is None:
+            return _which(hass)
         return await _do(coord, coord.client.dock, "is heading home")
 
     async def on_stop(user_input, result):
-        coord = _pick(hass, user_input.text)
-        if coord is None:
+        if not _coordinators(hass):
             return "No Tapo robot is set up."
+        coord = _pick(hass, _robot_text(user_input, result), active=True)
+        if coord is None:
+            return _which(hass)
         return await _do(coord, coord.client.stop, "stopped")
 
     async def on_pause(user_input, result):
-        coord = _pick(hass, user_input.text)
-        if coord is None:
+        if not _coordinators(hass):
             return "No Tapo robot is set up."
+        coord = _pick(hass, _robot_text(user_input, result), active=True)
+        if coord is None:
+            return _which(hass)
         return await _do(coord, coord.client.pause, "is paused")
 
     async def _do(coord, fn, done: str) -> str:
@@ -147,13 +196,27 @@ def async_setup_voice(hass: HomeAssistant):
         await coord.async_refresh_soon()
         return f"{coord.device_name} {done}."
 
-    unregisters = [
-        manager.register_trigger(SENTENCES_ROOMS, on_rooms),
-        manager.register_trigger(SENTENCES_ALL, on_all),
-        manager.register_trigger(SENTENCES_HOME, on_home),
-        manager.register_trigger(SENTENCES_STOP, on_stop),
-        manager.register_trigger(SENTENCES_PAUSE, on_pause),
-    ]
+    names = sorted({n for n in (re.sub(r"[^\w ]+", " ", c.device_name).strip().lower()
+                                for c in _coordinators(hass)) if n})
+    named_rooms, named_home, named_all, named_stop, named_pause = [], [], [], [], []
+    if names:
+        robot = "(" + "|".join(names) + ")"
+        named_rooms = [f"(tell|ask|get) {robot} to {CLEAN} [the] {{rooms}}"]
+        named_home = [f"(send|tell|get) {robot} (home|back|to [the] (dock|base|charger))",
+                      f"{robot} (go home|dock)"]
+        named_all = [f"(start|run) {robot}"]
+        named_stop = [f"(stop|halt) {robot}"]
+        named_pause = [f"pause {robot}"]
+    unregisters = []
+    try:
+        for sentences, cb in ((SENTENCES_ROOMS + named_rooms, on_rooms), (SENTENCES_ALL + named_all, on_all),
+                              (SENTENCES_HOME + named_home, on_home), (SENTENCES_STOP + named_stop, on_stop),
+                              (SENTENCES_PAUSE + named_pause, on_pause)):
+            unregisters.append(manager.register_trigger(sentences, cb))
+    except Exception:
+        for u in unregisters:     # all or nothing
+            u()
+        raise
 
     @callback
     def unregister() -> None:

@@ -13,8 +13,10 @@ No sentences to write:
 - "stop the vacuum", "pause the robot"
 
 Room names are matched against the robot's current map (partial matches work), and the reply
-says what it did or which room it did not recognise. With more than one robot, say its name in
-the sentence.
+says what it did or which room it did not recognise. With more than one robot, say its name:
+"tell Jarvis to clean the kitchen", "send Jarvis home", "stop Jarvis", or "vacuum the kitchen with
+Jarvis". Without a name, the robot that has the rooms asked for (or, for stop, pause and home, the
+one that is working) is used, and if that still leaves a choice Assist asks which robot.
 
 ## Device triggers
 

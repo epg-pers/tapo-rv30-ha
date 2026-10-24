@@ -155,3 +155,15 @@ def test_thumb_downscales():
     assert uri.startswith("data:image/png;base64,")
     img = Image.open(io.BytesIO(base64.b64decode(uri.split(",", 1)[1])))
     assert max(img.size) <= backupstore.THUMB_PX
+
+
+def test_scan_all_prefers_the_robots_own_folder(tmp_path):
+    own, shared = tmp_path / "abc", tmp_path
+    own.mkdir()
+    (own / "cloud_7_200.bin").write_bytes(b"x")
+    (shared / "cloud_7_200.bin").write_bytes(b"yy")
+    (shared / "cloud_8_100.bin").write_bytes(b"z")
+    entries = backupstore.scan_all([str(own), str(shared)])
+    assert [(e["file"], e["dir"]) for e in entries] == [("cloud_7_200.bin", str(own)), ("cloud_8_100.bin", str(shared))]
+    assert backupstore.locate([str(own), str(shared)], "cloud_8_100.bin") == str(shared / "cloud_8_100.bin")
+    assert backupstore.locate([str(own), str(shared)], "../cloud_8_100.bin") is None

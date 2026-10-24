@@ -59,13 +59,14 @@ class TapoMapCamera(CoordinatorEntity[TapoCoordinator], Camera):
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
+        fresh = self.coordinator.room_freshness_by_id()
         return {
             "map_id": self.coordinator.map_id,
             "map_name": self.coordinator.map_name,
             "maps": self.coordinator.maps,
             "path_points": len(self.coordinator.path_points),
             "rooms": [r["name"] for r in self.coordinator.room_geometry],
-            "room_geometry": [{**r, **self.coordinator.room_freshness().get(r["name"], {})} for r in self.coordinator.room_geometry],
+            "room_geometry": [{**r, **fresh.get(r.get("id"), {})} for r in self.coordinator.room_geometry],
             "rooms_last_cleaned": self.coordinator.room_freshness(),
             "last_clean": self.coordinator.last_clean_info,
             "last_clean_url": (f"/api/{DOMAIN}/{self.coordinator.entry.entry_id}/last_clean.png?v={self.coordinator.last_clean_hash}"

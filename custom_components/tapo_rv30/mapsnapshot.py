@@ -76,6 +76,17 @@ def _norm_zone(a: dict) -> dict:
     return {k: a[k] for k in _ZONE_WRITE if a.get(k) is not None}
 
 
+def _shape(zone: dict) -> str:
+    return json.dumps(zone.get("vertexs"))
+
+
+def _hhmm(s_min) -> str:
+    try:
+        return f"{int(s_min) // 60:02d}:{int(s_min) % 60:02d}"
+    except (TypeError, ValueError):
+        return str(s_min)
+
+
 def _norm_furn(f: dict) -> dict:
     return {k: f[k] for k in ("type", "id", "angle", "vertexs") if f.get(k) is not None}
 
@@ -123,10 +134,23 @@ def plan(snap: dict, target_map_id: int, area_list: list, furniture: list,
     if missing:
         out["skipped"].append(f"rooms {missing} are not on the target map")
 
-    for t in ZONE_TYPES:
-        want = [_norm_zone(a) for a in saved.get(t, [])]
-        if want and want != [_norm_zone(a) for a in current[t]]:
-            out["zones"][t] = want
+    # Zones are matched by outline, not id (the robot renumbers them). Saved zones the map
+    # lacks are added next to the ones it has; zones drawn on the map since are kept.
+    for zt in ZONE_TYPES:
+        have = [_norm_zone(a) for a in current[zt]]
+        shapes = {_shape(z) for z in have}
+        used = {z.get("id") for z in have}
+        add = []
+        for z in (_norm_zone(a) for a in saved.get(zt, [])):
+            if _shape(z) in shapes:
+                continue
+            shapes.add(_shape(z))
+            if z.get("id") in used or z.get("id") is None:
+                z["id"] = max([i for i in used if isinstance(i, int)] + [0]) + 1
+            used.add(z["id"])
+            add.append(z)
+        if add:
+            out["zones"][zt] = have + add
 
     want_f = [_norm_furn(f) for f in snap.get("furniture") or []]
     if want_f and want_f != [_norm_furn(f) for f in furniture or []]:
@@ -143,18 +167,31 @@ def plan(snap: dict, target_map_id: int, area_list: list, furniture: list,
         if not items:
             out["skipped"].append(f"preset '{name}': none of its rooms are on the target map")
             continue
+        lost = [a.get("id") for a in p.get("area_list") or [] if a.get("id") not in room_ids]
+        if lost:
+            out["skipped"].append(f"preset '{name}': rooms {lost} are not on the target map, "
+                                  "recreated without them")
         out["presets"].append({"rule_name": p.get("rule_name"), "mode": p.get("mode") or "room",
                                "map_id": target_map_id, "clean_order": p.get("clean_order", True),
                                "area_list": items})
 
     names_by_id = {p.get("rule_id"): _b64(p.get("rule_name")) for p in snap.get("presets") or []}
     names_now = {p.get("rule_id"): _b64(p.get("rule_name")) for p in presets_now or []}
-    have = {_sched_key(s, None, names_now) for s in schedules_now or []}
+    # A schedule with no map_id (whole house) belongs to whichever map is active, so on both
+    # sides it counts as the target map's.
+    have = {_sched_key(s, (s.get("clean_attr") or {}).get("map_id") or target_map_id, names_now)
+            for s in schedules_now or []}
     for s in snap.get("schedules") or []:
         if _sched_key(s, target_map_id, names_by_id) in have:
             continue
         attr = dict(s.get("clean_attr") or {})
-        attr["map_id"] = target_map_id
+        gone = [r for r in attr.get("room_list") or [] if r not in room_ids]
+        if gone:
+            out["skipped"].append(f"schedule at {_hhmm(s.get('s_min'))}: rooms {gone} are not on the "
+                                  "target map")
+            continue
+        if attr.get("map_id") is not None:
+            attr["map_id"] = target_map_id
         keys = ("enable", "mode", "week_day", "s_min", "start_remind", "alarm_min")
         if s.get("mode") == "once":
             keys += ("year", "month", "day")

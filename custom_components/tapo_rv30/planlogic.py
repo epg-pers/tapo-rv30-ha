@@ -126,17 +126,20 @@ def window_key(now: datetime) -> str:
 
 
 def schedule_soon(now: datetime, schedules: list[dict], minutes: int = 60) -> dict | None:
-    """An enabled robot schedule starting within `minutes` (that the robot will really run)."""
+    """An enabled robot schedule starting within `minutes` (that the robot will really run),
+    including one just after midnight. now is the robot's own local time."""
     m_now = now.hour * 60 + now.minute
-    today = DAYS[now.weekday()]
+    today, tomorrow = DAYS[now.weekday()], DAYS[(now.weekday() + 1) % 7]
     for s in schedules or []:
-        if not s.get("enabled") or s.get("blocked_by_dnd") or today not in (s.get("days") or []):
+        if not s.get("enabled") or s.get("blocked_by_dnd"):
             continue
         try:
             start = hhmm(s.get("time", ""))
         except (ValueError, AttributeError):
             continue
-        if 0 <= start - m_now <= minutes:
+        days = s.get("days") or []
+        if (today in days and 0 <= start - m_now <= minutes) or \
+                (tomorrow in days and 0 <= start + 1440 - m_now <= minutes):
             return s
     return None
 
@@ -185,6 +188,7 @@ class Snapshot:
     skip_today: bool
     ran_window: str | None
     rooms: list[RoomState]
+    robot_now: datetime | None = None    # the robot's own clock (its region); DND and schedules use it
 
 
 @dataclass
@@ -232,7 +236,7 @@ def decide(snap: Snapshot, cfg: dict) -> Decision:
         return wait("The robot reports a problem", "error")
     if snap.robot_busy or not snap.robot_docked:
         return wait("The robot is busy", "busy")
-    until = dnd_until(snap.dnd, snap.now)
+    until = dnd_until(snap.dnd, snap.robot_now or snap.now)
     if until:
         return wait(f"Do Not Disturb until {until}", "dnd")
     if snap.battery is not None and snap.battery < int(cfg.get("min_battery", 0)):
@@ -241,7 +245,7 @@ def decide(snap: Snapshot, cfg: dict) -> Decision:
         n = len(snap.people_home)
         return wait(f"Waiting: {_names(snap.people_home)} {'is' if n == 1 else 'are'} home", "people")
     if cfg.get("avoid_schedules"):
-        soon = schedule_soon(snap.now, snap.schedules)
+        soon = schedule_soon(snap.robot_now or snap.now, snap.schedules)
         if soon:
             return wait(f"A schedule on the robot runs at {soon.get('time')}", "schedule")
     if cfg.get("skip_in_use"):
