@@ -522,6 +522,7 @@ class TapoRV30Panel extends HTMLElement {
     }
     const recs = this._records;
     const runs = pane.querySelector(".runs");
+    if (!runs) return;     // the tab changed while the records were loading
     runs.innerHTML = recs.length ? recs.slice(0, 20).map((x) => {
       const d = x.started ? new Date(x.started * 1000) : null;
       const when = d ? d.toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" }) + " " + d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" }) : "";
