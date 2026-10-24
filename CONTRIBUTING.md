@@ -51,6 +51,6 @@ to `main` once CI is green and the hardware checks pass.
 
 The `docs/` folder is published at https://epg-pers.github.io/tapo-rv30-ha/ by the Docs
 workflow (Material for MkDocs, `mkdocs.yml` at the repo root). Any Markdown file added to
-`docs/` becomes a page on the next push to `main`; there is no nav list to maintain, pages
-are ordered alphabetically after the index. Links between `.md` files work as-is. To
+`docs/` becomes a page on the next push to `main` once it has a line in the `nav:` list in
+`mkdocs.yml` (a page left out builds but is not in the menu). Links between `.md` files work as-is. To
 preview locally: `pip install mkdocs-material && mkdocs serve`.

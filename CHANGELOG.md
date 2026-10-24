@@ -6,7 +6,7 @@ A fourth bug hunt, from new angles: upgrades and stored data, the last release's
 
 ### Safety
 
-- **A clean can no longer start while a map write is running.** The vacuum's Start, spot clean, `vacuum.clean_area`, voice and preset buttons now wait for map setup, the map editor and the automatic restore finish, as the services already did. Map writes also ask the robot itself whether it is working, instead of trusting the last poll.
+- **A clean can no longer start while a map write is running.** The vacuum's Start, spot clean, `vacuum.clean_area`, voice and preset buttons are now refused (try again shortly) while map setup, the map editor or the automatic restore finish runs, as the services already were. Map writes also ask the robot itself whether it is working, instead of trusting the last poll.
 - **A robot that docks to recharge part way through a clean is still cleaning.** It used to look finished: map writes were allowed and `clean_finished` fired early. Now the run stays open until the robot records it (map writes and the restore finish wait), one run gives one start and one finish event, and the planner does not start another clean meanwhile.
 - **Rooms picked on one map are never cleaned on another.** `clean_rooms` and `vacuum.clean_area` check which map the robot is on right now and refuse rooms from another map (room numbers restart on every map, so they would be other rooms). Switch with `set_map` first.
 - **Voice no longer cleans a room from part of a word.** "Clean it" cleaned the Kitchen ("it" is in "kitchen") and "clean the room" a Bedroom. A partial name now has to be the start of a word, three letters or more ("clean the bath").
@@ -278,6 +278,8 @@ A full bug hunt across the integration. Everything below was found by reading an
 - **Do Not Disturb aware schedules.** The robot keeps a schedule whose start time is inside its Do Not Disturb window but never runs it (verified: it stays docked). The schedules sensor marks such schedules `blocked_by_dnd` and carries the window (`dnd`), the sidebar page flags them in the list and in the editor and asks before saving or enabling one, and `add_schedule` / `set_schedule` refuse them unless `ignore_dnd: true`. The Do Not Disturb times are editable on the page's Settings tab.
 
 
+## v0.17.0
+
 ### New
 
 - **Per-room "last cleaned"**: every finished run's map is folded onto the current map's rooms, so each room knows when it was last cleaned and what share of it the robot covered (runs that only crossed a room do not count). Kept across restarts; old records are backfilled a few per poll while the robot is docked. Exposed as `rooms_last_cleaned` and on each `room_geometry` entry of the map camera.
@@ -285,6 +287,8 @@ A full bug hunt across the integration. Everything below was found by reading an
 - **Dashboard strategy** `custom:tapo-rv30`: one line of dashboard config builds a complete view per robot.
 - The map camera carries `last_clean` (record details) and `last_clean_url`; the vacuum entity carries `consumables` (percent life left per part).
 
+
+## v0.16.0
 
 ### New
 
@@ -296,6 +300,8 @@ A full bug hunt across the integration. Everything below was found by reading an
 - **Furniture** on the map is now drawn as filled, anti-aliased illustrations (beds with pillows, sofas with cushions, tables with chairs, appliances, plants, toilet, pet items) instead of line glyphs.
 
 
+## v0.15.0
+
 ### New
 
 - **Furniture drawn on the map**: every item the app knows (beds, sofas, tables, TV cabinet, wardrobe, bedside table, fridge, washer, air conditioner, plants, toilet, pet house, litter box, pet bowl) gets its own glyph and label, rotated with the item. The glyphs are the integration's own drawings. Full type code table in the README.
@@ -304,6 +310,8 @@ A full bug hunt across the integration. Everything below was found by reading an
 
 - Carpet Boost documented as the app's carpet cleaning preference (`setCarpetClean` boost / normal and `setCarpetAutoBoost` are the same setting on the RV30 Max Plus), so no separate select was added.
 
+
+## v0.14.1
 
 ### Changed
 
@@ -316,17 +324,23 @@ A full bug hunt across the integration. Everything below was found by reading an
 - **Matter**: a diagnostic sensor (off by default) with the robot's pairing state (`Not paired` / `Pairing window open` / `Paired`), paired ecosystems, time left in the pairing window, and the robot's fixed setup code and QR payload; an **Open Matter Pairing Window** button (`startCommission`); and `tapo_rv30.remove_matter_fabric`. Only created on robots that report the `matter` component. Status and setup-info reads verified on an RV30 Max Plus; the button and the remove service follow the app's code and are untested on hardware. See the README's Matter section, including why the code does not change but the window does.
 
 
+## v0.13.0
+
 ### New
 
 - **Last Clean Map** image entity: the newest clean record rendered from the robot's own copy (`getCleanRecordExtraInfo`): cleaned cells in blue, skipped rooms in grey, the driven path, start (green) and end (red) points, dock. Read once per record and only while the robot is not working. Record details (area, minutes, start type, map) are its attributes.
 - **Schedules from Home Assistant**: `tapo_rv30.add_schedule`, `set_schedule` and `remove_schedule` drive the robot's own schedule list (`addScheduleRule` / `editScheduleRule` / `removeScheduleRules`, bodies verified on an RV30 Max Plus). Days accept Mon..Sun, daily, weekdays or weekend; rooms, a preset or the whole house; optional suction / water / passes. Repeating schedules only: in testing the robot stored a one-off rule on a different date than asked.
 
 
+## v0.12.1
+
 ### Fixed
 
 - `set_room_settings` on RV30 Max Plus firmware 1.3.3 failed with "Device error -1001": that firmware rejects the app's own per-room write, so it never worked there (it was listed as untested since 0.4). It now explains that and points at the alternatives.
 - `clean_rooms` takes optional `suction`, `water` and `passes` for the run. The card's long-press room sheet now starts a clean of that room with the chosen levels instead of trying to save them.
 
+
+## v0.12.0
 
 Method names and value tables in this release were read from the Tapo Android app (3.22.105) and then verified on an RV30 Max Plus.
 

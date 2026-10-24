@@ -305,7 +305,9 @@ class TapoPlanner:
                                    self.room_skips.get(key) == today))
         home = [p["name"] for p in self.people() if p["included"] and p["home"]]
         return Snapshot(
-            now=now, robot_docked=code in DOCKED_CODES, robot_busy=self.coordinator.busy,
+            # The last good poll is not the robot now: while it does not answer, nothing is started.
+            now=now, robot_docked=code in DOCKED_CODES and self.coordinator.last_update_success,
+            robot_busy=self.coordinator.busy,
             robot_error=(data.get("error_codes") or [0])[0] not in (0, None),
             battery=data.get("battery"), dnd=self.coordinator.settings.get("dnd"),
             people_home=home, schedules=list(self.coordinator.schedules or []),

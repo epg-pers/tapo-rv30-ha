@@ -174,12 +174,13 @@ def _draw_furniture(img: Image.Image, furniture: list[dict], to_px) -> None:
 
 def _px_transform(map_data: dict):
     """Return mm -> image px function for this map (Y grows upwards in the grid,
-    downwards in the image)."""
+    downwards in the image). The robot puts a point in cell floor((mm - origin) / res), so
+    origin + cell * res is the cell's lower-left corner, not its centre."""
     height = map_data["height"]
 
     def to_px(x_mm: float, y_mm: float) -> tuple[float, float]:
         gx, gy = mm_to_grid(map_data, x_mm, y_mm)
-        return gx * MAP_SCALE + MAP_SCALE / 2, (height - 1 - gy) * MAP_SCALE + MAP_SCALE / 2
+        return gx * MAP_SCALE, (height - gy) * MAP_SCALE
 
     return to_px
 
@@ -297,8 +298,8 @@ def render_map(map_data: dict) -> tuple[Image.Image, list[dict], dict]:
         "scale_px_per_cell": MAP_SCALE,
         "resolution_mm": map_data.get("resolution"),
         "real_origin_mm": list(map_data.get("real_origin_coor", [0, 0])[:2]),
-        # px_x = ((mm_x - ox) / res) * scale + scale / 2
-        # px_y = (grid_h - 1 - (mm_y - oy) / res) * scale + scale / 2
+        # px_x = ((mm_x - ox) / res) * scale
+        # px_y = (grid_h - (mm_y - oy) / res) * scale
         "dock_px": list(_grid_px(charge[0], charge[1], height)) if charge else None,
     }
     return img, geometry, map_geometry

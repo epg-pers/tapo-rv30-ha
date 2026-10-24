@@ -11,6 +11,17 @@ const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const FAN = ["Quiet", "Standard", "Turbo", "Max", "Ultra"];
 const WATER = ["off", "low", "medium", "high"];
 const START = { 0: "button", 1: "app", 2: "Alexa", 3: "Google", 4: "schedule", 5: "automation", 6: "IFTTT", 7: "Alice" };
+// Furniture types offered when the map editor's reply names none (older integration).
+const FURN_FALLBACK = [[1, "Single bed"], [2, "Double bed"], [101, "Sofa"], [103, "Corner sofa"],
+  [201, "Table & chairs"], [202, "Table"], [301, "TV unit"], [302, "Wardrobe"],
+  [401, "Fridge"], [402, "Washer"], [503, "Plant"], [601, "Toilet"], [701, "Pet house"]];
+// Size a new furniture item is placed at, in mm: width (across) x depth (the picture's top to bottom).
+const FURN_SIZE = { 1: [900, 2000], 2: [1500, 2000], 101: [850, 850], 102: [1600, 900], 103: [2600, 1600],
+  201: [2200, 1170], 202: [900, 900], 203: [500, 500], 301: [1600, 450], 302: [1200, 600], 303: [450, 400],
+  401: [700, 700], 402: [600, 600], 403: [450, 350], 503: [500, 500], 601: [400, 700], 701: [600, 500], 702: [550, 450], 703: [400, 250] };
+const FURN_MIN = 200;     // smallest side a resize allows, mm
+// A box in world mm (y up) in the robot's corner order: top left, top right, bottom right, bottom left.
+const mmBox = (x0, y0, x1, y1) => { const l = Math.min(x0, x1), r = Math.max(x0, x1), b = Math.min(y0, y1), t = Math.max(y0, y1); return [[l, t], [r, t], [r, b], [l, b]]; };
 // Minutes after midnight inside the robot's Do Not Disturb window? Windows cross midnight.
 const toMin = (hhmm) => { const [h, m] = String(hhmm || "0:0").split(":").map(Number); return h * 60 + m; };
 const inDnd = (dnd, hhmm) => {
@@ -660,17 +671,13 @@ class TapoRV30Panel extends HTMLElement {
 
   // ---- map editor ----------------------------------------------------------------------
   _paneEdit(pane) {
-    const FURN = [[1, "Single bed"], [2, "Double bed"], [101, "Sofa"], [103, "Corner sofa"],
-      [201, "Table & chairs"], [202, "Table"], [301, "TV unit"], [302, "Wardrobe"],
-      [401, "Fridge"], [402, "Washer"], [503, "Plant"], [601, "Toilet"], [701, "Pet house"]];
-    this._furnNames = Object.fromEntries(FURN);
     // Carpets and room renaming are read-only for now: carpet writes do not persist
     // standalone, and setAreaInfo "room" can disturb room geometry; both pending safe testing.
     const tools = [["select", "mdi:cursor-move", "Select"], ["forbid", "mdi:cancel", "No-go"],
       ["virtual_wall", "mdi:wall", "Wall"], ["furniture", "mdi:sofa", "Furniture"]];
     pane.innerHTML = `<ha-card><div class="card">
       <div class="etools">${tools.map(([k, i, l]) => `<button class="btn etool" data-tool="${k}"><ha-icon icon="${i}"></ha-icon>${l}</button>`).join("")}
-        <select class="efurn" title="Furniture type">${FURN.map(([c, n]) => `<option value="${c}">${n}</option>`).join("")}</select>
+        <select class="efurn" title="Furniture type"></select>
         <button class="btn edel" title="Delete selected"><ha-icon icon="mdi:delete"></ha-icon></button></div>
       <div class="ehint">Pick a tool, then draw on the map. Changes are saved to the robot only when you press Save.${this._isAdmin() ? "" : " Only an administrator can save map changes."}</div>
       <div class="estage"><canvas class="ecanvas"></canvas></div>
@@ -685,6 +692,7 @@ class TapoRV30Panel extends HTMLElement {
     const q = (s) => pane.querySelector(s);
     this._editEl = { canvas: q(".ecanvas"), rooms: q(".erooms"), status: q(".estatus"), furn: q(".efurn") };
     this._edit = { tool: "select", sel: null, areas: null, furniture: [], rooms: [], undo: [], img: null, geom: null, mapId: null };
+    this._editFurnTypes(null);
     pane.querySelectorAll(".etool").forEach((b) => b.onclick = () => {
       this._edit.tool = b.dataset.tool; this._edit.sel = null;
       pane.querySelectorAll(".etool").forEach((x) => x.classList.toggle("on", x === b)); this._editDraw();
@@ -705,9 +713,22 @@ class TapoRV30Panel extends HTMLElement {
     this._editLoad();
   }
 
+  // The type list and names from the edit_get reply ({"<code>": "<label>"}), else the built-in list.
+  _editFurnTypes(types) {
+    const list = types && typeof types === "object" && Object.keys(types).length
+      ? Object.entries(types).map(([c, n]) => [Number(c), String(n)]).filter(([c]) => Number.isInteger(c)) : FURN_FALLBACK;
+    this._furnNames = Object.fromEntries(list);
+    const sel = this._editEl && this._editEl.furn; if (!sel) return;
+    const was = sel.value;
+    sel.innerHTML = list.map(([c, n]) => `<option value="${c}">${esc(n)}</option>`).join("");
+    if (list.some(([c]) => String(c) === was)) sel.value = was;
+  }
+
   _editGeom() { return this._edit.geom; }
-  _editMm2Px(x, y) { const g = this._edit.geom, s = g.scale_px_per_cell, r = g.resolution_mm, [ox, oy] = g.real_origin_mm, gh = g.grid_size[1]; return [((x - ox) / r) * s + s / 2, (gh - 1 - (y - oy) / r) * s + s / 2]; }
-  _editPx2Mm(x, y) { const g = this._edit.geom, s = g.scale_px_per_cell, r = g.resolution_mm, [ox, oy] = g.real_origin_mm, gh = g.grid_size[1]; return [Math.round(ox + ((x - s / 2) / s) * r), Math.round(oy + (gh - 1 - (y - s / 2) / s) * r)]; }
+  // Map cell (gx, gy) covers ox + gx * res to ox + (gx + 1) * res (the robot rounds mm down into
+  // cells), so ox, oy is a cell corner: the bottom left corner of the picture.
+  _editMm2Px(x, y) { const g = this._edit.geom, s = g.scale_px_per_cell, r = g.resolution_mm, [ox, oy] = g.real_origin_mm, gh = g.grid_size[1]; return [((x - ox) / r) * s, (gh - (y - oy) / r) * s]; }
+  _editPx2Mm(x, y) { const g = this._edit.geom, s = g.scale_px_per_cell, r = g.resolution_mm, [ox, oy] = g.real_origin_mm, gh = g.grid_size[1]; return [Math.round(ox + (x / s) * r), Math.round(oy + (gh - y / s) * r)]; }
   _editPoint(e) {
     const c = this._editEl.canvas, b = c.getBoundingClientRect(), clamp = (v, max) => Math.max(0, Math.min(max, v));
     return [clamp((e.clientX - b.left) / b.width * c.width, c.width), clamp((e.clientY - b.top) / b.height * c.height, c.height)];
@@ -730,6 +751,7 @@ class TapoRV30Panel extends HTMLElement {
       const c = this._editEl.canvas; c.width = img.naturalWidth; c.height = img.naturalHeight;
       this._edit.img = img; this._edit.geom = geom; this._edit.mapId = res.map_id;
       this._edit.areas = res.areas || {}; this._edit.furniture = res.furniture || []; this._edit.rooms = res.rooms || [];
+      this._editFurnTypes(res.furniture_types);
       this._edit.sel = null; this._edit.undo = [];
       this._editRenderRooms(); this._editDraw();
       this._editEl.status.textContent = "";
@@ -750,6 +772,16 @@ class TapoRV30Panel extends HTMLElement {
     ctx.clearRect(0, 0, c.width, c.height); ctx.drawImage(this._edit.img, 0, 0);
     const poly = (verts) => { ctx.beginPath(); verts.forEach((p, i) => { const [x, y] = this._editMm2Px(p[0], p[1]); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }); };
     const styles = { forbid: ["rgba(219,68,55,.22)", "rgba(219,68,55,.95)"], carpet_rectangle: ["rgba(186,140,90,.30)", "rgba(150,100,55,.95)"], carpet_round: ["rgba(186,140,90,.30)", "rgba(150,100,55,.95)"] };
+    for (const [i, f] of (this._edit.furniture || []).entries()) {
+      // The robot bakes the furniture picture into the map render, which only refreshes on
+      // Save. Shade and label the box so the furniture reads as moved straight away; drawn
+      // first and see-through, so no-go zones and walls on top of it stay visible.
+      poly(f.vertexs); ctx.closePath(); ctx.fillStyle = "rgba(60,90,150,.35)"; ctx.fill();
+      ctx.strokeStyle = "rgba(230,238,250,.95)"; ctx.lineWidth = this._editSelMatch("furniture", i) ? 4 : 2; ctx.stroke();
+      const cx = f.vertexs.reduce((s, p) => s + p[0], 0) / f.vertexs.length, cy = f.vertexs.reduce((s, p) => s + p[1], 0) / f.vertexs.length;
+      const [px, py] = this._editMm2Px(cx, cy); ctx.fillStyle = "#fff"; ctx.strokeStyle = "rgba(0,0,0,.6)"; ctx.lineWidth = 3; ctx.font = "11px system-ui, sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      const name = this._furnNames?.[f.type] || "Furniture"; ctx.strokeText(name, px, py); ctx.fillText(name, px, py); ctx.textAlign = "start"; ctx.textBaseline = "alphabetic";
+    }
     for (const t of ["forbid", "carpet_rectangle", "carpet_round"]) for (const [i, a] of (this._edit.areas[t] || []).entries()) {
       poly(a.vertexs); ctx.closePath(); ctx.fillStyle = styles[t][0]; ctx.fill();
       ctx.strokeStyle = styles[t][1]; ctx.lineWidth = this._editSelMatch(t, i) ? 4 : 2; ctx.setLineDash(t === "forbid" ? [] : [6, 4]); ctx.stroke(); ctx.setLineDash([]);
@@ -757,15 +789,8 @@ class TapoRV30Panel extends HTMLElement {
     for (const [i, a] of (this._edit.areas.virtual_wall || []).entries()) {
       poly(a.vertexs); ctx.strokeStyle = "rgba(150,70,210,.95)"; ctx.lineWidth = this._editSelMatch("virtual_wall", i) ? 6 : 4; ctx.stroke();
     }
-    for (const [i, f] of (this._edit.furniture || []).entries()) {
-      // The robot bakes the furniture picture into the map render, which only refreshes on
-      // Save. Fill the box opaquely and label it so the furniture reads as moved straight away.
-      poly(f.vertexs); ctx.closePath(); ctx.fillStyle = "rgba(60,90,150,.78)"; ctx.fill();
-      ctx.strokeStyle = "rgba(230,238,250,.95)"; ctx.lineWidth = this._editSelMatch("furniture", i) ? 4 : 2; ctx.stroke();
-      const cx = f.vertexs.reduce((s, p) => s + p[0], 0) / f.vertexs.length, cy = f.vertexs.reduce((s, p) => s + p[1], 0) / f.vertexs.length;
-      const [px, py] = this._editMm2Px(cx, cy); ctx.fillStyle = "#fff"; ctx.font = "11px system-ui, sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
-      ctx.fillText(this._furnNames?.[f.type] || "Furniture", px, py); ctx.textAlign = "start"; ctx.textBaseline = "alphabetic";
-    }
+    const hd = this._editHandle();
+    if (hd) { const r = this._editHandleR() / 2; ctx.fillStyle = "#fff"; ctx.strokeStyle = "rgba(40,110,220,.95)"; ctx.lineWidth = 2; ctx.fillRect(hd[0] - r, hd[1] - r, 2 * r, 2 * r); ctx.strokeRect(hd[0] - r, hd[1] - r, 2 * r, 2 * r); }
     if (this._edit.drag) { const d = this._edit.drag; ctx.strokeStyle = "rgba(40,110,220,.95)"; ctx.lineWidth = 2; ctx.setLineDash([5, 4]); if (d.line) { ctx.beginPath(); ctx.moveTo(d.x0, d.y0); ctx.lineTo(d.x1, d.y1); ctx.stroke(); } else { ctx.strokeRect(Math.min(d.x0, d.x1), Math.min(d.y0, d.y1), Math.abs(d.x1 - d.x0), Math.abs(d.y1 - d.y0)); } ctx.setLineDash([]); }
   }
 
@@ -777,14 +802,32 @@ class TapoRV30Panel extends HTMLElement {
     if (!this._editReady()) return;     // nothing to draw on until the map has loaded
     try { this._editEl.canvas.setPointerCapture(e.pointerId); } catch (err) { /* the pointer is already gone */ }
     const [x, y] = this._editPoint(e); const t = this._edit.tool;
-    if (t === "select") { this._edit.sel = this._editHit(x, y); if (this._edit.sel) this._edit.moveFrom = this._editPx2Mm(x, y); this._editDraw(); return; }
-    if (t === "furniture") { this._editSnapshot(); const [mx, my] = this._editPx2Mm(x, y); const hw = 350, hh = 250; const type = Number(this._editEl.furn.value); this._edit.furniture.push({ type, id: 0, angle: 0, vertexs: [[mx - hw, my - hh], [mx + hw, my - hh], [mx + hw, my + hh], [mx - hw, my + hh]] }); this._edit.sel = { kind: "furniture", i: this._edit.furniture.length - 1 }; this._editDraw(); return; }
+    if (t === "select") {
+      // The selected furniture's bottom right handle resizes it about its fixed top left corner.
+      const hd = this._editHandle();
+      if (hd && Math.hypot(x - hd[0], y - hd[1]) <= this._editHandleR()) { this._edit.resizing = true; return; }
+      this._edit.sel = this._editHit(x, y); if (this._edit.sel) this._edit.moveFrom = this._editPx2Mm(x, y); this._editDraw(); return;
+    }
+    if (t === "furniture") {
+      this._editSnapshot(); const [mx, my] = this._editPx2Mm(x, y); const type = Number(this._editEl.furn.value);
+      const [w, d] = FURN_SIZE[type] || [700, 500], hw = w / 2, hh = d / 2;
+      // A fresh id: the robot keys furniture by id, so a second id 0 would clash with the first.
+      const id = Math.max(-1, ...this._edit.furniture.map((f) => Number(f.id)).filter(Number.isFinite)) + 1;
+      this._edit.furniture.push({ type, id, angle: 0, vertexs: mmBox(mx - hw, my + hh, mx + hw, my - hh) });
+      this._edit.sel = { kind: "furniture", i: this._edit.furniture.length - 1 }; this._editDraw(); return;
+    }
     this._edit.drag = { x0: x, y0: y, x1: x, y1: y, line: t === "virtual_wall" };
   }
   _editMove(e) {
     if (!this._editReady()) return;
     const [x, y] = this._editPoint(e);
     if (this._edit.drag) { this._edit.drag.x1 = x; this._edit.drag.y1 = y; this._editDraw(); return; }
+    if (this._edit.resizing && (e.buttons & 1)) {
+      const it = this._editSelItem(); if (!it) return;
+      if (!this._edit.moving) { this._editSnapshot(); this._edit.moving = true; }
+      const [mx, my] = this._editPx2Mm(x, y), l = Math.min(...it.vertexs.map((p) => p[0])), t = Math.max(...it.vertexs.map((p) => p[1]));
+      it.vertexs = mmBox(l, t, Math.max(mx, l + FURN_MIN), Math.min(my, t - FURN_MIN)); this._editDraw(); return;
+    }
     if (this._edit.tool === "select" && this._edit.sel && this._edit.moveFrom && (e.buttons & 1)) {
       const [mx, my] = this._editPx2Mm(x, y); const dx = mx - this._edit.moveFrom[0], dy = my - this._edit.moveFrom[1];
       if (!this._edit.moving) { this._editSnapshot(); this._edit.moving = true; }
@@ -792,30 +835,46 @@ class TapoRV30Panel extends HTMLElement {
     }
   }
   _editUp(e) {
-    this._edit.moving = false; this._edit.moveFrom = null;
+    this._edit.moving = false; this._edit.moveFrom = null; this._edit.resizing = false;
     if (!this._editReady()) { this._edit.drag = null; return; }
     const d = this._edit.drag; if (!d) return; this._edit.drag = null;
     const moved = Math.hypot(d.x1 - d.x0, d.y1 - d.y0); if (moved < 6) { this._editDraw(); return; }
     const [ax, ay] = this._editPx2Mm(d.x0, d.y0), [bx, by] = this._editPx2Mm(d.x1, d.y1); this._editSnapshot();
-    if (this._edit.tool === "virtual_wall") { (this._edit.areas.virtual_wall ||= []).push({ id: 0, vertexs: [[ax, ay], [bx, by]] }); }
-    else { const t = this._edit.tool; (this._edit.areas[t] ||= []).push({ id: 0, vertexs: [[ax, ay], [bx, ay], [bx, by], [ax, by]] }); }
+    // The same corner order whichever way the drag went: zones as mmBox, walls from their left
+    // end (the top one when upright).
+    if (this._edit.tool === "virtual_wall") { const ends = (ax < bx || (ax === bx && ay >= by)) ? [[ax, ay], [bx, by]] : [[bx, by], [ax, ay]]; (this._edit.areas.virtual_wall ||= []).push({ id: 0, vertexs: ends }); }
+    else { const t = this._edit.tool; (this._edit.areas[t] ||= []).push({ id: 0, vertexs: mmBox(ax, ay, bx, by) }); }
     this._editDraw();
   }
 
   _editCancel() {
     if (!this._edit) return;
-    this._edit.moving = false; this._edit.moveFrom = null;
+    this._edit.moving = false; this._edit.moveFrom = null; this._edit.resizing = false;
     if (this._edit.drag) { this._edit.drag = null; this._editDraw(); }
   }
 
   _editHit(x, y) {
     const inside = (verts) => { let hit = false; const pts = verts.map((p) => this._editMm2Px(p[0], p[1])); for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) { const [xi, yi] = pts[i], [xj, yj] = pts[j]; if ((yi > y) !== (yj > y) && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) hit = !hit; } return hit; };
     const near = (verts) => { const [x0, y0] = this._editMm2Px(verts[0][0], verts[0][1]), [x1, y1] = this._editMm2Px(verts[1][0], verts[1][1]); const L = Math.hypot(x1 - x0, y1 - y0) || 1; return Math.abs((y1 - y0) * x - (x1 - x0) * y + x1 * y0 - y1 * x0) / L < 8; };
-    for (const [i, f] of (this._edit.furniture || []).entries()) if (inside(f.vertexs)) return { kind: "furniture", i };
-    for (const [i, a] of (this._edit.areas.forbid || []).entries()) if (inside(a.vertexs)) return { kind: "forbid", i };
-    for (const [i, a] of (this._edit.areas.virtual_wall || []).entries()) if (near(a.vertexs)) return { kind: "virtual_wall", i };
-    return null;
+    // The smallest item under the pointer wins, so a zone inside a furniture box stays selectable
+    // (a wall counts as no area: it is hit only near its line).
+    const area = (verts) => { let s = 0; for (let i = 0, j = verts.length - 1; i < verts.length; j = i++) s += verts[j][0] * verts[i][1] - verts[i][0] * verts[j][1]; return Math.abs(s) / 2; };
+    let best = null, bestArea = Infinity;
+    const take = (kind, i, a) => { if (a < bestArea) { best = { kind, i }; bestArea = a; } };
+    for (const [i, f] of (this._edit.furniture || []).entries()) if (inside(f.vertexs)) take("furniture", i, area(f.vertexs));
+    for (const [i, a] of (this._edit.areas.forbid || []).entries()) if (inside(a.vertexs)) take("forbid", i, area(a.vertexs));
+    for (const [i, a] of (this._edit.areas.virtual_wall || []).entries()) if (near(a.vertexs)) take("virtual_wall", i, 0);
+    return best;
   }
+  // Where the selected furniture's resize handle is (its bottom right corner, canvas px), or null.
+  // Turned items have none: resizing keeps the box square to the map.
+  _editHandle() {
+    const s = this._edit.sel; if (this._edit.tool !== "select" || !s || s.kind !== "furniture") return null;
+    const f = this._edit.furniture[s.i]; if (!f || Number(f.angle) || !f.vertexs || !f.vertexs.length) return null;
+    return this._editMm2Px(Math.max(...f.vertexs.map((p) => p[0])), Math.min(...f.vertexs.map((p) => p[1])));
+  }
+  // The handle's size in canvas px: about 14 screen px however the canvas is scaled.
+  _editHandleR() { const c = this._editEl.canvas, w = c.getBoundingClientRect().width; return 14 * (w ? c.width / w : 1); }
   _editSelItem() { const s = this._edit.sel; if (!s) return null; return s.kind === "furniture" ? this._edit.furniture[s.i] : this._edit.areas[s.kind][s.i]; }
   _editDelete() { const s = this._edit.sel; if (!s || !this._editReady()) return; this._editSnapshot(); if (s.kind === "furniture") this._edit.furniture.splice(s.i, 1); else this._edit.areas[s.kind].splice(s.i, 1); this._edit.sel = null; this._editDraw(); }
   _editUndo() { const u = this._edit.undo.pop(); if (!u) return; const o = JSON.parse(u); this._edit.areas = o.areas; this._edit.furniture = o.furniture; this._edit.rooms = o.rooms; this._edit.sel = null; this._editRenderRooms(); this._editDraw(); }

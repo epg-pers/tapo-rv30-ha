@@ -77,4 +77,5 @@ def test_decode_path_from_live_sample():
     assert pts[0] == (-815, 2684) and pts[-1] == (-1172, 2452)
     assert (-15, -28) not in pts                 # marker dropped
     assert len(pts) == 12
-    assert len(decode_path(sample, 60, max_jump_mm=10_000)) == 13   # nothing dropped when the threshold is huge
+    # with a huge jump threshold only the origin marker rule applies (the robot is 2.7 m away)
+    assert len(decode_path(sample, 60, max_jump_mm=10_000)) == 12

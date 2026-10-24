@@ -1,7 +1,7 @@
-pytest
+pytest==9.1.1
 requests
 cryptography
 ecdsa
-pyflakes
+pyflakes==4.0.3
 pillow
-ruff>=0.5
+ruff==0.16.9

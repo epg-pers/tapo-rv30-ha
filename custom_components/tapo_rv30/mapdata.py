@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import functools
+import math
 import re
 import unicodedata
 from typing import Any, Callable
@@ -222,9 +223,13 @@ def decode_path(pos_array: str, pos_len: int, max_jump_mm: int = 1500) -> list[t
     if len(pts) < 3:
         return pts
     far = lambda a, b: abs(a[0] - b[0]) + abs(a[1] - b[1]) > max_jump_mm
-    # interior markers: far from both neighbours
+    dist = lambda a, b: abs(a[0] - b[0]) + abs(a[1] - b[1])
+    # interior markers: far from both neighbours; or, with the robot itself near (0, 0), a
+    # sample at the origin that both neighbours are well away from (real steps are ~60 mm)
     out = [p for i, p in enumerate(pts)
-           if not (0 < i < len(pts) - 1 and far(pts[i - 1], p) and far(pts[i + 1], p))]
+           if not (0 < i < len(pts) - 1 and (
+               (far(pts[i - 1], p) and far(pts[i + 1], p))
+               or (abs(p[0]) + abs(p[1]) <= 100 and dist(pts[i - 1], p) > 250 and dist(pts[i + 1], p) > 250)))]
     # then the ends, against the cleaned sequence
     if len(out) > 1 and far(out[0], out[1]):
         out = out[1:]
@@ -535,7 +540,7 @@ def _painted_cells(record: dict, live: dict) -> set[tuple[int, int]] | None:
     b = _PATH_BRUSH
     for x_mm, y_mm in pts:
         gx, gy = mm_to_grid(live, x_mm, y_mm)
-        cx, cy = round(gx), round(gy)
+        cx, cy = math.floor(gx), math.floor(gy)     # the cell the robot puts that point in
         for dx in range(-b, b + 1):
             for dy in range(-b, b + 1):
                 painted.add((cx + dx, cy + dy))

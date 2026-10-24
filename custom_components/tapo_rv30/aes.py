@@ -132,7 +132,11 @@ class AesVacuumClient(TapoVacuumClient):
 
     # ---- send ----------------------------------------------------------------
     async def _query(self, method: str, params: dict | None) -> dict:
-        from kasa.exceptions import AuthenticationError, DeviceError, _RetryableError
+        from kasa import exceptions as kexc
+        AuthenticationError, DeviceError = kexc.AuthenticationError, kexc.DeviceError
+        # A private python-kasa name: if a release drops it, treat nothing as "retryable" (a
+        # refusal then surfaces as a device error, and a write is never resent).
+        _RetryableError = getattr(kexc, "_RetryableError", None) or type("_NoRetry", (Exception,), {})
 
         dev = await self._connect()
         request = {method: params or {}}

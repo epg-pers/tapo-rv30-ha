@@ -108,9 +108,9 @@ the app). If it is still missing, Settings, Dashboards, Resources should list
 
 ## Polling is slow or the map is stale
 
-**Symptom.** Position and status lag by a minute.
+**Symptom.** Position and status lag by half a minute or more.
 
-**Cause.** The idle poll interval defaults to 60 seconds; the robot is polled every 10
+**Cause.** The idle poll interval defaults to 30 seconds; the robot is polled every 10
 seconds only while cleaning or returning.
 
 **Fix.** Lower the Poll Interval number entity. The map itself is re-rendered on a slower
@@ -123,8 +123,8 @@ a swap, not a reinstall: in HACS remove the fork (keep the config entry when ask
 simply do not delete the integration in Home Assistant), add
 `https://github.com/epg-pers/tapo-rv30-ha` as a custom repository of type Integration,
 download it and restart. Your config entry, entity ids, dashboards and automations carry
-over. Entities the fork had and this project does not are removed on the first start;
-entities new here appear. If the fork used a different domain, set the robot up again
+over. Entities the fork had and this project does not stay behind as "no longer provided":
+delete them from the entity list. Entities new here appear. If the fork used a different domain, set the robot up again
 here and remove the old entry afterwards.
 
 ## Still stuck

@@ -81,7 +81,7 @@ code and README, so this is what shipped on that day, not a promise about tomorr
 | Matter, voice, network discovery, device triggers, blueprints | yes | yes, adapted from here |
 | Furniture on the map | yes, illustrated and labelled | yes, adapted from here, plain shapes |
 | Go to a point | yes, tap the map or call the service | yes, in the separate VacuumCard-ADV card |
-| Remote drive | yes, joystick on the sidebar page | yes, in the separate VacuumCard-ADV card |
+| Remote drive | yes, arrow buttons and keys on the sidebar page | yes, in the separate VacuumCard-ADV card |
 | Sidebar page (schedules editor, history, drive, maintenance, settings) | yes | yes, ported from here |
 | Smart cleaning planner (room targets, people, motion sensors) | yes | yes, ported from here |
 | Bundled map card (tap rooms, draw zones, floors) | yes | no, separate card project |
@@ -111,8 +111,8 @@ says what it did or which room it did not recognise. With more than one robot, s
 
 ## Automations
 
-Our events show up as device triggers in the automation editor ("Jarvis finished cleaning",
-"Jarvis reported an error", "Jarvis started cleaning", "Jarvis gave a notice"), no raw event
+Our events show up as device triggers in the automation editor ("Finished cleaning",
+"Reported an error", "Started cleaning", "Gave a notice", under the robot's device), no raw event
 trigger needed. Two
 ready-made blueprints:
 

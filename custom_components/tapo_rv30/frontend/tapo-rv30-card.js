@@ -619,16 +619,18 @@ class TapoRV30Card extends HTMLElement {
     }
   }
 
+  // Map cell (gx, gy) covers ox + gx * res to ox + (gx + 1) * res (the robot rounds mm down into
+  // cells), so ox, oy is a cell corner: the bottom left corner of the picture. Same as the integration.
   _mmToPx(xmm, ymm) {
     const g = this._mapAttrs().map_geometry; if (!g) return null;
     const s = g.scale_px_per_cell, res = g.resolution_mm, [ox, oy] = g.real_origin_mm, gh = g.grid_size[1];
-    return [((xmm - ox) / res) * s + s / 2, (gh - 1 - (ymm - oy) / res) * s + s / 2];
+    return [((xmm - ox) / res) * s, (gh - (ymm - oy) / res) * s];
   }
 
   _pxToMm(x, y) {
     const g = this._mapAttrs().map_geometry; if (!g) return null;
     const s = g.scale_px_per_cell, res = g.resolution_mm, [ox, oy] = g.real_origin_mm, gh = g.grid_size[1];
-    return [Math.round(ox + ((x - s / 2) / s) * res), Math.round(oy + (gh - 1 - (y - s / 2) / s) * res)];
+    return [Math.round(ox + (x / s) * res), Math.round(oy + (gh - y / s) * res)];
   }
 
   _drawRobot(ctx) {
@@ -673,9 +675,15 @@ class TapoRV30Card extends HTMLElement {
   _openRoomSheet(id) {
     const a = this._mapAttrs(), g = (a.room_geometry || []).find((r) => r.id === id); if (!g) return;
     const mapId = a.map_id;     // the map this room id was read from
-    // The room's own levels when they are ones the sheet offers, else the defaults.
-    const level = (v, ok, dflt) => (ok.includes(Number(v)) ? Number(v) : dflt);
-    const cur = { suction: level(g.suction, [1, 2, 3, 4, 5], 3), water_level: level(g.water_level, [0, 1, 2, 3], 0), passes: level(g.passes, [1, 2, 3], 1) };
+    // The room's own levels when they are ones the sheet offers, else the robot's current ones: only
+    // changed levels are sent, so either way what is highlighted is what the clean will use. A level
+    // neither gives (no water tank, say) is left unhighlighted.
+    const attrs = (this._st(this._config.entity) || {}).attributes || {};
+    const named = (v, names) => { const i = names.indexOf(String(v ?? "").toLowerCase()); return i < 0 ? null : i; };
+    const level = (v, ok, dflt) => (v != null && ok.includes(Number(v)) ? Number(v) : ok.includes(dflt) ? dflt : null);
+    const cur = { suction: level(g.suction, [1, 2, 3, 4, 5], named(attrs.fan_speed, ["", "quiet", "standard", "turbo", "max", "ultra"])),
+      water_level: level(g.water_level, [0, 1, 2, 3], named(attrs.water_level, ["off", "low", "medium", "high"])),
+      passes: level(g.passes, [1, 2, 3], Number(attrs.clean_passes)) };
     const start = { ...cur };     // levels sent with the clean become the robot's defaults: send only the changed ones
     const sheet = document.createElement("div"); sheet.className = "sheet";
     const seg = (key, opts) => `<div class="opt"><span>${{ suction: "Suction", water_level: "Water", passes: "Passes" }[key]}</span><div class="seg" data-key="${key}">` +

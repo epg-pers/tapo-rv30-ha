@@ -111,7 +111,7 @@ def test_render_record_marks_cleaned_cells_and_path():
     rec["map_data"] = base64.b64encode(_lz4_literal(bytes(px))).decode()
     rec["pos_array"] = "8C3/xQAMAAEAAPzRCnz/8f/k/MkKnPyVCoz8YQqI/C0KgPv5Cnj7wAps+2wKaPtsCjT7bAoA+2wJzPtsCZQ="
     rec["pos_len"] = 60
-    rec["real_charge_coor"] = [0, 0, 0]
+    rec["real_charge_coor"] = [300, 0, 0]       # clear of the cells sampled below
     img = render_record(rec)
     assert img.size == (width * MAP_SCALE, rec["height"] * MAP_SCALE)
     # room 1 (cols 1-4, rows 1-3 in grid coords) is now painted as cleaned; room 2 as plain floor

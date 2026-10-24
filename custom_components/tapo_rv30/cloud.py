@@ -114,8 +114,12 @@ class TapoCloud:
 
     def _account_post(self, base: str, path: str, payload: dict, what: str, token: str | None = None) -> Any:
         body = json.dumps(payload, separators=(",", ":")).encode()
-        resp = self._http.post(base + path, data=body, headers=_signed_headers(path, body), timeout=TIMEOUT,
-                               params={"token": token} if token else None)
+        try:
+            resp = self._http.post(base + path, data=body, headers=_signed_headers(path, body), timeout=TIMEOUT,
+                                   params={"token": token} if token else None)
+        except requests.RequestException as exc:
+            # The error text quotes the URL, and with it the account token: name the failure only.
+            raise CloudError(f"{what}: {type(exc).__name__}") from None
         return _unwrap(resp, what)
 
     def resolve_iot_server(self) -> None:

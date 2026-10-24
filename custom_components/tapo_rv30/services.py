@@ -771,6 +771,8 @@ def async_setup_services(hass: HomeAssistant) -> None:
             raise ServiceValidationError(f"{call.service}: {exc}") from exc
         except setup_apply.ApplyError as exc:
             raise HomeAssistantError(f"{call.service}: {exc}") from exc
+        except Exception as exc:
+            raise HomeAssistantError(f"{call.service}: could not read the map from the vacuum: {exc}") from exc
         result["map_name"] = names.get(map_id)
         return result
 

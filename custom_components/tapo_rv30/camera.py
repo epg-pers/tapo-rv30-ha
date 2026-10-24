@@ -23,7 +23,8 @@ def _calibration_points(g: dict) -> list[dict] | None:
         return None
 
     def pt(gx, gy):
-        return {"vacuum": {"x": int(ox + gx * res), "y": int(oy + gy * res)},
+        # the centre of cell (gx, gy) in mm and in image pixels
+        return {"vacuum": {"x": int(ox + (gx + 0.5) * res), "y": int(oy + (gy + 0.5) * res)},
                 "map": {"x": int(gx * s + s / 2), "y": int((gh - 1 - gy) * s + s / 2)}}
 
     return [pt(0, 0), pt(gw - 1, 0), pt(0, gh - 1)]

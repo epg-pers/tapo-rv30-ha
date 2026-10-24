@@ -35,20 +35,23 @@ capability flags `goto_point` and `remote_control`.
 Status, Battery, Error, Last Clean Area, Clean Progress, Last Clean (with run totals), Total
 Cleans, Total Area Cleaned, Total Cleaning Time, Current Room, Schedules (count, decoded list
 as attributes, each with `blocked_by_dnd` when its time falls inside Do Not Disturb), consumable
-life (Main Brush / Side Brush / Filter / Sensor / Charge Contacts Remaining, in percent) and use
+life (Main Brush / Side Brush / Filter / Sensor / Charge Contacts Remaining, in hours left; the
+percentage is in the vacuum's `consumables` attribute) and use
 (Main Brush Lid Used, Mop Cloth Used, in hours) for the parts the robot reports, Wi-Fi Signal (diagnostic, off by default), Matter and Matter Setup Code
 (diagnostic, off by default; see [matter.md](matter.md)).
 
 ## Binary sensors
 
 Charging, Problem (with code and text), Mop Attached, Do Not Disturb Active, and Replace
-Soon per consumable the robot reports (on below 10% of service life).
+<part> (for example Replace Main Brush) per consumable the robot reports (on below 10% of
+service life).
 
 ## Switches
 
 Auto Empty, Do Not Disturb, Auto Firmware Update, Child Lock, Carpet Boost (the app's carpet
 cleaning preference), and on models that answer them: AI Obstacle Avoidance, Automatic
-Re-mopping, Clean Along Floor, Extended Mopping, Pet Area Deep Clean, Sweep Walk.
+Re-mopping, Clean Along Floor, Extended Mopping, Pet Area Deep Clean, Sweep Walk, Auto-change
+Map. The planner adds its own switch and status sensor, see [planner.md](planner.md).
 
 ## Selects
 
@@ -57,7 +60,7 @@ Light / Balanced / Max, self-empty docks).
 
 ## Numbers and times
 
-Voice Volume, Poll Interval, Do Not Disturb start and end.
+Volume, Poll Interval, Do Not Disturb start and end.
 
 ## Buttons
 

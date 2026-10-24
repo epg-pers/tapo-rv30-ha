@@ -8,12 +8,21 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_HOST, CONF_PASSWORD, CONF_USERNAME, Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.storage import Store
 from homeassistant.loader import async_get_integration
 
 from .aes import AesVacuumClient
 from .backup_ws import async_setup_backup_ws
-from .const import CONF_SECURITY, CONF_TRANSPORT, DEFAULT_PORT, DOMAIN, OPT_SHOW_PANEL, TRANSPORT_AES
+from .const import (
+    CONF_SECURITY,
+    CONF_TRANSPORT,
+    DEFAULT_PORT,
+    DOMAIN,
+    ISSUE_UNREACHABLE,
+    OPT_SHOW_PANEL,
+    TRANSPORT_AES,
+)
 from .coordinator import TapoCoordinator
 from .frontend import async_remove_panel_if_present, async_setup_frontend, async_setup_panel
 from .map_edit_ws import async_setup_map_edit_ws
@@ -129,6 +138,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         planner.async_stop()
     ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if ok:
+        # The "stopped answering" repair belongs to this entry; it must not outlive it.
+        ir.async_delete_issue(hass, DOMAIN, f"{ISSUE_UNREACHABLE}_{entry.entry_id}")
         coordinator = hass.data.get(DOMAIN, {}).pop(entry.entry_id, None)
         if coordinator is not None:
             if planner is not None:
@@ -156,6 +167,7 @@ def _async_register_voice(hass: HomeAssistant) -> None:
 async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """The integration entry was deleted: drop its stored planner, room history, pending
     restore and session cache. Map setups and backups are kept (they are the user's)."""
+    ir.async_delete_issue(hass, DOMAIN, f"{ISSUE_UNREACHABLE}_{entry.entry_id}")
     for key in ("planner", "rooms", "restore"):
         await Store(hass, 1, f"{DOMAIN}.{entry.entry_id}.{key}").async_remove()
     cache_dir = hass.config.path(".storage", "tapo_rv30")

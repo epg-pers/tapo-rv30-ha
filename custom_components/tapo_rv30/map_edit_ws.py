@@ -17,7 +17,7 @@ from homeassistant.components import websocket_api
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 
-from .const import DOMAIN
+from .const import DOMAIN, FURNITURE_TYPES
 from .mapdata import b64name
 
 _LOGGER = logging.getLogger(__name__)
@@ -72,6 +72,7 @@ async def ws_edit_get(hass: HomeAssistant, connection: websocket_api.ActiveConne
         "map_id": map_id,
         "areas": areas,
         "furniture": data.get("furniture_list", []),
+        "furniture_types": {str(k): v for k, v in FURNITURE_TYPES.items()},
         "rooms": rooms,
     })
 

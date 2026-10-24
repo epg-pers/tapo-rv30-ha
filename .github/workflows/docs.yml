@@ -8,6 +8,8 @@ on:
     paths:
       - docs/**
       - mkdocs.yml
+      - CHANGELOG.md
+      - CONTRIBUTING.md
       - .github/workflows/docs.yml
   workflow_dispatch:
 

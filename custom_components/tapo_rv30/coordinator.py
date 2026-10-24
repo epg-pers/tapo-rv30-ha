@@ -54,7 +54,7 @@ from .mapdata import (
     room_at_vac,
     room_coverage,
 )
-from .maprender import _dot, _grid_px, _png, _px_transform, render_map, render_record, room_mask_png
+from .maprender import _dot, _png, _px_transform, render_map, render_record, room_mask_png
 from .tpap import AuthError, TapoVacuumClient
 
 _LOGGER = logging.getLogger(__name__)
@@ -635,6 +635,10 @@ class TapoCoordinator(DataUpdateCoordinator):
         except setup_apply.ApplyError as exc:
             msg = f"{name} is restored, but putting its setup back failed: {exc}. Run apply_map_setup to retry."
             self._drop_restore(pend)
+        except Exception as exc:     # a read failed (robot busy or offline): still pending, try again later
+            _LOGGER.warning("%s: finishing the restore of %s failed (%s); trying again later",
+                            self.device_name, name, exc)
+            return None
         finally:
             self._finishing = False
         persistent_notification.async_create(self.hass, msg, title=f"{self.device_name}: map restored",
@@ -995,18 +999,20 @@ class TapoCoordinator(DataUpdateCoordinator):
         self._update_path(map_data)
         if self._map_base is not None:
             # Docked, nothing moves: drawing and encoding the same frame every poll is wasted CPU.
-            key = (id(self._map_base), tuple(map_data.get("vac_coor") or ()), len(self.path_points))
+            vac = map_data.get("real_vac_coor")
+            key = (id(self._map_base), tuple(vac or ()), len(self.path_points))
             if key == self._frame_key and self.map_image_bytes is not None:
                 return
             self._frame_key = key
             img = self._map_base.copy()
             draw = ImageDraw.Draw(img)
+            # In the frame of the map the base image was drawn from: the robot's grid size and
+            # origin change from one read to the next, and this poll's would put the dot elsewhere.
+            to_px = _px_transform(self._live_map or map_data)
             if len(self.path_points) > 1:
-                to_px = _px_transform(map_data)
                 draw.line([to_px(x, y) for x, y in self.path_points], fill=(0, 140, 220, 200), width=2, joint="curve")
-            vac = map_data.get("vac_coor")
-            if vac:
-                _dot(draw, *_grid_px(vac[0], vac[1], map_data["height"]), (0, 180, 255))
+            if vac and len(vac) >= 2:
+                _dot(draw, *map(int, to_px(vac[0], vac[1])), (0, 180, 255))
             self.map_image_bytes = _png(img, fast=True)
 
     def _update_path(self, map_data: dict) -> None:
