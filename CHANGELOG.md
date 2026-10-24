@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.29.0b1
+## v0.29.0
 
 A third bug hunt, with new angles: hostile and odd robot data, network faults, things happening at the same time, a brand new user, missing tests and a check of the last round's fixes. Every finding was argued for and against by separate reviewers, and only what held up was fixed.
 
