@@ -1646,6 +1646,12 @@ class TapoVacuumClient:
         r = self.send("mapBackup", {"map_id": int(map_id)})
         return r.get("error_code", 0)
 
+    def delete_map(self, map_id: int) -> int:
+        """Delete a saved map, as the Tapo app does. Only for the guarded delete_map service:
+        send_raw refuses deleteMap. Returns the error_code."""
+        r = self.send("deleteMap", {"map_id": int(map_id)})
+        return r.get("error_code", 0)
+
     def save_current_map(self, name: str) -> int:
         """Save the current unsaved map (a restored backup) under name, keeping its id. This is
         saveMap without replace_map_id: with one, the robot would save it over that map."""

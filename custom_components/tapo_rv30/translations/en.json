@@ -557,6 +557,20 @@
           "description": "The code TP-Link emailed you, when the cloud login asks for one."
         }
       }
+    },
+    "delete_map": {
+      "name": "Delete map",
+      "description": "Delete a map from the robot, as the Tapo app does; its presets and schedules go with it. Not the current map (switch first) and not the last saved one. Docked and idle. Admin only.",
+      "fields": {
+        "map": {
+          "name": "Map",
+          "description": "The map to delete: its full name or id."
+        },
+        "confirm": {
+          "name": "Confirm",
+          "description": "Must be on: the map is deleted from the robot."
+        }
+      }
     }
   },
   "issues": {

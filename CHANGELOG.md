@@ -6,6 +6,7 @@
 
 - **Restore a backup as a new map.** Restore on the sidebar page's Backups tab now asks whether to replace the map or restore the backup as a new map with a name you choose; `restore_map_backup` takes `new_name` for the same. The new map sits next to the original with its own id, room names, colours, no-go zones and furniture.
 - **Copy a map.** A **Copy** button on each map in the Settings tab, and `tapo_rv30.copy_map`, make a new map from an existing one, so you can edit or try things on the copy and keep the original as it is. It backs the map up to your TP-Link cloud, downloads that backup and restores it as a new map (cloud login needed; docked and idle; the robot holds at most 3 maps). Admin only.
+- **Delete a map.** A delete button on each map in the Settings tab (asks once more in the row) and `tapo_rv30.delete_map`, the same as deleting in the Tapo app. Admin only, `confirm` required, the map named in full or by id, docked and idle. Never the current map (switch first) and never the last saved one. The robot is read back to confirm it went. `send_raw` still refuses `deleteMap`, so this service is the only way.
 - How it works, verified on an RV30 Max Plus (firmware 1.3.3): a backup carries its map id inside it and the robot restores it under that id, so Home Assistant changes the id in a copy of the backup file and saves the new map with `saveMap` under your name (never with `replace_map_id`, which would save over another map). The `.bkmap` layout is documented in protocol.md.
 
 ### Fixed

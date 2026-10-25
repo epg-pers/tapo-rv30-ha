@@ -22,7 +22,7 @@ SERVICES = ("clean_rooms", "set_room_settings", "clean_zone", "run_schedule", "s
             "get_clean_records", "run_preset", "set_map", "go_to",
             "add_schedule", "set_schedule", "remove_schedule", "remove_matter_fabric", "get_matter_setup_code",
             "rename_map", "set_map_rotation",
-            "fetch_cloud_map_backups", "save_map_setup", "apply_map_setup", "restore_map_backup", "copy_map",
+            "fetch_cloud_map_backups", "save_map_setup", "apply_map_setup", "restore_map_backup", "copy_map", "delete_map",
             "create_preset", "update_preset", "delete_preset", "remote_drive")
 
 
@@ -234,7 +234,7 @@ async def _read(hass: HomeAssistant, call: ServiceCall, fn, *args):
 # are allowed; a script runs as whoever started it, as with Home Assistant's own admin services.
 ADMIN_SERVICES = frozenset({"send_raw", "restore_map_backup", "apply_map_setup", "save_map_setup",
                             "fetch_cloud_map_backups", "delete_preset", "remove_schedule",
-                            "remove_matter_fabric", "rename_map", "copy_map"})
+                            "remove_matter_fabric", "rename_map", "copy_map", "delete_map"})
 
 
 def _admin_only(hass: HomeAssistant, handler):
@@ -1281,9 +1281,60 @@ def async_setup_services(hass: HomeAssistant) -> None:
         result["copied_from"] = {"map_id": src, "map_name": names[src], "backup": newest["file"]}
         return result
 
+    async def handle_delete_map(call: ServiceCall) -> ServiceResponse:
+        """Delete a map from the robot, as the Tapo app does. Never the current map (switch first)
+        and never the last saved one; named in full or by id; docked and idle."""
+        import os
+        coord = _one(hass, call)
+        if not call.data.get("confirm"):
+            raise ServiceValidationError(f"{call.service}: this deletes a map from the robot; set confirm: true")
+        names = await _read(hass, call, coord.map_names)
+        map_id = _match_map(call, names, call.data.get("map"), exact=True)
+        if coord.map_busy:
+            raise ServiceValidationError(f"{call.service}: {coord.device_name} must be docked and idle")
+        if coord.map_lock.locked():
+            raise ServiceValidationError(f"{call.service}: a map write is running; try again shortly")
+        async with coord.map_lock:
+            current, map_list = await _read(hass, call, coord.client.get_map_info)
+            ids = [m.get("map_id") for m in map_list]
+            if map_id not in ids:
+                raise ServiceValidationError(f"{call.service}: '{names.get(map_id)}' is not on the robot any more")
+            if map_id == current:
+                raise ServiceValidationError(f"{call.service}: '{names.get(map_id)}' is the current map; switch to "
+                                             "another map first")
+            if not any(m.get("is_saved") is not False and m.get("map_id") != map_id for m in map_list):
+                raise ServiceValidationError(f"{call.service}: '{names.get(map_id)}' is the only saved map; the robot "
+                                             "needs one to restore a backup onto")
+            if (coord.pending_restore or {}).get("carrier") == map_id and not coord.pending_restore.get("tidied", True):
+                raise ServiceValidationError(f"{call.service}: a restore onto '{names.get(map_id)}' is still being "
+                                             "finished; try again shortly")
+
+            def _held() -> list[str]:
+                out = []
+                for folder in setup_apply.backup_folders(hass, coord):
+                    try:
+                        out += [f for f in os.listdir(folder) if re.match(rf"^cloud_{map_id}_\d+\.bin$", f)]
+                    except OSError:
+                        continue
+                return sorted(out)
+
+            held = await hass.async_add_executor_job(_held)
+            try:
+                code = await _read(hass, call, coord.client.delete_map, map_id)
+                _, after = await _read(hass, call, coord.client.get_map_info)
+            finally:
+                await coord.async_request_map_refresh()
+        if code != 0 or any(m.get("map_id") == map_id for m in after):
+            raise HomeAssistantError(f"{call.service}: the robot did not delete '{names.get(map_id)}' (error {code})")
+        if (coord.pending_restore or {}).get("map_id") == map_id:
+            coord._drop_restore(coord.pending_restore)
+        return {"map_id": map_id, "map_name": names.get(map_id), "deleted": True, "backups_held": held}
+
     hass.services.async_register(DOMAIN, "restore_map_backup", _admin_only(hass, handle_restore_map_backup),
                                  supports_response=SupportsResponse.OPTIONAL)
     hass.services.async_register(DOMAIN, "copy_map", _admin_only(hass, handle_copy_map),
+                                 supports_response=SupportsResponse.OPTIONAL)
+    hass.services.async_register(DOMAIN, "delete_map", _admin_only(hass, handle_delete_map),
                                  supports_response=SupportsResponse.OPTIONAL)
     hass.services.async_register(DOMAIN, "save_map_setup", _admin_only(hass, handle_save_map_setup),
                                  supports_response=SupportsResponse.OPTIONAL)

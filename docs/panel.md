@@ -106,7 +106,8 @@ button for administrators (the same as
 renaming in the Tapo app; the robot must be idle). Everything in the integration follows a map by its id, so
 only automations that pass the old name as `map:` need updating. **Copy** makes a new map from
 it with a name you give (rooms, names, no-go zones and furniture), so you can edit or try things
-on the copy and leave the original alone; see [copying a map](map-recovery.md#restore-as-a-new-map-or-copy-a-map).
+on the copy and leave the original alone; see [copying a map](map-recovery.md#restore-as-a-new-map-or-copy-a-map). The bin
+button deletes a map that is not the current one, after a second press in the row.
 
 With more than one robot, each gets a tab in the header.
 

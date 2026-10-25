@@ -93,6 +93,9 @@
     "copy_map": {
       "service": "mdi:content-copy"
     },
+    "delete_map": {
+      "service": "mdi:map-marker-remove-outline"
+    },
     "remote_drive": {
       "service": "mdi:gamepad-variant"
     },

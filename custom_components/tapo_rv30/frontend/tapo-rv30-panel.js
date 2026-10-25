@@ -1434,7 +1434,8 @@ class TapoRV30Panel extends HTMLElement {
       <button class="icon-btn" data-turn="${esc(m.id)}" data-to="${((m.rotation || 0) + 270) % 360}" title="Turn anticlockwise"><ha-icon icon="mdi:rotate-left"></ha-icon></button>
       <button class="icon-btn" data-turn="${esc(m.id)}" data-to="${((m.rotation || 0) + 90) % 360}" title="Turn clockwise"><ha-icon icon="mdi:rotate-right"></ha-icon></button>
       <button class="btn" data-rename="${esc(m.id)}" data-name="${esc(m.name || "")}" ${admin ? "" : `disabled title="Only an administrator can rename maps"`}><ha-icon icon="mdi:rename-outline"></ha-icon>Rename</button>
-      <button class="btn" data-copy="${esc(m.id)}" data-name="${esc(m.name || "")}" ${!admin ? `disabled title="Only an administrator can copy maps"` : maps.length >= 3 ? `disabled title="The robot holds at most 3 maps; delete one in the Tapo app first"` : ""}><ha-icon icon="mdi:content-copy"></ha-icon>Copy</button></div>`).join("");
+      <button class="btn" data-copy="${esc(m.id)}" data-name="${esc(m.name || "")}" ${!admin ? `disabled title="Only an administrator can copy maps"` : maps.length >= 3 ? `disabled title="The robot holds at most 3 maps; delete one in the Tapo app first"` : ""}><ha-icon icon="mdi:content-copy"></ha-icon>Copy</button>
+      <button class="icon-btn" data-delete="${esc(m.id)}" data-name="${esc(m.name || "")}" ${!admin ? `disabled title="Only an administrator can delete maps"` : m.current ? `disabled title="This is the current map; switch to another map to delete it"` : maps.length < 2 ? `disabled title="The robot needs at least one map"` : `title="Delete this map"`}><ha-icon icon="mdi:delete-outline"></ha-icon></button></div>`).join("");
     pane.innerHTML = `${maps.length ? `<ha-card><div class="card"><h3><span>Maps</span></h3>${mapRows}</div></ha-card>` : ""}
       <ha-card><div class="card"><h3><span>Settings</span></h3>${sw}${sel}${tim}${num}${(sw || sel || num || tim) ? "" : `<div class="empty">No settings entities.</div>`}</div></ha-card>`;
     pane.querySelectorAll("[data-turn]").forEach((b) => b.onclick = async () => {
@@ -1497,6 +1498,22 @@ class TapoRV30Panel extends HTMLElement {
       cancel.onclick = done;
       input.onkeydown = (e) => { if (e.key === "Enter") submit(); else if (e.key === "Escape") done(); };
       input.focus(); input.select();
+    });
+    // Deleted only after a second, explicit press in the row.
+    pane.querySelectorAll("[data-delete]").forEach((b) => b.onclick = () => {
+      const row = b.closest(".row"), id = b.dataset.delete, name = b.dataset.name || `Map ${id}`;
+      row.innerHTML = `<div class="main"><div class="t">Delete "${esc(name)}" from the robot?</div>
+        <div class="s delnote">Its presets and schedules go with it. It can only come back from a backup (Backups tab).</div></div>
+        <button class="btn primary" data-act="del"><ha-icon icon="mdi:delete-outline"></ha-icon>Delete</button><button class="btn" data-act="cancel">Cancel</button>`;
+      const del = row.querySelector("[data-act=del]"), cancel = row.querySelector("[data-act=cancel]");
+      cancel.onclick = () => this._paneSettings(pane);
+      del.onclick = async () => {
+        del.disabled = cancel.disabled = true;
+        row.querySelector(".delnote").textContent = `Deleting "${name}"...`;
+        if (await this._call(DOMAIN, "delete_map", { map: id, confirm: true }, { entity_id: this._robot })) return this._paneSettings(pane);
+        if (row.isConnected) { del.disabled = cancel.disabled = false; row.querySelector(".delnote").textContent = "Not deleted."; }
+      };
+      cancel.focus();
     });
     pane.querySelectorAll("[data-sw]").forEach((b) => b.onclick = () => this._call("switch", b.classList.contains("on") ? "turn_off" : "turn_on", {}, { entity_id: b.dataset.sw }));
     // A refused change puts the control back to what the entity really holds, so it does not look saved.

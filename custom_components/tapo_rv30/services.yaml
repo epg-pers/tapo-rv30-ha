@@ -279,6 +279,22 @@ copy_map:
       example: "123456"
       selector:
         text: {}
+delete_map:
+  target:
+    entity:
+      domain: vacuum
+      integration: tapo_rv30
+  fields:
+    map:
+      required: true
+      example: Downstairs copy
+      selector:
+        text: {}
+    confirm:
+      required: true
+      default: false
+      selector:
+        boolean: {}
 run_preset:
   target:
     entity:

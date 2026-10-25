@@ -82,8 +82,8 @@ was. Presets and schedules belong to a map, so the copy starts without them.
 
 Things to know:
 
-- The robot holds at most **3 maps**. A new map is refused when it already has 3; delete one in
-  the Tapo app first.
+- The robot holds at most **3 maps**. A new map is refused when it already has 3; delete one
+  first (the bin button in the Settings tab, `delete_map`, or the Tapo app).
 - The robot must be docked and idle, and `copy_map` needs the TP-Link cloud login (the same as
   `fetch_cloud_map_backups`), because the robot only writes a backup to the cloud.
 - The map that was current before stays current afterwards; switch to the copy with the map
