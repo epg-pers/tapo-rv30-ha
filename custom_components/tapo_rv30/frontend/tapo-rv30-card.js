@@ -10,7 +10,7 @@
  * the vacuum's device automatically.
  */
 
-const CARD_VERSION = "0.33.1";
+const CARD_VERSION = "0.34.0b1";
 
 const ICONS = {
   start: "mdi:play", pause: "mdi:pause", stop: "mdi:stop", dock: "mdi:home-import-outline",
@@ -138,6 +138,16 @@ canvas { display: block; width: 100%; height: auto; touch-action: none; cursor: 
 .con.low .bar > div { background: var(--error-color, #db4437); }
 .con.mid .bar > div { background: var(--warning-color, #ffa600); }
 `;
+
+// A point of the unturned map picture in the picture turned clockwise by g.rotation, and back.
+const turnPx = (x, y, g) => {
+  const r = g.rotation || 0, W = g.grid_size[0] * g.scale_px_per_cell, H = g.grid_size[1] * g.scale_px_per_cell;
+  return r === 90 ? [H - y, x] : r === 180 ? [W - x, H - y] : r === 270 ? [y, W - x] : [x, y];
+};
+const unturnPx = (x, y, g) => {
+  const r = g.rotation || 0, W = g.grid_size[0] * g.scale_px_per_cell, H = g.grid_size[1] * g.scale_px_per_cell;
+  return r === 90 ? [y, H - x] : r === 180 ? [W - x, H - y] : r === 270 ? [W - y, x] : [x, y];
+};
 
 class TapoRV30Card extends HTMLElement {
   static getConfigElement() { return document.createElement("tapo-rv30-card-editor"); }
@@ -621,15 +631,18 @@ class TapoRV30Card extends HTMLElement {
 
   // Map cell (gx, gy) covers ox + gx * res to ox + (gx + 1) * res (the robot rounds mm down into
   // cells), so ox, oy is a cell corner: the bottom left corner of the picture. Same as the integration.
+  // The map may be turned clockwise (map_geometry.rotation, as the robot stores it): px are in
+  // the turned picture, worked out from the unturned grid_w x grid_h one. Same as the integration.
   _mmToPx(xmm, ymm) {
     const g = this._mapAttrs().map_geometry; if (!g) return null;
     const s = g.scale_px_per_cell, res = g.resolution_mm, [ox, oy] = g.real_origin_mm, gh = g.grid_size[1];
-    return [((xmm - ox) / res) * s, (gh - (ymm - oy) / res) * s];
+    return turnPx(((xmm - ox) / res) * s, (gh - (ymm - oy) / res) * s, g);
   }
 
-  _pxToMm(x, y) {
+  _pxToMm(px, py) {
     const g = this._mapAttrs().map_geometry; if (!g) return null;
     const s = g.scale_px_per_cell, res = g.resolution_mm, [ox, oy] = g.real_origin_mm, gh = g.grid_size[1];
+    const [x, y] = unturnPx(px, py, g);
     return [Math.round(ox + (x / s) * res), Math.round(oy + (gh - y / s) * res)];
   }
 
@@ -808,9 +821,10 @@ class TapoRV30Card extends HTMLElement {
         const xs = z.saved.mm.map((p) => p[0]), ys = z.saved.mm.map((p) => p[1]);
         this._call("tapo_rv30", "clean_zone", { zones: [[Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)]] }, target);
       } else {
-        const a = this._pxToMm(Math.min(z.x0, z.x1), Math.max(z.y0, z.y1)), b = this._pxToMm(Math.max(z.x0, z.x1), Math.min(z.y0, z.y1));
+        // Opposite corners, sorted in mm: on a turned map a picture corner is a different mm corner.
+        const a = this._pxToMm(z.x0, z.y0), b = this._pxToMm(z.x1, z.y1);
         if (!a || !b) return;
-        this._call("tapo_rv30", "clean_zone", { zones: [[a[0], a[1], b[0], b[1]]] }, target);
+        this._call("tapo_rv30", "clean_zone", { zones: [[Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.max(a[0], b[0]), Math.max(a[1], b[1])]] }, target);
       }
     } else if (this._mode === "goto" && this._target) {
       const mm = this._pxToMm(this._target[0], this._target[1]);

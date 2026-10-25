@@ -21,7 +21,7 @@ _LOGGER = logging.getLogger(__name__)
 SERVICES = ("clean_rooms", "set_room_settings", "clean_zone", "run_schedule", "send_raw",
             "get_clean_records", "run_preset", "set_map", "go_to",
             "add_schedule", "set_schedule", "remove_schedule", "remove_matter_fabric", "get_matter_setup_code",
-            "rename_map",
+            "rename_map", "set_map_rotation",
             "fetch_cloud_map_backups", "save_map_setup", "apply_map_setup", "restore_map_backup",
             "create_preset", "update_preset", "delete_preset", "remote_drive")
 
@@ -702,6 +702,26 @@ def async_setup_services(hass: HomeAssistant) -> None:
         await _send(hass, call, coord.client.set_current_map, _match_map(call, names, ref))
         await coord.async_request_map_refresh()
 
+    async def handle_set_map_rotation(call: ServiceCall) -> ServiceResponse:
+        """Turn a map's display (clockwise), stored on the robot as in the app. Display only."""
+        coord = _one(hass, call)
+        try:
+            rotation = int(call.data.get("rotation"))
+        except (TypeError, ValueError):
+            rotation = -1
+        if rotation not in (0, 90, 180, 270):
+            raise ServiceValidationError(f"{call.service}: 'rotation' must be 0, 90, 180 or 270")
+        if coord.map_lock.locked():
+            raise ServiceValidationError(f"{call.service}: {coord.device_name} is having its map written; "
+                                         "try again shortly")
+        names = await _read(hass, call, coord.map_names)
+        map_id = _match_map(call, names, call.data.get("map", coord.map_id), exact=True)
+        try:
+            await coord.async_set_map_rotation(map_id, rotation)
+        except Exception as exc:
+            raise HomeAssistantError(f"{call.service}: the robot refused the rotation: {exc}") from exc
+        return {"map_id": map_id, "name": names.get(map_id), "rotation": rotation}
+
     async def handle_rename_map(call: ServiceCall) -> ServiceResponse:
         """Rename a saved map. Everything in this integration (schedules, presets, room freshness,
         the planner, area mappings, setups, history) follows maps by id, so only references by
@@ -1090,6 +1110,8 @@ def async_setup_services(hass: HomeAssistant) -> None:
     hass.services.async_register(DOMAIN, "set_map", handle_set_map)
     # Renaming rewrites the robot and can break automations that name the map: admins only.
     hass.services.async_register(DOMAIN, "rename_map", _admin_only(hass, handle_rename_map),
+                                 supports_response=SupportsResponse.OPTIONAL)
+    hass.services.async_register(DOMAIN, "set_map_rotation", handle_set_map_rotation,
                                  supports_response=SupportsResponse.OPTIONAL)
     hass.services.async_register(DOMAIN, "go_to", handle_go_to)
     hass.services.async_register(DOMAIN, "remote_drive", handle_remote_drive,

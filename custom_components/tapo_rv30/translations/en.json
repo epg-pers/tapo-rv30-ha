@@ -204,6 +204,20 @@
         }
       }
     },
+    "set_map_rotation": {
+      "name": "Set map rotation",
+      "description": "Turn a map's display clockwise by 0, 90, 180 or 270 degrees. Stored on the robot as the Tapo app stores it, so the app shows the map the same way. Display only: rooms, zones, furniture and cleaning are unaffected.",
+      "fields": {
+        "map": {
+          "name": "Map",
+          "description": "Its id or full name. Defaults to the current map."
+        },
+        "rotation": {
+          "name": "Rotation",
+          "description": "Clockwise degrees: 0, 90, 180 or 270."
+        }
+      }
+    },
     "go_to": {
       "name": "Go to point",
       "description": "Drive the robot to a point given in the map's real coordinates (mm, same frame as the vacuum's position_mm attribute and tapo_rv30.clean_zone). Stop it with vacuum.stop; vacuum.return_to_base sends it home.",

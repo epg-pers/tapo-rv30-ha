@@ -57,7 +57,7 @@ from .mapdata import (
     room_at_vac,
     room_coverage,
 )
-from .maprender import _dot, _png, _px_transform, render_map, render_record, room_mask_png
+from .maprender import _dot, _png, _px_transform, render_map, render_record, room_mask_png, rotation_of
 from .setup_apply import robot_key
 from .tpap import AuthError, TapoVacuumClient
 
@@ -129,7 +129,7 @@ class TapoCoordinator(DataUpdateCoordinator):
         self._record_rendered_ts: int | None = None
         self._history: cleanhistory.CleanHistory | None = None   # kept clean maps, see history()
         self._history_pruned_at = 0.0
-        self._history_png: OrderedDict[int, bytes] = OrderedDict()   # the last few runs drawn
+        self._history_png: OrderedDict[int, tuple] = OrderedDict()   # the last few drawn: (map, turn, png)
         self._map_base: Image.Image | None = None     # rendered map without the vacuum marker
         self.room_geometry: list[dict] = []
         self.map_geometry: dict = {}
@@ -138,6 +138,7 @@ class TapoCoordinator(DataUpdateCoordinator):
         self.rooms: list[dict] = []        # current map's rooms (area_list, type == room)
         self.map_id: int | None = None
         self.map_name: str | None = None
+        self.map_rotation = 0                # the current map's rotate_angle (0, 90, 180, 270)
         self.device_name: str = "Tapo RV30"
         self.device_model: str = "RV30"
         self.fw_version: str | None = None
@@ -567,7 +568,7 @@ class TapoCoordinator(DataUpdateCoordinator):
                 if rts == ts:
                     # Drawing and PNG encoding are both CPU-heavy: keep them off the event loop.
                     self.last_clean_image_bytes = await self.hass.async_add_executor_job(
-                        lambda d=detail: _png(render_record(d)))
+                        lambda d=detail: _png(render_record(d, self.rotation_for(d.get("map_id")))))
                     self.last_clean_hash = str(rts)
                     self.last_clean_info = {**decode_clean_record(rec),
                                             "map_name": b64name(detail.get("map_name", "")),
@@ -679,9 +680,10 @@ class TapoCoordinator(DataUpdateCoordinator):
         """One run's map as a PNG: from the kept copy if there is one, else read from the robot
         (and kept, if history is on). The last few drawn are held in memory."""
         started = int(started)
-        if started in self._history_png:
+        hit = self._history_png.get(started)
+        if hit and hit[1] == self.rotation_for(hit[0]):      # drawn this way round already
             self._history_png.move_to_end(started)
-            return self._history_png[started]
+            return hit[2]
         hist = self.history()
         detail = await self.hass.async_add_executor_job(hist.get, started) if hist else None
         if detail is None:
@@ -695,8 +697,10 @@ class TapoCoordinator(DataUpdateCoordinator):
             detail = await self.hass.async_add_executor_job(
                 self.client.get_clean_record_detail, rec.get("record_index", 0))
             await self._keep_run(rec, detail)
-        png = await self.hass.async_add_executor_job(lambda: _png(render_record(detail)))
-        self._history_png[started] = png
+        map_id = detail.get("map_id")
+        rotation = self.rotation_for(map_id)
+        png = await self.hass.async_add_executor_job(lambda: _png(render_record(detail, rotation)))
+        self._history_png[started] = (map_id, rotation, png)
         while len(self._history_png) > 6:
             self._history_png.popitem(last=False)
         return png
@@ -1218,7 +1222,7 @@ class TapoCoordinator(DataUpdateCoordinator):
             draw = ImageDraw.Draw(img)
             # In the frame of the map the base image was drawn from: the robot's grid size and
             # origin change from one read to the next, and this poll's would put the dot elsewhere.
-            to_px = _px_transform(self._live_map or map_data)
+            to_px = _px_transform(self._live_map or map_data, self.map_rotation)
             if len(self.path_points) > 1:
                 draw.line([to_px(x, y) for x, y in self.path_points], fill=(0, 140, 220, 200), width=2, joint="curve")
             if vac and len(vac) >= 2:
@@ -1251,7 +1255,12 @@ class TapoCoordinator(DataUpdateCoordinator):
         current_id, map_list = self.client.get_map_info()
         self._room_name_cache = {}      # names may have changed in the app
         self.maps = [{"id": m["map_id"], "name": b64name(m.get("map_name", "")), "current": m["map_id"] == current_id,
-                      "saved": m.get("is_saved", True) is not False} for m in map_list]
+                      "saved": m.get("is_saved", True) is not False,
+                      "rotation": rotation_of(m.get("rotate_angle"))} for m in map_list]
+        rotation = self.rotation_for(current_id)
+        if rotation != self.map_rotation:
+            self._record_rendered_ts = None     # redraw the last clean turned the new way
+        self.map_rotation = rotation
         map_data = self.client.get_map_data(current_id)
         self.map_id = current_id
         self.map_name = b64name(map_data.get("map_name", ""))
@@ -1259,16 +1268,29 @@ class TapoCoordinator(DataUpdateCoordinator):
         self._map_layers = {"map_id": current_id, "map_name": self.map_name,
                             "area_list": list(map_data.get("area_list") or []),
                             "furniture_list": list(map_data.get("furniture_list") or [])}
-        self._map_base, self.room_geometry, self.map_geometry = render_map(map_data)
+        self._map_base, self.room_geometry, self.map_geometry = render_map(map_data, self.map_rotation)
         self._live_map = {k: map_data.get(k) for k in ("width", "height", "pix_len", "map_data", "resolution", "real_origin_coor", "area_list", "map_id")}
         try:
             self._live_pixels = grid_pixels(map_data)
         except Exception:
             self._live_pixels = None
-        self.room_mask = room_mask_png(map_data)
-        self.map_hash = str(map_data.get("map_hash") or len(self.room_mask))
+        self.room_mask = room_mask_png(map_data, self.map_rotation)
+        # The rotation is part of it, so the card fetches the turned mask instead of a cached one.
+        self.map_hash = f"{map_data.get('map_hash') or len(self.room_mask)}-{self.map_rotation}"
         self._apply_position(map_data)
         _LOGGER.debug("Map rendered: %d bytes, %d rooms", len(self.map_image_bytes or b""), len(self.rooms))
+
+    async def async_set_map_rotation(self, map_id: int, rotation: int) -> None:
+        """Turn a map's display on the robot (rotate_angle), so the Tapo app and Home Assistant
+        agree. Display only: nothing on the map itself changes."""
+        if rotation not in (0, 90, 180, 270):
+            raise ValueError(f"rotation must be 0, 90, 180 or 270, not {rotation!r}")
+        await self.hass.async_add_executor_job(self.client.set_map_rotation, int(map_id), int(rotation))
+        await self.async_request_map_refresh()
+
+    def rotation_for(self, map_id) -> int:
+        """A map's rotate_angle as last read (0 for a map not on the robot any more)."""
+        return next((m.get("rotation", 0) for m in self.maps if m.get("id") == map_id), 0)
 
     def rooms_named(self) -> list[dict]:
         """Rooms of the current map with the decoded name under name_text."""

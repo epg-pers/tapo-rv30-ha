@@ -172,26 +172,64 @@ def _draw_furniture(img: Image.Image, furniture: list[dict], to_px) -> None:
         draw.text((cx, cy), name, fill=(60, 60, 60), font=small_font, anchor="mm")
 
 
-def _px_transform(map_data: dict):
+# The map's display rotation, as the Tapo app stores it per map (rotate_angle): the picture
+# turned clockwise by this many degrees. Quarter turns only, so cells stay square and exact.
+ROTATIONS = (0, 90, 180, 270)
+# PIL turns anticlockwise, so a clockwise quarter turn is its ROTATE_270.
+_TRANSPOSE = {90: Image.Transpose.ROTATE_270, 180: Image.Transpose.ROTATE_180, 270: Image.Transpose.ROTATE_90}
+
+
+def rotation_of(value) -> int:
+    """A rotate_angle from the robot as one of ROTATIONS (anything else is 0)."""
+    try:
+        angle = int(value) % 360
+    except (TypeError, ValueError, OverflowError):
+        return 0
+    return angle if angle in ROTATIONS else 0
+
+
+def rotate_px(x: float, y: float, w: float, h: float, rotation: int) -> tuple[float, float]:
+    """A point of the unrotated w x h picture, in the picture turned clockwise by rotation."""
+    if rotation == 90:
+        return h - y, x
+    if rotation == 180:
+        return w - x, h - y
+    if rotation == 270:
+        return y, w - x
+    return x, y
+
+
+def _turn(img: Image.Image, rotation: int) -> Image.Image:
+    return img.transpose(_TRANSPOSE[rotation]) if rotation in _TRANSPOSE else img
+
+
+def _px_transform(map_data: dict, rotation: int = 0):
     """Return mm -> image px function for this map (Y grows upwards in the grid,
-    downwards in the image). The robot puts a point in cell floor((mm - origin) / res), so
-    origin + cell * res is the cell's lower-left corner, not its centre."""
+    downwards in the image), in the picture turned clockwise by rotation. The robot puts a
+    point in cell floor((mm - origin) / res), so origin + cell * res is the cell's lower-left
+    corner, not its centre."""
     height = map_data["height"]
+    w, h = map_data["width"] * MAP_SCALE, height * MAP_SCALE
 
     def to_px(x_mm: float, y_mm: float) -> tuple[float, float]:
         gx, gy = mm_to_grid(map_data, x_mm, y_mm)
-        return gx * MAP_SCALE, (height - gy) * MAP_SCALE
+        return rotate_px(gx * MAP_SCALE, (height - gy) * MAP_SCALE, w, h, rotation)
 
     return to_px
 
 
-def _grid_px(gx: float, gy: float, height: int) -> tuple[int, int]:
-    return int(gx * MAP_SCALE + MAP_SCALE // 2), int((height - 1 - gy) * MAP_SCALE + MAP_SCALE // 2)
+def _grid_px(gx: float, gy: float, height: int, width: int = 0, rotation: int = 0) -> tuple[int, int]:
+    """The centre of grid cell (gx, gy) in image px (in the rotated picture when rotation)."""
+    x, y = int(gx * MAP_SCALE + MAP_SCALE // 2), int((height - 1 - gy) * MAP_SCALE + MAP_SCALE // 2)
+    if rotation:
+        x, y = rotate_px(x, y, width * MAP_SCALE, height * MAP_SCALE, rotation)
+    return int(x), int(y)
 
 
-def render_map(map_data: dict) -> tuple[Image.Image, list[dict], dict]:
+def render_map(map_data: dict, rotation: int = 0) -> tuple[Image.Image, list[dict], dict]:
     """Decode the LZ4 pixel grid and draw rooms, no-go zones, virtual walls,
-    carpets, saved zones, furniture, labels and the dock.
+    carpets, saved zones, furniture, labels and the dock. With a rotation the grid is turned
+    first and everything is drawn on the turned picture, so labels stay upright.
 
     Returns (base image without the vacuum marker, room_geometry, map_geometry).
     room_geometry: per room id/name, bbox and centre in image px.
@@ -218,10 +256,14 @@ def render_map(map_data: dict) -> tuple[Image.Image, list[dict], dict]:
     # Unknown area is transparent so the map sits on light and dark themes alike.
     small = Image.new("RGBA", (width, height))
     small.putdata([(*lut[p], 255) if (p < 256 and p != 127) else (0, 0, 0, 0) for p in pixels])
-    small = small.transpose(Image.Transpose.FLIP_TOP_BOTTOM)
-    img = small.resize((width * MAP_SCALE, height * MAP_SCALE), Image.Resampling.NEAREST)
+    rotation = rotation_of(rotation)
+    small = _turn(small.transpose(Image.Transpose.FLIP_TOP_BOTTOM), rotation)
+    img = small.resize((small.width * MAP_SCALE, small.height * MAP_SCALE), Image.Resampling.NEAREST)
 
-    to_px = _px_transform(map_data)
+    to_px = _px_transform(map_data, rotation)
+
+    def gpx(gx: float, gy: float) -> tuple[int, int]:
+        return _grid_px(gx, gy, height, width, rotation)
 
     def poly(a: dict) -> list[tuple[float, float]]:
         return [to_px(x, y) for x, y in a.get("vertexs", [])]
@@ -266,11 +308,11 @@ def render_map(map_data: dict) -> tuple[Image.Image, list[dict], dict]:
             continue
         xs = [c for c, _ in pts]
         ys = [r for _, r in pts]
-        cx, cy = _grid_px(sum(xs) / len(xs), sum(ys) / len(ys), height)
-        x0, y0 = _grid_px(min(xs), max(ys), height)
-        x1, y1 = _grid_px(max(xs), min(ys), height)
+        cx, cy = gpx(sum(xs) / len(xs), sum(ys) / len(ys))
+        (ax, ay), (bx, by) = gpx(min(xs), max(ys)), gpx(max(xs), min(ys))
         name = b64name(room.get("name", ""))
-        geometry.append({"id": rid, "name": name, "bbox": [x0, y0, x1, y1], "centre": [cx, cy],
+        geometry.append({"id": rid, "name": name, "bbox": [min(ax, bx), min(ay, by), max(ax, bx), max(ay, by)],
+                         "centre": [cx, cy],
                          "cells": len(pts), "suction": _num(room.get("suction")),
                          "water_level": _num(room.get("cistern")), "passes": _num(room.get("clean_number"))})
         draw.text((cx + 1, cy + 1), name, fill=(0, 0, 0), font=font, anchor="mm")
@@ -278,7 +320,7 @@ def render_map(map_data: dict) -> tuple[Image.Image, list[dict], dict]:
 
     charge = map_data.get("charge_coor")
     if charge:
-        _dot(draw, *_grid_px(charge[0], charge[1], height), (255, 200, 0))
+        _dot(draw, *gpx(charge[0], charge[1]), (255, 200, 0))
 
     zones = [{"id": a.get("id"), "px": [list(p) for p in poly(a)],
               "mm": [list(v) for v in a.get("vertexs", [])],
@@ -300,7 +342,10 @@ def render_map(map_data: dict) -> tuple[Image.Image, list[dict], dict]:
         "real_origin_mm": list(map_data.get("real_origin_coor", [0, 0])[:2]),
         # px_x = ((mm_x - ox) / res) * scale
         # px_y = (grid_h - (mm_y - oy) / res) * scale
-        "dock_px": list(_grid_px(charge[0], charge[1], height)) if charge else None,
+        # then turned clockwise by rotation in a (grid_w * scale) x (grid_h * scale) picture:
+        # 90: (H - y, x), 180: (W - x, H - y), 270: (y, W - x)
+        "rotation": rotation,
+        "dock_px": list(gpx(charge[0], charge[1])) if charge else None,
     }
     return img, geometry, map_geometry
 
@@ -309,7 +354,7 @@ CLEANED_COLOR = (88, 170, 255)
 RECORD_FLOOR = (205, 205, 210)
 
 
-def render_record(rec: dict) -> Image.Image:
+def render_record(rec: dict, rotation: int = 0) -> Image.Image:
     """A finished run from getCleanRecordExtraInfo: cells the robot cleaned (255)
     in blue over the rooms it skipped in grey, with the path it drove, where it
     started (green) and where it stopped (red). Same grid format as the live map."""
@@ -321,10 +366,11 @@ def render_record(rec: dict) -> Image.Image:
     lut[255] = CLEANED_COLOR
     small = Image.new("RGBA", (width, height))
     small.putdata([(*lut[p], 255) if (p < 256 and p != 127) else (0, 0, 0, 0) for p in pixels])
-    small = small.transpose(Image.Transpose.FLIP_TOP_BOTTOM)
-    img = small.resize((width * MAP_SCALE, height * MAP_SCALE), Image.Resampling.NEAREST)
+    rotation = rotation_of(rotation)
+    small = _turn(small.transpose(Image.Transpose.FLIP_TOP_BOTTOM), rotation)
+    img = small.resize((small.width * MAP_SCALE, small.height * MAP_SCALE), Image.Resampling.NEAREST)
     draw = ImageDraw.Draw(img)
-    to_px = _px_transform(rec)
+    to_px = _px_transform(rec, rotation)
     for a in rec.get("area_list", []):
         if a.get("type") == "forbid" and len(a.get("vertexs", [])) >= 3:
             draw.polygon([to_px(x, y) for x, y in a["vertexs"]], outline=FORBID_OUTLINE, width=2)
@@ -370,14 +416,14 @@ _jpeg = _png   # kept for callers; the map is PNG with transparency since 0.11
 
 
 
-def room_mask_png(map_data: dict) -> bytes:
+def room_mask_png(map_data: dict, rotation: int = 0) -> bytes:
     """Lossless 8-bit PNG of the room-id grid (same orientation as the map
-    image, 1 px per cell). Pixel value = room id, 0 wall, 255 floor, 127 unknown."""
+    image, rotation included, 1 px per cell). Pixel value = room id, 0 wall, 255 floor, 127 unknown."""
     validate_map(map_data)
     width, height, pix_len = map_data["width"], map_data["height"], map_data["pix_len"]
     pixels = lz4_block_decompress(base64.b64decode(map_data["map_data"]), pix_len)
     img = Image.frombytes("L", (width, height), bytes(min(p, 255) for p in pixels))
-    img = img.transpose(Image.Transpose.FLIP_TOP_BOTTOM)
+    img = _turn(img.transpose(Image.Transpose.FLIP_TOP_BOTTOM), rotation_of(rotation))
     buf = io.BytesIO()
     img.save(buf, format="PNG", optimize=True)
     return buf.getvalue()

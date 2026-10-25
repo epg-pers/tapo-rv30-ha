@@ -12,6 +12,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
 from .coordinator import TapoCoordinator
+from .maprender import rotate_px, rotation_of
 
 
 def _calibration_points(g: dict) -> list[dict] | None:
@@ -22,10 +23,13 @@ def _calibration_points(g: dict) -> list[dict] | None:
     except (KeyError, TypeError):
         return None
 
+    rotation = rotation_of(g.get("rotation"))
+
     def pt(gx, gy):
-        # the centre of cell (gx, gy) in mm and in image pixels
+        # the centre of cell (gx, gy) in mm and in image pixels (in the turned picture)
+        x, y = rotate_px(gx * s + s / 2, (gh - 1 - gy) * s + s / 2, gw * s, gh * s, rotation)
         return {"vacuum": {"x": int(ox + (gx + 0.5) * res), "y": int(oy + (gy + 0.5) * res)},
-                "map": {"x": int(gx * s + s / 2), "y": int((gh - 1 - gy) * s + s / 2)}}
+                "map": {"x": int(x), "y": int(y)}}
 
     return [pt(0, 0), pt(gw - 1, 0), pt(0, gh - 1)]
 

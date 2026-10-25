@@ -20,6 +20,16 @@ const FURN_SIZE = { 1: [900, 2000], 2: [1500, 2000], 101: [850, 850], 102: [1600
   201: [2200, 1170], 202: [900, 900], 203: [500, 500], 301: [1600, 450], 302: [1200, 600], 303: [450, 400],
   401: [700, 700], 402: [600, 600], 403: [450, 350], 503: [500, 500], 601: [400, 700], 701: [600, 500], 702: [550, 450], 703: [400, 250] };
 const FURN_MIN = 200;     // smallest side a resize allows, mm
+// A point of the unturned map picture in the picture turned clockwise by g.rotation, and back
+// (the robot stores a display rotation per map, as the Tapo app shows it).
+const turnPx = (x, y, g) => {
+  const r = g.rotation || 0, W = g.grid_size[0] * g.scale_px_per_cell, H = g.grid_size[1] * g.scale_px_per_cell;
+  return r === 90 ? [H - y, x] : r === 180 ? [W - x, H - y] : r === 270 ? [y, W - x] : [x, y];
+};
+const unturnPx = (x, y, g) => {
+  const r = g.rotation || 0, W = g.grid_size[0] * g.scale_px_per_cell, H = g.grid_size[1] * g.scale_px_per_cell;
+  return r === 90 ? [y, H - x] : r === 180 ? [W - x, H - y] : r === 270 ? [W - y, x] : [x, y];
+};
 // A box in world mm (y up) in the robot's corner order: top left, top right, bottom right, bottom left.
 const mmBox = (x0, y0, x1, y1) => { const l = Math.min(x0, x1), r = Math.max(x0, x1), b = Math.min(y0, y1), t = Math.max(y0, y1); return [[l, t], [r, t], [r, b], [l, b]]; };
 // Minutes after midnight inside the robot's Do Not Disturb window? Windows cross midnight.
@@ -804,8 +814,10 @@ class TapoRV30Panel extends HTMLElement {
   _editGeom() { return this._edit.geom; }
   // Map cell (gx, gy) covers ox + gx * res to ox + (gx + 1) * res (the robot rounds mm down into
   // cells), so ox, oy is a cell corner: the bottom left corner of the picture.
-  _editMm2Px(x, y) { const g = this._edit.geom, s = g.scale_px_per_cell, r = g.resolution_mm, [ox, oy] = g.real_origin_mm, gh = g.grid_size[1]; return [((x - ox) / r) * s, (gh - (y - oy) / r) * s]; }
-  _editPx2Mm(x, y) { const g = this._edit.geom, s = g.scale_px_per_cell, r = g.resolution_mm, [ox, oy] = g.real_origin_mm, gh = g.grid_size[1]; return [Math.round(ox + (x / s) * r), Math.round(oy + (gh - y / s) * r)]; }
+  // Editing is done in mm; only drawing and pointer positions go through these, so a turned map
+  // (geom.rotation) saves exactly what an unturned one would.
+  _editMm2Px(x, y) { const g = this._edit.geom, s = g.scale_px_per_cell, r = g.resolution_mm, [ox, oy] = g.real_origin_mm, gh = g.grid_size[1]; return turnPx(((x - ox) / r) * s, (gh - (y - oy) / r) * s, g); }
+  _editPx2Mm(px, py) { const g = this._edit.geom, s = g.scale_px_per_cell, r = g.resolution_mm, [ox, oy] = g.real_origin_mm, gh = g.grid_size[1]; const [x, y] = unturnPx(px, py, g); return [Math.round(ox + (x / s) * r), Math.round(oy + (gh - y / s) * r)]; }
   _editPoint(e) {
     const c = this._editEl.canvas, b = c.getBoundingClientRect(), clamp = (v, max) => Math.max(0, Math.min(max, v));
     return [clamp((e.clientX - b.left) / b.width * c.width, c.width), clamp((e.clientY - b.top) / b.height * c.height, c.height)];
@@ -1371,10 +1383,17 @@ class TapoRV30Panel extends HTMLElement {
     // rename only touches automations that name the map.
     const cam = this._st(r.camera), maps = ((cam && cam.attributes.maps) || []).filter((m) => m.saved !== false);
     const admin = this._isAdmin();
-    const mapRows = maps.map((m) => `<div class="row" data-map="${esc(m.id)}"><div class="main"><div class="t">${esc(m.name || `Map ${m.id}`)}</div><div class="s">${m.current ? "Current map" : "Saved map"} &middot; id ${esc(m.id)}</div></div>
+    const mapRows = maps.map((m) => `<div class="row" data-map="${esc(m.id)}"><div class="main"><div class="t">${esc(m.name || `Map ${m.id}`)}</div><div class="s">${m.current ? "Current map" : "Saved map"} &middot; turned ${esc(m.rotation || 0)}&deg; &middot; id ${esc(m.id)}</div></div>
+      <button class="icon-btn" data-turn="${esc(m.id)}" data-to="${((m.rotation || 0) + 270) % 360}" title="Turn anticlockwise"><ha-icon icon="mdi:rotate-left"></ha-icon></button>
+      <button class="icon-btn" data-turn="${esc(m.id)}" data-to="${((m.rotation || 0) + 90) % 360}" title="Turn clockwise"><ha-icon icon="mdi:rotate-right"></ha-icon></button>
       <button class="btn" data-rename="${esc(m.id)}" data-name="${esc(m.name || "")}" ${admin ? "" : `disabled title="Only an administrator can rename maps"`}><ha-icon icon="mdi:rename-outline"></ha-icon>Rename</button></div>`).join("");
     pane.innerHTML = `${maps.length ? `<ha-card><div class="card"><h3><span>Maps</span></h3>${mapRows}</div></ha-card>` : ""}
       <ha-card><div class="card"><h3><span>Settings</span></h3>${sw}${sel}${tim}${num}${(sw || sel || num || tim) ? "" : `<div class="empty">No settings entities.</div>`}</div></ha-card>`;
+    pane.querySelectorAll("[data-turn]").forEach((b) => b.onclick = async () => {
+      b.disabled = true;
+      await this._call(DOMAIN, "set_map_rotation", { map: b.dataset.turn, rotation: Number(b.dataset.to) }, { entity_id: this._robot });
+      b.disabled = false;
+    });
     // Renamed in place: a text box in the row (no browser prompt, which app webviews may not show).
     pane.querySelectorAll("[data-rename]").forEach((b) => b.onclick = () => {
       const row = b.closest(".row"), id = b.dataset.rename, old = b.dataset.name;

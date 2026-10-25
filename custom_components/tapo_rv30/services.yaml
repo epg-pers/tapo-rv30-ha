@@ -292,6 +292,24 @@ rename_map:
       selector:
         text: {}
 
+set_map_rotation:
+  target:
+    entity:
+      domain: vacuum
+      integration: tapo_rv30
+  fields:
+    map:
+      required: false
+      example: Downstairs
+      selector:
+        text: {}
+    rotation:
+      required: true
+      example: 90
+      selector:
+        select:
+          options: ["0", "90", "180", "270"]
+
 go_to:
   target:
     entity:

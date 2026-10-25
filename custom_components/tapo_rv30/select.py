@@ -1,4 +1,4 @@
-"""Select entities for Tapo RV30 — water level, clean passes, auto empty and clean map history."""
+"""Select entities for Tapo RV30 — water level, clean passes, auto empty, clean map history and map rotation."""
 from __future__ import annotations
 
 import logging
@@ -37,6 +37,7 @@ async def async_setup_entry(
     if "dust_collection_mode" in (coordinator.settings.get("dust") or {}):
         entities.append(TapoAutoEmptyModeSelect(coordinator, entry))
     entities.append(TapoHistoryRetentionSelect(coordinator, entry))
+    entities.append(TapoMapRotationSelect(coordinator, entry))
     async_add_entities(entities)
 
 
@@ -140,3 +141,28 @@ class TapoHistoryRetentionSelect(TapoEntity, SelectEntity):
 
     async def async_select_option(self, option: str) -> None:
         await self.coordinator.async_set_history(retention=option)
+
+
+class TapoMapRotationSelect(TapoEntity, SelectEntity):
+    """How the current map is turned (clockwise degrees), stored on the robot like the app's
+    own setting, so the Tapo app shows it the same way. Display only."""
+    _attr_entity_category = EntityCategory.CONFIG
+    _attr_icon = "mdi:rotate-right"
+    _attr_options = ["0", "90", "180", "270"]
+
+    def __init__(self, coordinator: TapoCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, entry, "map_rotation", "Map Rotation")
+
+    @property
+    def available(self) -> bool:
+        return super().available and self.coordinator.map_id is not None
+
+    @property
+    def current_option(self) -> str:
+        return str(self.coordinator.map_rotation)
+
+    async def async_select_option(self, option: str) -> None:
+        try:
+            await self.coordinator.async_set_map_rotation(self.coordinator.map_id, int(option))
+        except Exception as exc:
+            raise HomeAssistantError(f"{self.coordinator.device_name}: could not turn the map: {exc}") from exc

@@ -1146,6 +1146,11 @@ class TapoVacuumClient:
         """Switch the active map (the robot relocalises on it)."""
         self.send("setMapInfo", {"current_map_id": int(map_id)})
 
+    def set_map_rotation(self, map_id: int, rotation: int) -> None:
+        """Turn a map's display, as the Tapo app does (rotate_angle 0 / 90 / 180 / 270,
+        clockwise): one map_list entry with only its id and the angle."""
+        self.send("setMapInfo", {"map_list": [{"map_id": int(map_id), "rotate_angle": int(rotation)}]})
+
     def rename_map(self, map_id: int, name: str) -> None:
         """Rename a saved map, as the Tapo app does: one map_list entry with only its id and the
         new name (base64 UTF-8). Nothing else goes in it: the same entry's is_base_exist would

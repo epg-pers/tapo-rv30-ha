@@ -57,7 +57,8 @@ Map. The planner adds its own switch and status sensor, see [planner.md](planner
 ## Selects
 
 Water Level (Off / Low / Medium / High), Clean Passes (1 / 2 / 3), Auto Empty Mode (Smart /
-Light / Balanced / Max, self-empty docks), Clean Map History (how long each run's map is kept
+Light / Balanced / Max, self-empty docks), Map Rotation (0 / 90 / 180 / 270, clockwise, for the
+current map; stored on the robot like the Tapo app's setting, display only), Clean Map History (how long each run's map is kept
 in Home Assistant: Off / 1 week / 1 month / 3 months / 1 year / Forever; Off deletes the kept
 maps; see [the sidebar page](panel.md#history)).
 
