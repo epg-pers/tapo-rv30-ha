@@ -118,44 +118,70 @@ def tidy(client, pend: dict) -> dict:
     furniture back first, then save the restored map under its name if it is the current
     unsaved map and the name is free, give it the backup's room names and furniture, and for a
     copy make the carrier current again. Each step on its own, so one failing does not skip the
-    others; the carrier step failing is the only one worth retrying (carrier_ok False)."""
+    others. pend["done"] records the steps that worked, so a retry only redoes the rest and the
+    one-off steps (save, names, switching back) are only tried while the restored map is there."""
     from .mapdata import fold
     carrier, landed, name = pend["carrier"], pend["map_id"], pend.get("name")
-    out: dict = {"carrier": None, "carrier_ok": False, "saved": False, "errors": []}
-    try:
-        fix = repair(pend.get("before") or {"rooms": [], "furniture": []}, client.get_map_data(carrier))
-        if fix["rooms"]:
-            client.set_areas(carrier, "room", fix["rooms"])
-        if fix["furniture"] is not None:
-            client.set_furniture(carrier, fix["furniture"])
-        out["carrier"] = {"rooms": len(fix["rooms"] or []),
-                          "furniture": None if fix["furniture"] is None else len(fix["furniture"])}
-        out["carrier_ok"] = True
-    except Exception as exc:
-        out["errors"].append(f"putting back map {carrier}: {exc}")
+    done = pend.setdefault("done", {})
+    out: dict = {"carrier": None, "carrier_ok": bool(done.get("carrier")), "saved": bool(done.get("saved")),
+                 "switched": bool(done.get("switched")), "errors": []}
+    if not done.get("carrier"):
+        try:
+            fix = repair(pend.get("before") or {"rooms": [], "furniture": []}, client.get_map_data(carrier))
+            if fix["rooms"]:
+                client.set_areas(carrier, "room", fix["rooms"])
+            if fix["furniture"] is not None:
+                client.set_furniture(carrier, fix["furniture"])
+            out["carrier"] = {"rooms": len(fix["rooms"] or []),
+                              "furniture": None if fix["furniture"] is None else len(fix["furniture"])}
+            out["carrier_ok"] = done["carrier"] = True
+        except Exception as exc:
+            out["errors"].append(f"putting back map {carrier}: {exc}")
+    if done.get("finished"):
+        return out
     try:
         current, map_list = client.get_map_info()
-        entry = next((m for m in map_list if m.get("map_id") == landed), None)
-        others = [n for mid, n in _names(map_list).items() if mid != landed]
-        if (entry is not None and entry.get("is_saved") is False and name and current == landed
-                and not any(fold(n) == fold(name) for n in others) and client.save_current_map(name) == 0):
-            _, map_list = client.get_map_info()
-            entry = next((m for m in map_list if m.get("map_id") == landed), None)
-        out["saved"] = entry is not None and entry.get("is_saved") is not False
     except Exception as exc:
-        out["errors"].append(f"saving map {landed}: {exc}")
-    if out["saved"] and pend.get("tail"):
+        out["errors"].append(f"reading the maps: {exc}")
+        return out
+    entry = next((m for m in map_list if m.get("map_id") == landed), None)
+    if entry is None:
+        return out          # not there (yet, or the restore failed): nothing more to do on it
+    if entry.get("is_saved") is False:
+        others = [n for mid, n in _names(map_list).items() if mid != landed]
+        why = ("it has no name to save it under" if not name
+               else "it is not the current map" if current != landed
+               else "another map already has that name" if any(fold(n) == fold(name) for n in others) else None)
+        if why:
+            out["errors"].append(f"map {landed} was not saved: {why}")
+        else:
+            try:
+                if client.save_current_map(name) == 0:
+                    _, map_list = client.get_map_info()
+                    entry = next((m for m in map_list if m.get("map_id") == landed), None) or {}
+                    if entry.get("is_saved") is False:
+                        out["errors"].append(f"map {landed} still reads as unsaved after saving it")
+                else:
+                    out["errors"].append(f"the robot did not save map {landed}")
+            except Exception as exc:
+                out["errors"].append(f"saving map {landed}: {exc}")
+    out["saved"] = done["saved"] = entry.get("is_saved") is not False
+    if out["saved"] and pend.get("tail") and not done.get("tail"):
         try:
             new = tail_layers(pend["tail"], client.get_map_data(landed))
             if new["rooms"]:
                 client.set_areas(landed, "room", new["rooms"])
             if new["furniture"]:
                 client.set_furniture(landed, new["furniture"])
+            done["tail"] = True
         except Exception as exc:
             out["errors"].append(f"room names and furniture of map {landed}: {exc}")
-    if pend.get("copy") and out["saved"]:
+    if pend.get("copy") and out["saved"] and not done.get("switched"):
         try:
             client.set_current_map(carrier)
+            out["switched"] = done["switched"] = True
         except Exception as exc:
             out["errors"].append(f"switching back to map {carrier}: {exc}")
+    # The one-off steps had their go once the restored map was there.
+    done["finished"] = True
     return out

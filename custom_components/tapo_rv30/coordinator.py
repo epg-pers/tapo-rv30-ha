@@ -59,7 +59,7 @@ from .mapdata import (
 )
 from .maprender import _dot, _png, _px_transform, render_map, render_record, room_mask_png, rotation_of
 from .setup_apply import robot_key
-from .tpap import AuthError, TapoVacuumClient
+from .tpap import AuthError, TapoVacuumClient, _opt_int
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -778,16 +778,25 @@ class TapoCoordinator(DataUpdateCoordinator):
         if self._restore_store is not None:
             self.hass.async_create_task(self._restore_store.async_save({"pending": self.pending_restore}))
 
+    RESTORE_GIVE_UP_S = 600     # a restored map that has not shown up by then is not coming
+
     def expect_restore(self, map_id: int, name: str | None, carrier: int, before: dict | None = None,
                        tail: dict | None = None, copy: bool = False) -> None:
         """A backup is being restored onto a carrier map and comes back as a new, unsaved map.
         before is the carrier's rooms and furniture, which the robot overwrites with the
         backup's: put back (with the restored map saved and given the backup's names) as soon
-        as the map shows up, by the service or, if it stopped watching, by the next poll. A
-        lost map is then finished once saved. Kept across restarts."""
+        as the map shows up, by the service or, if it stopped watching, by a later poll; if the
+        map never shows up, the carrier is still put back. A lost map is then finished once
+        saved. Kept across restarts."""
         self.pending_restore = {"map_id": map_id, "name": name, "carrier": carrier, "before": before,
-                                "tail": tail, "copy": copy, "tidied": before is None}
+                                "tail": tail, "copy": copy, "tidied": before is None, "started": time.time(),
+                                "done": {}}
         self._save_restore()
+
+    def restore_unfinished(self) -> dict | None:
+        """A restore whose carrier has not been put back yet: no other map write until it is."""
+        pend = self.pending_restore
+        return pend if pend and not pend.get("tidied", True) else None
 
     def _drop_restore(self, pend: dict) -> None:
         """Clear the pending restore it finished, unless a newer restore replaced it meanwhile."""
@@ -800,38 +809,60 @@ class TapoCoordinator(DataUpdateCoordinator):
         if not pend or self._finishing:
             return
         m = next((x for x in self.maps if x["id"] == pend["map_id"]), None)
+        if not pend.get("tidied", True):
+            given_up = m is None and (pend.get("failed")
+                                      or time.time() - (pend.get("started") or 0) > self.RESTORE_GIVE_UP_S)
+            if m is not None or given_up:
+                self._finishing = True
+                self._background(self._tidy_in_background(pend), "tidy restore")
+            return
         if m is None:
             return
-        if not pend.get("tidied", True):
-            self._finishing = True
-            self._background(self._tidy_in_background(pend), "tidy restore")
-        elif pend.get("copy"):
+        if pend.get("copy"):
             self._drop_restore(pend)
         elif m.get("saved"):
             self._finishing = True
             self._background(self.async_finish_restore(), "finish restore")
 
     async def _tidy_in_background(self, pend: dict) -> None:
+        from homeassistant.components import persistent_notification
         try:
             if self.map_busy or self.map_lock.locked() or await self._robot_working():
                 return      # a later poll tries again, once docked
             async with self.map_lock:
+                if self.pending_restore is not pend or pend.get("tidied", True):
+                    return  # finished (or replaced) while this waited
                 out = await self.async_tidy_restore(pend)
-            if out is not None and pend.get("copy") and out["saved"]:
-                from homeassistant.components import persistent_notification
-                persistent_notification.async_create(
-                    self.hass, f"The copy \"{pend.get('name')}\" is saved." + (
-                        f" Not everything went to plan: {'; '.join(out['errors'])}." if out["errors"] else ""),
-                    title=f"{self.device_name}: map copied", notification_id=f"{DOMAIN}_restore_{pend['map_id']}")
+            if out is None or not pend.get("tidied"):
+                return
+            carrier = next((x["name"] for x in self.maps if x["id"] == pend["carrier"]), None) or f"map {pend['carrier']}"
+            problems = f" Not everything went to plan: {'; '.join(out['errors'])}." if out["errors"] else ""
+            if not pend["done"].get("finished"):
+                msg, title = (f"The restore did not complete: the restored map never appeared. \"{carrier}\" "
+                              f"was put back as it was.{problems}"), "map restore did not complete"
+            elif pend.get("copy"):
+                msg = (f"The copy \"{pend.get('name')}\" is saved" if out["saved"] else
+                       f"The copy came back as map {pend['map_id']} but is not saved; save it in the Tapo app")
+                msg += f", and \"{carrier}\" was put back as it was.{problems}"
+                title = "map copied"
+            else:
+                return      # a lost map: finished (and notified) once saved
+            persistent_notification.async_create(self.hass, msg, title=f"{self.device_name}: {title}",
+                                                 notification_id=f"{DOMAIN}_restore_{pend['map_id']}")
         finally:
             self._finishing = False
 
     async def async_tidy_restore(self, pend: dict) -> dict | None:
-        """Run mapcopy.tidy for a pending restore whose map has landed (map lock held by the
-        caller). Marks it tidied once the carrier is put back; a copy is then done. Returns the
-        tidy result, or None if the robot could not be read (tried again on a later poll)."""
+        """Run mapcopy.tidy for a pending restore (map lock held by the caller), unless the
+        robot is still applying a backup (it may not have written to the carrier yet). Once the
+        carrier is put back and the restored map has had its steps, or it is given up on, the
+        restore is tidied; a copy, or a restore that never landed, is then done. Returns the
+        tidy result, or None to try again on a later poll."""
         from . import mapcopy
         try:
+            br = await self.hass.async_add_executor_job(self.client.get_map_br_process)
+            if _opt_int(br.get("type")) == 2 and _opt_int(br.get("status")) == 2:
+                return None
             out = await self.hass.async_add_executor_job(mapcopy.tidy, self.client, pend)
         except Exception as exc:
             _LOGGER.warning("%s: tidying up after the restore of map %s failed (%s); trying again later",
@@ -840,13 +871,19 @@ class TapoCoordinator(DataUpdateCoordinator):
         if out["errors"]:
             _LOGGER.warning("%s: after the restore of map %s: %s", self.device_name, pend.get("map_id"),
                             "; ".join(out["errors"]))
-        if out["carrier_ok"] and self.pending_restore is pend:
-            pend["tidied"] = True
-            pend.pop("before", None)
-            if pend.get("copy"):
-                self._drop_restore(pend)
+        if self.pending_restore is pend:
+            landed = pend["done"].get("finished")
+            given_up = not landed and (pend.get("failed")
+                                       or time.time() - (pend.get("started") or 0) > self.RESTORE_GIVE_UP_S)
+            if out["carrier_ok"] and (landed or given_up):
+                pend["tidied"] = True
+                pend.pop("before", None)
+                if pend.get("copy") or given_up:
+                    self._drop_restore(pend)
+                else:
+                    self._save_restore()
             else:
-                self._save_restore()
+                self._save_restore()    # keep what worked, so a retry only redoes the rest
         await self.async_request_map_refresh()
         return out
 

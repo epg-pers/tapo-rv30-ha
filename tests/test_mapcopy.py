@@ -209,3 +209,14 @@ def test_reid_rejects_short_or_truncated_input():
     head = cut[:25] + hashlib.md5(cut[62:]).hexdigest().encode() + b"\x01" + (size - 20).to_bytes(4, "big")
     with pytest.raises(ValueError):
         mapbackup.reid_bkmap(head + cut[62:], 1792933921)
+
+
+def test_tidy_retry_only_redoes_the_carrier():
+    c, pend, good = _robot(fail={"set_areas"})
+    first = mapcopy.tidy(c, pend)
+    assert not first["carrier_ok"] and first["saved"] and pend["done"]["finished"]
+    c.fail.clear()
+    c.calls.clear()
+    again = mapcopy.tidy(c, pend)
+    assert again["carrier_ok"] and c.maps[OLD]["area_list"] == good
+    assert [n for n, *_ in c.calls] == ["set_areas", "set_furniture"]       # no second save or switch
