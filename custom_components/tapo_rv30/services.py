@@ -21,6 +21,7 @@ _LOGGER = logging.getLogger(__name__)
 SERVICES = ("clean_rooms", "set_room_settings", "clean_zone", "run_schedule", "send_raw",
             "get_clean_records", "run_preset", "set_map", "go_to",
             "add_schedule", "set_schedule", "remove_schedule", "remove_matter_fabric", "get_matter_setup_code",
+            "rename_map",
             "fetch_cloud_map_backups", "save_map_setup", "apply_map_setup", "restore_map_backup",
             "create_preset", "update_preset", "delete_preset", "remote_drive")
 
@@ -187,6 +188,23 @@ async def _send(hass: HomeAssistant, call: ServiceCall, fn, *args) -> None:
         raise ServiceValidationError(f"{call.service}: the vacuum {exc}") from exc
     except Exception as exc:
         raise HomeAssistantError(f"{call.service}: vacuum rejected the command: {exc}") from exc
+
+
+MAP_NAME_MAX = 32     # the Tapo app's map name limit
+
+
+def _match_map(call: ServiceCall, names: dict[int, str], ref) -> int:
+    """One map from a name or id: an id or exact name first, then a unique partial name."""
+    if ref in (None, ""):
+        raise ServiceValidationError(f"{call.service}: 'map' (name or id) is required")
+    from .mapdata import fold
+    wanted = fold(str(ref).strip())
+    hits = [mid for mid, n in names.items() if str(mid) == wanted or fold(n) == wanted]
+    hits = hits or [mid for mid, n in names.items() if wanted and wanted in fold(n)]
+    if len(hits) != 1:
+        raise ServiceValidationError(
+            f"{call.service}: no unique map matching '{ref}'. Available: {sorted(names.values())}")
+    return hits[0]
 
 
 async def _read(hass: HomeAssistant, call: ServiceCall, fn, *args):
@@ -667,15 +685,43 @@ def async_setup_services(hass: HomeAssistant) -> None:
             names = await hass.async_add_executor_job(coord.map_names)
         except Exception as exc:
             raise HomeAssistantError(f"{call.service}: could not read maps from the vacuum: {exc}") from exc
-        from .mapdata import fold
-        wanted = fold(str(ref).strip())
-        hits = [mid for mid, n in names.items() if str(mid) == wanted or fold(n) == wanted]
-        hits = hits or [mid for mid, n in names.items() if wanted and wanted in fold(n)]
-        if len(hits) != 1:
-            raise ServiceValidationError(
-                f"{call.service}: no unique map matching '{ref}'. Available: {sorted(names.values())}")
-        await _send(hass, call, coord.client.set_current_map, hits[0])
+        await _send(hass, call, coord.client.set_current_map, _match_map(call, names, ref))
         await coord.async_request_map_refresh()
+
+    async def handle_rename_map(call: ServiceCall) -> ServiceResponse:
+        """Rename a saved map. Everything in this integration (schedules, presets, room freshness,
+        the planner, area mappings, setups, history) follows maps by id, so only references by
+        the old name (automations passing map: <name>) need updating."""
+        coord = _one(hass, call)
+        _require_idle(call, coord)
+        new = " ".join(str(call.data.get("name") or "").split())
+        # The app's limit, counted as it counts (UTF-16 units).
+        if not new or len(new.encode("utf-16-le")) // 2 > MAP_NAME_MAX:
+            raise ServiceValidationError(f"{call.service}: 'name' must be 1 to {MAP_NAME_MAX} characters")
+        if coord.map_lock.locked():
+            raise ServiceValidationError(f"{call.service}: {coord.device_name} is having its map written; "
+                                         "try again shortly")
+        async with coord.map_lock:
+            names = await _read(hass, call, coord.map_names)
+            map_id = _match_map(call, names, call.data.get("map"))
+            old = names.get(map_id) or ""
+            if any(m.get("id") == map_id and m.get("saved") is False for m in coord.maps):
+                raise ServiceValidationError(f"{call.service}: that map is not saved yet; save it in the "
+                                             "Tapo app first")
+            if new == old:
+                raise ServiceValidationError(f"{call.service}: the map is already called '{old}'")
+            from .mapdata import fold
+            clash = [n for mid, n in names.items() if mid != map_id and fold(n) == fold(new)]
+            if clash:
+                # Two maps of one name would make every map: <name> reference ambiguous.
+                raise ServiceValidationError(f"{call.service}: another map is already called '{clash[0]}'")
+            await _send(hass, call, coord.client.rename_map, map_id, new)
+            after = await _read(hass, call, coord.map_names)
+        if after.get(map_id) != new:
+            raise HomeAssistantError(f"{call.service}: the robot accepted the rename but still reports "
+                                     f"'{after.get(map_id)}'")
+        await coord.async_request_map_refresh()
+        return {"map_id": map_id, "old_name": old, "name": new}
 
     async def handle_fetch_cloud_map_backups(call: ServiceCall) -> ServiceResponse:
         import uuid
@@ -1024,6 +1070,7 @@ def async_setup_services(hass: HomeAssistant) -> None:
             fn = _admin_only(hass, fn)
         hass.services.async_register(DOMAIN, name, fn, supports_response=SupportsResponse.OPTIONAL)
     hass.services.async_register(DOMAIN, "set_map", handle_set_map)
+    hass.services.async_register(DOMAIN, "rename_map", handle_rename_map, supports_response=SupportsResponse.OPTIONAL)
     hass.services.async_register(DOMAIN, "go_to", handle_go_to)
     hass.services.async_register(DOMAIN, "remote_drive", handle_remote_drive,
                                  supports_response=SupportsResponse.OPTIONAL)

@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.33.0b1
+
+### Added
+
+- **Rename a map.** `tapo_rv30.rename_map` (`map`: name or id, `name`) and a **Rename** button in a new **Maps** card on the sidebar page's Settings tab rename a saved map on the robot, the same call the Tapo app makes (only the map's id and new name are sent). The robot must be idle; a name over 32 characters, unchanged, or already used by another map is refused; the robot is read back to confirm the new name.
+  - Schedules, presets, room freshness, the planner, area mappings, saved map setups and clean map history all follow a map by its id, so a rename does not affect them. Automations that pass the old name as `map:` to `set_map`, `clean_rooms`, `add_schedule` or `apply_map_setup` need the new name; passing the map id avoids that.
+
 ## v0.32.2
 
 ### Fixed

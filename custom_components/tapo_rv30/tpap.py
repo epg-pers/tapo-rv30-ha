@@ -1146,6 +1146,12 @@ class TapoVacuumClient:
         """Switch the active map (the robot relocalises on it)."""
         self.send("setMapInfo", {"current_map_id": int(map_id)})
 
+    def rename_map(self, map_id: int, name: str) -> None:
+        """Rename a saved map, as the Tapo app does: one map_list entry with only its id and the
+        new name (base64 UTF-8). Nothing else goes in it: the same entry's is_base_exist would
+        save or delete the map."""
+        self.send("setMapInfo", {"map_list": [{"map_id": int(map_id), "map_name": _b64e(name.encode("utf-8"))}]})
+
     # ---- Presets (Tapo app "customisation rules") ------------------------------------
     def get_presets(self) -> list[dict]:
         """Saved presets: [{rule_id, rule_name (b64), map_id, mode, invalid}, ...]."""

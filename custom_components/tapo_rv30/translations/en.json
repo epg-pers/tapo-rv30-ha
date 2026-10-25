@@ -190,6 +190,20 @@
         }
       }
     },
+    "rename_map": {
+      "name": "Rename map",
+      "description": "Rename a saved map on the robot, as the Tapo app does. The robot must be idle. Schedules, presets, room freshness, the planner, area mappings and saved setups follow the map by id and are unaffected; automations that pass the old name as 'map' need the new one (passing the map id avoids that).",
+      "fields": {
+        "map": {
+          "name": "Map",
+          "description": "The map to rename: its current name (partial, accent-insensitive) or id."
+        },
+        "name": {
+          "name": "New name",
+          "description": "1 to 32 characters, not already used by another map."
+        }
+      }
+    },
     "go_to": {
       "name": "Go to point",
       "description": "Drive the robot to a point given in the map's real coordinates (mm, same frame as the vacuum's position_mm attribute and tapo_rv30.clean_zone). Stop it with vacuum.stop; vacuum.return_to_base sends it home.",

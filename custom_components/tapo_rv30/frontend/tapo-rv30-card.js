@@ -10,7 +10,7 @@
  * the vacuum's device automatically.
  */
 
-const CARD_VERSION = "0.32.2";
+const CARD_VERSION = "0.33.0b1";
 
 const ICONS = {
   start: "mdi:play", pause: "mdi:pause", stop: "mdi:stop", dock: "mdi:home-import-outline",

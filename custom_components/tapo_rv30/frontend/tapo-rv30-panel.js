@@ -1365,7 +1365,20 @@ class TapoRV30Panel extends HTMLElement {
     const sel = r.selects.map((id) => { const s = this._st(id); return `<div class="row"><div class="main"><div class="t">${esc(strip(id))}</div></div><select data-sel="${esc(id)}">${(s.attributes.options || []).map((o) => `<option ${o === s.state ? "selected" : ""}>${esc(o)}</option>`).join("")}</select></div>`; }).join("");
     const num = r.numbers.map((id) => { const s = this._st(id); return `<div class="row"><div class="main"><div class="t">${esc(strip(id))}</div><div class="s">${esc(s.state)} ${esc(s.attributes.unit_of_measurement || "")}</div></div><input type="range" data-num="${esc(id)}" min="${toNum(s.attributes.min)}" max="${toNum(s.attributes.max, 100)}" step="${toNum(s.attributes.step, 1) || 1}" value="${esc(s.state)}"></div>`; }).join("");
     const tim = r.times.map((id) => { const s = this._st(id); return `<div class="row"><div class="main"><div class="t">${esc(strip(id))}</div></div><input type="time" data-time="${esc(id)}" value="${esc(String(s.state).slice(0, 5))}"></div>`; }).join("");
-    pane.innerHTML = `<ha-card><div class="card"><h3><span>Settings</span></h3>${sw}${sel}${tim}${num}${(sw || sel || num || tim) ? "" : `<div class="empty">No settings entities.</div>`}</div></ha-card>`;
+    // Saved maps, renamed on the robot as in the app. Everything here follows a map by id, so a
+    // rename only touches automations that name the map.
+    const cam = this._st(r.camera), maps = ((cam && cam.attributes.maps) || []).filter((m) => m.saved !== false);
+    const mapRows = maps.map((m) => `<div class="row"><div class="main"><div class="t">${esc(m.name || `Map ${m.id}`)}</div><div class="s">${m.current ? "Current map" : "Saved map"} &middot; id ${esc(m.id)}</div></div>
+      <button class="btn" data-rename="${esc(m.id)}" data-name="${esc(m.name || "")}"><ha-icon icon="mdi:rename-outline"></ha-icon>Rename</button></div>`).join("");
+    pane.innerHTML = `${maps.length ? `<ha-card><div class="card"><h3><span>Maps</span></h3>${mapRows}</div></ha-card>` : ""}
+      <ha-card><div class="card"><h3><span>Settings</span></h3>${sw}${sel}${tim}${num}${(sw || sel || num || tim) ? "" : `<div class="empty">No settings entities.</div>`}</div></ha-card>`;
+    pane.querySelectorAll("[data-rename]").forEach((b) => b.onclick = async () => {
+      const name = prompt(`New name for "${b.dataset.name}" (up to 32 characters). Automations that use the old name will need the new one.`, b.dataset.name);
+      if (name == null || !name.trim() || name.trim() === b.dataset.name) return;
+      b.disabled = true;
+      await this._call(DOMAIN, "rename_map", { map: b.dataset.rename, name: name.trim() }, { entity_id: this._robot });
+      b.disabled = false;
+    });
     pane.querySelectorAll("[data-sw]").forEach((b) => b.onclick = () => this._call("switch", b.classList.contains("on") ? "turn_off" : "turn_on", {}, { entity_id: b.dataset.sw }));
     // A refused change puts the control back to what the entity really holds, so it does not look saved.
     const back = (ok, e, id, text) => { const s = this._st(id); if (!ok && s && e.isConnected) e.value = text(s.state); };

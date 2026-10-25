@@ -275,6 +275,23 @@ set_map:
       selector:
         text: {}
 
+rename_map:
+  target:
+    entity:
+      domain: vacuum
+      integration: tapo_rv30
+  fields:
+    map:
+      required: true
+      example: Downstairs
+      selector:
+        text: {}
+    name:
+      required: true
+      example: Ground floor
+      selector:
+        text: {}
+
 go_to:
   target:
     entity:

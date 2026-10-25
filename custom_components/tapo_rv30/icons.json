@@ -51,6 +51,9 @@
     "set_map": {
       "service": "mdi:map"
     },
+    "rename_map": {
+      "service": "mdi:rename-outline"
+    },
     "go_to": {
       "service": "mdi:map-marker-right"
     },
