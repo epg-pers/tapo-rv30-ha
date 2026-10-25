@@ -42,7 +42,8 @@ Same domain, so your config entry and entities carry over; see
 - **Per-room "last cleaned"**: worked out from the robot's own run maps, shown when you hold a room, and available to automations
 - **Sidebar page**: map, a schedules editor for the robot's own schedules, history and statistics, rooms with freshness, maintenance and settings, no dashboard needed (switch it off in the integration options if you prefer)
 - **Smart cleaning planner**: keeps each room within a target like "every 2 days" and cleans the due rooms when nobody is home, inside your time window, leaving out rooms whose motion sensors say they are in use; starts in preview mode
-- **Map editor** on the sidebar page: draw no-go zones and virtual walls and place furniture straight onto the live map and save them to the robot, with undo, no app
+- **Map editor** on the sidebar page: draw no-go zones and virtual walls and place furniture on any saved map and save them to the robot, with undo, no app; edit a map the robot is not using without switching it, and turn the map from the editor
+- **Map management**: rename, turn, lock or unlock, preview, copy and delete maps from the sidebar page, stored on the robot exactly as the Tapo app stores them, with progress shown while the robot catches up
 - **Map backup and recovery**: a **Backups** tab that shows every backup as a thumbnail and restores one to the robot in a press; restore a whole map backup to the robot locally (Home Assistant serves it on the LAN and the robot applies it, no cloud), over its map or as a new named map; copy a map to a new one to edit or test on without touching the original; save a map's no-go zones, virtual walls, carpets and room names and re-apply them after the robot re-maps the floor; plus local copies of your cloud map backups so they survive even if TP-Link's are lost
 - **Remote drive**: take control from the sidebar page and steer the robot with arrows or keys, like the Tapo app
 - **Go to a point** from the card: tap the map, press Go
@@ -59,8 +60,8 @@ Same domain, so your config entry and entities carry over; see
   suction, water and passes, the same way the Tapo app does; each also gets a button
 - **Robot notices** (dust bag full, area unreachable, water tank empty and the rest) as events
   and a device trigger
-- **Go to point**, per-run suction / water / passes, native `vacuum.clean_area` with Home
-  Assistant areas, events for start / finish / error
+- Per-run suction / water / passes, native `vacuum.clean_area` with Home Assistant areas,
+  events for start / finish / error
 - Adaptive polling, hardened TPAP login, a repair issue when the robot stops answering,
   diagnostics, reconfigure and reauth from the integration page
 
