@@ -81,8 +81,11 @@ async def ws_edit_get(hass: HomeAssistant, connection: websocket_api.ActiveConne
         def _draw():
             # The angle from the robot itself: a turn just made may not have reached the cache.
             from .maprender import rotation_of
-            _, map_list = coord.client.get_map_info()
-            turn = next((rotation_of(m.get("rotate_angle")) for m in map_list if m.get("map_id") == map_id), 0)
+            try:
+                _, map_list = coord.client.get_map_info()
+                turn = next((rotation_of(m.get("rotate_angle")) for m in map_list if m.get("map_id") == map_id), 0)
+            except Exception:
+                turn = coord.rotation_for(map_id)
             img, _, geom = render_map(data, turn)
             return "data:image/png;base64," + base64.b64encode(_png(img)).decode(), geom
         try:
@@ -134,10 +137,12 @@ async def ws_edit_apply(hass: HomeAssistant, connection: websocket_api.ActiveCon
         result: dict[str, Any] = {}
         previous = None
         try:
-            # setAreaInfo writes the active map; switch to the target first (and back after).
+            # setAreaInfo and setFurnitureInfo write the map_id they are given, current or not
+            # (checked on an RV30 Max Plus), so the robot stays on its map. The room order is not
+            # known to, so for that alone switch to the map first (and back after, checked).
             info = await hass.async_add_executor_job(coord.client.send, "getMapInfo")
             current = (info.get("result") or {}).get("current_map_id")
-            if current != map_id:
+            if current != map_id and msg.get("order"):
                 previous = current
                 await hass.async_add_executor_job(coord.client.set_current_map, map_id)
             # The editor only round-trips id and shape; keep the robot's own fields (label,
@@ -172,9 +177,15 @@ async def ws_edit_apply(hass: HomeAssistant, connection: websocket_api.ActiveCon
             return
         finally:
             if previous is not None:      # leave the robot on the map it was using
+                back = None
                 try:
                     await hass.async_add_executor_job(coord.client.set_current_map, previous)
+                    back = await hass.async_add_executor_job(coord.client.get_map_info)
                 except Exception as exc:
                     _LOGGER.warning("Could not switch %s back to map %s: %s", coord.device_name, previous, exc)
+                if not back or back[0] != previous:
+                    result["switched_back"] = False
+                    result["warning"] = (f"{coord.device_name} could not be switched back to map {previous}; "
+                                         "choose its map again in the map selector")
     await coord.async_request_map_refresh()
     connection.send_result(msg["id"], {"map_id": map_id, "result": result})

@@ -11,6 +11,7 @@
 
 ### Fixed
 
+- The map editor no longer switches the robot to another map to save edits to it: no-go zones, walls, furniture and room names are written straight to that map (verified on an RV30 Max Plus). Only a room order change still switches, and if the robot does not switch back the save says so instead of reporting plain success.
 - Saving room names from the map editor (`tapo_rv30/map/edit_apply` with `rooms`) no longer clears the rooms' colours and floor settings: the rest of each room is kept as the robot has it.
 
 ## v0.35.0

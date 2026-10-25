@@ -894,10 +894,13 @@ def async_setup_services(hass: HomeAssistant) -> None:
         coord = _one(hass, call)
         try:
             result = await run(call)
+        except ServiceValidationError:
+            raise       # refused before any work: another job's progress bar must not end
         except Exception as exc:
             coord.map_job(job, "Failed", 100, done=True, error=str(exc))
             raise
-        ok = bool(result.get("applied")) and not result.get("note")
+        ok = (bool(result.get("applied")) and not result.get("note")
+              and result.get("restored_map_saved") is not False)
         coord.map_job(job, "Done" if ok else "Finished with a problem", 100, done=True,
                       error=None if ok else (result.get("note") or "the robot did not confirm it"))
         return result
@@ -1276,7 +1279,7 @@ def async_setup_services(hass: HomeAssistant) -> None:
                 seen += 1
                 last = p
                 if progress is not None:
-                    progress(_opt_int(p.get("process")) or 0)
+                    progress(max(0, min(100, _opt_int(p.get("process")) or 0)))
                 if st in (3, 13):
                     return p
             elif seen and t == 0 and st == 0 and kind == 1:

@@ -385,6 +385,8 @@ class TapoRV30Panel extends HTMLElement {
   // would throw away what the user is typing, so hold it until they are done.
   _formBusy() {
     if (this._tab === "schedules" && this._editing) return true;
+    // A map row being renamed, copied or deleted (and its progress bar) is not redrawn under the user.
+    if (this._tab === "settings" && this.shadowRoot.querySelector(".maprow input.rename, .maprow [data-act]")) return true;
     const a = this.shadowRoot && this.shadowRoot.activeElement;
     return !!(a && /^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName) && a.closest(".pane"));
   }
@@ -796,39 +798,45 @@ class TapoRV30Panel extends HTMLElement {
         <button class="btn primary esave"><ha-icon icon="mdi:content-save"></ha-icon>Save to robot</button>
       </div>
       <div class="s estatus"></div>
+      <div class="s enote"></div>
     </div></ha-card>`;
     const q = (s) => pane.querySelector(s);
     this._editEl = { canvas: q(".ecanvas"), rooms: q(".erooms"), status: q(".estatus"), furn: q(".efurn") };
     this._edit = { tool: "select", sel: null, areas: null, furniture: [], rooms: [], undo: [], img: null, geom: null, mapId: null,
-      want: this._editWant || null };
-    this._editEl.map = q(".emap"); this._editEl.use = q(".euse");
+      want: (this._editWant || {})[this._robot] || null, robot: this._robot };
+    this._editEl.map = q(".emap"); this._editEl.use = q(".euse"); this._editEl.note = q(".enote");
     q(".emap").onchange = (e) => {
       if (this._edit.undo.length) {     // never drop unsaved edits by switching maps
         e.target.value = String(this._edit.mapId);
         this._editEl.status.textContent = "Save or discard your changes before editing another map.";
         return;
       }
-      this._editWant = this._edit.want = Number(e.target.value); this._editLoad();
+      this._edit.want = Number(e.target.value);
+      this._editWant = { ...(this._editWant || {}), [this._robot]: this._edit.want };
+      this._editLoad();
     };
     pane.querySelectorAll(".eturn").forEach((b) => b.onclick = async () => {
       if (this._edit.mapId == null || !this._edit.geom) return;
       const to = ((this._edit.geom.rotation || 0) + Number(b.dataset.dir)) % 360;
-      pane.querySelectorAll(".eturn").forEach((x) => { x.disabled = true; });
+      const turns = pane.querySelectorAll(".eturn"), picker = this._editEl.map;
+      turns.forEach((x) => { x.disabled = true; }); picker.disabled = true;
       this._editEl.status.textContent = "Turning the map...";
       // Edits are kept in mm, so unsaved ones survive the turn: only the picture is redrawn.
-      if (await this._call(DOMAIN, "set_map_rotation", { map: String(this._edit.mapId), rotation: to }, { entity_id: this._robot }))
-        await this._editLoad(true);
-      else this._editEl.status.textContent = "";
-      pane.querySelectorAll(".eturn").forEach((x) => { x.disabled = !this._isAdmin(); });
+      try {
+        if (await this._call(DOMAIN, "set_map_rotation", { map: String(this._edit.mapId), rotation: to }, { entity_id: this._robot }))
+          await this._editLoad(true);
+        else this._editEl.status.textContent = "";
+      } finally { turns.forEach((x) => { x.disabled = false; }); picker.disabled = false; }
     });
     q(".euse").onclick = async () => {
       const b = q(".euse"); b.disabled = true;
       if (await this._call(DOMAIN, "set_map", { map: String(this._edit.mapId) }, { entity_id: this._robot })) {
         b.style.display = "none"; this._editEl.status.textContent = "The robot now uses this map.";
+        this._editEl.note.textContent = "";
       }
       b.disabled = false;
     };
-    if (!this._isAdmin()) pane.querySelectorAll(".eturn").forEach((x) => { x.disabled = true; x.title = "Only an administrator can turn maps"; });
+
     this._editFurnTypes(null);
     pane.querySelectorAll(".etool").forEach((b) => b.onclick = () => {
       this._edit.tool = b.dataset.tool; this._edit.sel = null;
@@ -876,10 +884,11 @@ class TapoRV30Panel extends HTMLElement {
   // Loads the chosen map (the current one by default) with its own picture and geometry, drawn
   // together by the integration so they always agree. keep: after a turn, keep the edits made so
   // far (they are in mm) and only redraw.
-  async _editLoad(keep) {
+  async _editLoad(keep, after) {
     const r = this._related(this._robot), cam = this._st(r.camera);
     const maps = ((cam && cam.attributes.maps) || []).filter((m) => m.saved !== false);
     const tok = this._editTok = {}, el = this._editEl;    // a newer load (or pane) wins
+    const was = { map: this._edit.mapId, robot: this._edit.robot };
     let want = this._edit.want;
     if (want == null || !maps.some((m) => m.id === want)) want = cam ? cam.attributes.map_id : null;
     el.map.innerHTML = maps.map((m) => `<option value="${m.id}" ${m.id === want ? "selected" : ""}>${esc(m.name || `Map ${m.id}`)}${m.current ? " (current)" : ""}</option>`).join("");
@@ -896,16 +905,20 @@ class TapoRV30Panel extends HTMLElement {
     img.onload = () => {
       if (this._editTok !== tok) return;
       const c = this._editEl.canvas; c.width = img.naturalWidth; c.height = img.naturalHeight;
-      this._edit.img = img; this._edit.geom = res.geometry; this._edit.mapId = res.map_id;
+      // Edits are only carried over onto the same map of the same robot (a turn); anything else
+      // starts from what that map has.
+      const same = keep && was.map === res.map_id && was.robot === this._robot && this._edit.areas;
+      this._edit.img = img; this._edit.geom = res.geometry; this._edit.mapId = res.map_id; this._edit.robot = this._robot;
       el.use.style.display = res.current ? "none" : "";
-      if (!keep) {
+      if (!same) {
         this._edit.areas = res.areas || {}; this._edit.furniture = res.furniture || []; this._edit.rooms = res.rooms || [];
         this._edit.sel = null; this._edit.undo = [];
       }
       this._editFurnTypes(res.furniture_types);
       this._editRenderRooms(); this._editDraw();
       const info = maps.find((m) => m.id === res.map_id) || {};
-      this._editEl.status.textContent = [res.current ? "" : "Editing a map the robot is not using right now; saving writes to this map.",
+      el.status.textContent = after || "";
+      el.note.textContent = [res.current ? "" : "Editing a map the robot is not using right now; saving writes to this map and the robot stays on its own.",
         info.locked ? "This map is locked: cleans do not update it, but no-go zones, walls and furniture can still be edited." : ""].filter(Boolean).join(" ");
     };
     img.src = res.picture;
@@ -1040,7 +1053,10 @@ class TapoRV30Panel extends HTMLElement {
       areas: { forbid: this._edit.areas.forbid || [], virtual_wall: this._edit.areas.virtual_wall || [] },
       furniture: this._edit.furniture };
     this._editEl.status.textContent = "Saving to robot...";
-    try { await this._hass.callWS(payload); this._editEl.status.textContent = "Saved."; this._editLoad(); }
+    try {
+      const r = await this._hass.callWS(payload), w = r && r.result && r.result.warning;
+      this._editLoad(false, w ? `Saved, but ${w}.` : "Saved.");
+    }
     catch (err) { this._editEl.status.textContent = "Save failed: " + (err.message || err); }
   }
 
