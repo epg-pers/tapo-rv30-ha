@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.36.1
+
+### Fixed
+
+- **A copy could report "saving failed" when it had worked.** The robot can stop answering while it unpacks a backup; the restore gave up waiting after a few missed reads, found the new map already listed and reported the save as failed, although Home Assistant then finished it on the next poll. It now keeps waiting (up to about three minutes), retries the tidy-up for a minute while the robot is still busy, and if it is still busy after that says it is finishing in the background (with a notification when done) instead of reporting a failure.
+- A harmless error was logged after every copy while removing its temporary file.
+
+### Changed
+
+- **Map changes show that they are in progress.** Switching maps (the map buttons on the card and the editor's Use this map), locking, unlocking, turning, renaming and deleting a map now show a moving bar and what is happening until the robot's change appears, instead of the old state sitting there for a few seconds.
+
 ## v0.36.0
 
 ### Added

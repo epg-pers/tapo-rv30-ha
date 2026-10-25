@@ -10,7 +10,7 @@
  * the vacuum's device automatically.
  */
 
-const CARD_VERSION = "0.36.0";
+const CARD_VERSION = "0.36.1";
 
 const ICONS = {
   start: "mdi:play", pause: "mdi:pause", stop: "mdi:stop", dock: "mdi:home-import-outline",
@@ -104,6 +104,11 @@ canvas { display: block; width: 100%; height: auto; touch-action: none; cursor: 
   background: color-mix(in srgb, var(--card-background-color) 80%, transparent); backdrop-filter: blur(6px); }
 .floors button { border: none; cursor: pointer; padding: 5px 10px; border-radius: 999px; font-size: .78em; background: transparent; color: var(--secondary-text-color); }
 .floors button.on { background: var(--primary-color); color: var(--text-primary-color, #fff); }
+.floors button.busy { color: var(--text-primary-color, #fff); background: linear-gradient(90deg, var(--primary-color) 0%, color-mix(in srgb, var(--primary-color) 45%, transparent) 50%, var(--primary-color) 100%); background-size: 200% 100%; animation: tapo-busy 1.2s linear infinite; }
+.mapwrap .switching { position: absolute; left: 0; right: 0; top: 0; height: 3px; overflow: hidden; z-index: 3; }
+.mapwrap .switching::after { content: ""; position: absolute; top: 0; bottom: 0; width: 35%; background: var(--primary-color); animation: tapo-slide 1.1s ease-in-out infinite; }
+@keyframes tapo-busy { from { background-position: 200% 0; } to { background-position: 0 0; } }
+@keyframes tapo-slide { from { left: -35%; } to { left: 100%; } }
 .mapwrap.has-go .floors { bottom: 60px; }
 .sheet { position: absolute; inset: 0; display: flex; align-items: flex-end; background: rgba(0,0,0,.35); backdrop-filter: blur(2px); z-index: 3; }
 .sheet .panel { width: 100%; background: var(--card-background-color); border-radius: 16px 16px 0 0; padding: 14px 16px 16px; box-shadow: 0 -6px 24px rgba(0,0,0,.3); }
@@ -439,17 +444,40 @@ class TapoRV30Card extends HTMLElement {
 
   _renderFloors() {
     const el = this._el.floors, maps = this._mapAttrs().maps || [];
+    // A switch in progress shows until the robot reports the new map as current (it relocalises
+    // and the map is redrawn, a few seconds), or a minute and a half at most.
+    const sw = this._switching;
+    if (sw && (maps.some((m) => m.id === sw.id && m.current) || Date.now() - sw.since > 90000)) this._switching = null;
+    this._showSwitching(!!this._switching);
     if (maps.length < 2) { el.hidden = true; return; }
     el.hidden = false;
     // Rebuilding unchanged buttons on every poll would drop keyboard focus.
-    const key = JSON.stringify(maps.map((m) => [m.id, m.name, !!m.current]));
+    const key = JSON.stringify([maps.map((m) => [m.id, m.name, !!m.current]), this._switching && this._switching.id]);
     if (key === this._floorsKey) return;
     this._floorsKey = key; el.innerHTML = "";
     for (const m of maps) {
-      const b = document.createElement("button"); b.textContent = m.name || `Map ${m.id}`; b.className = m.current ? "on" : "";
-      b.onclick = () => { if (!m.current) this._call("tapo_rv30", "set_map", { map: String(m.id) }, { entity_id: this._config.entity }); };
+      const b = document.createElement("button"), busy = this._switching && this._switching.id === m.id;
+      b.textContent = busy ? `Switching to ${m.name || `Map ${m.id}`}...` : (m.name || `Map ${m.id}`);
+      b.className = busy ? "busy" : m.current ? "on" : "";
+      b.onclick = () => {
+        if (m.current || this._switching) return;
+        this._switching = { id: m.id, since: Date.now() };
+        this._renderFloors();
+        this._hass.callService("tapo_rv30", "set_map", { map: String(m.id) }, { entity_id: this._config.entity }).catch((err) => {
+          this._switching = null; this._renderFloors();
+          const message = (err && (err.message || err.body && err.body.message)) || String(err);
+          this.dispatchEvent(new CustomEvent("hass-notification", { detail: { message }, bubbles: true, composed: true }));
+        });
+      };
       el.appendChild(b);
     }
+  }
+
+  _showSwitching(on) {
+    const wrap = this._el.mapwrap; if (!wrap) return;
+    let bar = wrap.querySelector(".switching");
+    if (on && !bar) { bar = document.createElement("div"); bar.className = "switching"; wrap.appendChild(bar); }
+    else if (!on && bar) bar.remove();
   }
 
   _batteryIcon(p) {

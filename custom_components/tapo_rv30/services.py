@@ -899,6 +899,9 @@ def async_setup_services(hass: HomeAssistant) -> None:
         except Exception as exc:
             coord.map_job(job, "Failed", 100, done=True, error=str(exc))
             raise
+        if result.get("finishing"):
+            coord.map_job(job, "On the robot; finishing in the background", 100, done=True)
+            return result
         ok = (bool(result.get("applied")) and not result.get("note")
               and result.get("restored_map_saved") is not False)
         coord.map_job(job, "Done" if ok else "Finished with a problem", 100, done=True,
@@ -1171,7 +1174,13 @@ def async_setup_services(hass: HomeAssistant) -> None:
                     if lp and lp.get("map_id") == backup_id and not lp.get("tidied", True):
                         if status == 13:
                             lp["failed"] = True     # the map will not land: just put the carrier back
-                        tidy = await live.async_tidy_restore(lp)
+                        # The robot can still be busy with it for a little while (it then refuses):
+                        # give it a minute before leaving the rest to the next polls.
+                        for _ in range(20):
+                            tidy = await live.async_tidy_restore(lp)
+                            if tidy is not None or live.pending_restore is not lp:
+                                break
+                            await asyncio.sleep(3)
                 if status == 3:
                     try:
                         _, map_list = await hass.async_add_executor_job(live.client.get_map_info)
@@ -1196,8 +1205,7 @@ def async_setup_services(hass: HomeAssistant) -> None:
                         os.remove(tmp)
                     except OSError:
                         pass
-                hass.loop.call_later(600 if keep_url else 5,
-                                     lambda: hass.async_create_task(hass.async_add_executor_job(_rm)))
+                hass.loop.call_later(600 if keep_url else 5, lambda: hass.async_add_executor_job(_rm))
         status = _opt_int(process.get("status"))
         saved = bool(tidy and tidy["saved"]) or (bool(landed) and landed.get("is_saved", True) is not False)
         carrier_name = names.get(map_id)
@@ -1210,6 +1218,7 @@ def async_setup_services(hass: HomeAssistant) -> None:
             note = ((note + "; ") if note else "") + "after the restore: " + "; ".join(tidy["errors"])
         put_back = bool(tidy and tidy["carrier_ok"])
         next_steps = None
+        finishing = False
         if code not in (0, None):
             pass
         elif status in (2, None) and carrier:
@@ -1219,6 +1228,11 @@ def async_setup_services(hass: HomeAssistant) -> None:
                           "back as it was" + (f" and saves the new map as \"{new_name}\"." if new_name else
                                               (f" and saves it as \"{label}\"." if label else
                                                "; then save the restored map in the Tapo app.")))
+        elif status == 3 and carrier and (tidy is None or not tidy.get("carrier_ok")) and coord.restore_unfinished():
+            finishing = True
+            next_steps = ("The map is on the robot; Home Assistant is finishing it in the background"
+                          + (f" (saving it as \"{new_name or label}\" and" if (new_name or label) else " (")
+                          + f" putting \"{carrier_name}\" back as it was) and lets you know when it is done.")
         elif status == 3 and new_name:
             if saved:
                 next_steps = (f"Restored as a new map, \"{new_name}\", with the backup's room names and furniture."
@@ -1247,10 +1261,10 @@ def async_setup_services(hass: HomeAssistant) -> None:
                 "restored_map_saved": saved if status == 3 else None,
                 "carrier_repaired": tidy["carrier"] if put_back else None,
                 "source": src, "md5": md5, "url": url, "error_code": code, "process": process,
-                "applied": status == 3, "note": note, "next_steps": next_steps}
+                "applied": status == 3, "finishing": finishing, "note": note, "next_steps": next_steps}
 
     async def _wait_br(coord: TapoCoordinator, kind: int, baseline: dict, src: int | None = None,
-                       tries: int = 45, progress=None) -> dict:
+                       tries: int = 90, progress=None) -> dict:
         """Poll getMapBRProcess until a job of this kind (1 backup, 2 recovery) has finished
         (status 3) or failed (13). A finished job of the same kind still shown from before the
         request (baseline) does not count until something else has been read; a backup that has
@@ -1265,11 +1279,10 @@ def async_setup_services(hass: HomeAssistant) -> None:
                 p = await hass.async_add_executor_job(coord.client.get_map_br_process)
                 misses = 0
             except Exception as exc:
-                # The robot is busy unpacking; one missed read is not a failed job.
+                # The robot often stops answering while it unpacks a backup: missed reads are
+                # not a failed job, so keep asking (within tries).
                 misses += 1
                 _LOGGER.debug("getMapBRProcess failed (%s), %d in a row", exc, misses)
-                if misses >= 5:
-                    break
                 continue
             t, st = _opt_int(p.get("type")), _opt_int(p.get("status"))
             if p == stale:

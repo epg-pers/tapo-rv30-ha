@@ -127,6 +127,11 @@ canvas.chart { width: 100%; height: 140px; display: block; }
 .etools { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 8px; }
 .maprow { flex-wrap: wrap; }
 .maprow .main { flex: 1 1 100%; }
+.maprow .pending { display: flex; align-items: center; gap: 10px; width: 100%; margin-top: 6px; font-size: .86em; color: var(--secondary-text-color); }
+.ibar { position: relative; flex: 1; height: 4px; border-radius: 2px; overflow: hidden; background: color-mix(in srgb, var(--primary-text-color) 12%, transparent); }
+.ibar::after { content: ""; position: absolute; top: 0; bottom: 0; width: 35%; border-radius: 2px; background: var(--primary-color); animation: tapo-slide 1.1s ease-in-out infinite; }
+@keyframes tapo-slide { from { left: -35%; } to { left: 100%; } }
+.btn.busy { opacity: .75; }
 .maprow .mapacts { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; justify-content: flex-end; width: 100%; margin-top: 6px; }
 .emaps { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 8px; }
 .emaps select { flex: 1; min-width: 140px; }
@@ -829,12 +834,22 @@ class TapoRV30Panel extends HTMLElement {
       } finally { turns.forEach((x) => { x.disabled = false; }); picker.disabled = false; }
     });
     q(".euse").onclick = async () => {
-      const b = q(".euse"); b.disabled = true;
-      if (await this._call(DOMAIN, "set_map", { map: String(this._edit.mapId) }, { entity_id: this._robot })) {
-        b.style.display = "none"; this._editEl.status.textContent = "The robot now uses this map.";
-        this._editEl.note.textContent = "";
-      }
-      b.disabled = false;
+      const b = q(".euse"), id = this._edit.mapId, st = this._editEl.status;
+      b.disabled = true;
+      if (!(await this._call(DOMAIN, "set_map", { map: String(id) }, { entity_id: this._robot }))) { b.disabled = false; return; }
+      // The robot relocalises on the map and the map is redrawn: say so until it shows as current.
+      st.innerHTML = `<div class="pending" style="display:flex;gap:10px;align-items:center"><span>Switching the robot to this map...</span><div class="ibar"></div></div>`;
+      const since = Date.now(), timer = setInterval(() => {
+        const cam = this._st(this._related(this._robot).camera);
+        const now = cam && cam.attributes.map_id === id;
+        if (now || Date.now() - since > 90000 || !st.isConnected) {
+          clearInterval(timer);
+          if (!st.isConnected) return;
+          st.textContent = now ? "The robot now uses this map." : "The robot has not confirmed the switch yet; check the map selector.";
+          if (now) { b.style.display = "none"; this._editEl.note.textContent = ""; }
+          b.disabled = false;
+        }
+      }, 1000);
     };
 
     this._editFurnTypes(null);
@@ -1508,6 +1523,17 @@ class TapoRV30Panel extends HTMLElement {
   }
 
   // ---- settings ------------------------------------------------------------------------
+  // Shows a row as busy until done(map entry) holds in the map list (or 90 s), then redraws it.
+  _pendMap(pane, id, label, done) {
+    this._mapPending = { ...(this._mapPending || {}), [String(id)]: { label, done, since: Date.now() } };
+    this._paneSettings(pane);
+    clearInterval(this._mapPendTimer);
+    this._mapPendTimer = setInterval(() => {       // also redraw when nothing else changes
+      if (!pane.isConnected || !Object.keys(this._mapPending || {}).length) { clearInterval(this._mapPendTimer); return; }
+      if (this._tab === "settings" && !this._formBusy()) this._paneSettings(pane);
+    }, 1500);
+  }
+
   _paneSettings(pane) {
     const r = this._related(this._robot), strip = (id) => this._label(id);
     const sw = r.switches.map((id) => { const s = this._st(id); return `<div class="row"><div class="main"><div class="t">${esc(strip(id))}</div></div>${toggle(s.state === "on", strip(id), `data-sw="${esc(id)}"`)}</div>`; }).join("");
@@ -1519,7 +1545,15 @@ class TapoRV30Panel extends HTMLElement {
     const cam = this._st(r.camera), maps = ((cam && cam.attributes.maps) || []).filter((m) => m.saved !== false);
     const admin = this._isAdmin();
     const lockTxt = (m) => m.locked === undefined ? "" : m.auto_locked ? " &middot; locked by the robot" : m.locked ? " &middot; locked" : " &middot; unlocked";
-    const mapRows = maps.map((m) => `<div class="row maprow" data-map="${esc(m.id)}"><div class="main"><div class="t">${esc(m.name || `Map ${m.id}`)}</div><div class="s">${m.current ? "Current map" : "Saved map"} &middot; turned ${esc(m.rotation || 0)}&deg;${lockTxt(m)} &middot; id ${esc(m.id)}</div></div>
+    // A change the robot has accepted but the map list does not show yet (it is re-read and
+    // redrawn, a few seconds): the row says so instead of looking as if nothing happened.
+    const allMaps = (cam && cam.attributes.maps) || [], pend = this._mapPending || {};
+    for (const [id, p] of Object.entries(pend)) {
+      const m = allMaps.find((x) => String(x.id) === id);
+      if (p.done(m) || Date.now() - p.since > 90000) delete pend[id];
+    }
+    const pendHtml = (m) => pend[String(m.id)] ? `<div class="pending"><span>${esc(pend[String(m.id)].label)}</span><div class="ibar"></div></div>` : "";
+    const mapRows = maps.map((m) => pend[String(m.id)] ? `<div class="row maprow" data-map="${esc(m.id)}"><div class="main"><div class="t">${esc(m.name || `Map ${m.id}`)}</div></div>${pendHtml(m)}</div>` : `<div class="row maprow" data-map="${esc(m.id)}"><div class="main"><div class="t">${esc(m.name || `Map ${m.id}`)}</div><div class="s">${m.current ? "Current map" : "Saved map"} &middot; turned ${esc(m.rotation || 0)}&deg;${lockTxt(m)} &middot; id ${esc(m.id)}</div></div>
       <div class="mapacts">
       ${m.locked === undefined ? "" : `<button class="icon-btn" data-lock="${esc(m.id)}" data-to="${m.locked ? "0" : "1"}" ${admin ? `title="${m.locked ? "Unlock: let later cleans update this map" : "Lock: keep this map as it is; later cleans no longer update it"}"` : `disabled title="Only an administrator can lock maps"`}><ha-icon icon="${m.locked ? "mdi:lock" : "mdi:lock-open-variant-outline"}"></ha-icon></button>`}
       <button class="icon-btn" data-preview="${esc(m.id)}" data-name="${esc(m.name || `Map ${m.id}`)}" title="Preview this map"><ha-icon icon="mdi:eye-outline"></ha-icon></button>
@@ -1535,8 +1569,10 @@ class TapoRV30Panel extends HTMLElement {
       // quick second press turns from the new angle instead of repeating the first.
       const both = pane.querySelectorAll(`[data-turn="${b.dataset.turn}"]`);
       both.forEach((x) => { x.disabled = true; });
-      if (!(await this._call(DOMAIN, "set_map_rotation", { map: b.dataset.turn, rotation: Number(b.dataset.to) }, { entity_id: this._robot })))
-        both.forEach((x) => { x.disabled = false; });
+      const to = Number(b.dataset.to);
+      if (await this._call(DOMAIN, "set_map_rotation", { map: b.dataset.turn, rotation: to }, { entity_id: this._robot }))
+        this._pendMap(pane, b.dataset.turn, "Turning the map...", (m) => !m || m.rotation === to);
+      else both.forEach((x) => { x.disabled = false; });
     });
     // Drawn on request for any saved map (not just the current one), full size over the page.
     pane.querySelectorAll("[data-preview]").forEach((b) => b.onclick = async () => {
@@ -1555,8 +1591,10 @@ class TapoRV30Panel extends HTMLElement {
     });
     pane.querySelectorAll("[data-lock]").forEach((b) => b.onclick = async () => {
       b.disabled = true;
-      if (!(await this._call(DOMAIN, "set_map_lock", { map: b.dataset.lock, locked: b.dataset.to === "1" }, { entity_id: this._robot })))
-        b.disabled = false;
+      const lock = b.dataset.to === "1";
+      if (await this._call(DOMAIN, "set_map_lock", { map: b.dataset.lock, locked: lock }, { entity_id: this._robot }))
+        this._pendMap(pane, b.dataset.lock, lock ? "Locking..." : "Unlocking...", (m) => !m || m.locked === lock);
+      else b.disabled = false;
     });
     // Renamed in place: a text box in the row (no browser prompt, which app webviews may not show).
     pane.querySelectorAll("[data-rename]").forEach((b) => b.onclick = () => {
@@ -1570,7 +1608,10 @@ class TapoRV30Panel extends HTMLElement {
         const name = input.value.trim();
         if (!name || name === old) return done();
         save.disabled = true;
-        if (await this._call(DOMAIN, "rename_map", { map: id, name }, { entity_id: this._robot })) return done();
+        if (await this._call(DOMAIN, "rename_map", { map: id, name }, { entity_id: this._robot })) {
+          input.blur();
+          return this._pendMap(pane, id, `Renaming to "${name}"...`, (m) => !m || m.name === name);
+        }
         save.disabled = false; input.focus();
       };
       save.onclick = submit;
@@ -1627,7 +1668,8 @@ class TapoRV30Panel extends HTMLElement {
       del.onclick = async () => {
         del.disabled = cancel.disabled = true;
         row.querySelector(".delnote").textContent = `Deleting "${name}"...`;
-        if (await this._call(DOMAIN, "delete_map", { map: id, confirm: true }, { entity_id: this._robot })) return this._paneSettings(pane);
+        if (await this._call(DOMAIN, "delete_map", { map: id, confirm: true }, { entity_id: this._robot }))
+          return this._pendMap(pane, id, "Deleting...", (m) => !m);
         if (row.isConnected) { del.disabled = cancel.disabled = false; row.querySelector(".delnote").textContent = "Not deleted."; }
       };
       cancel.focus();
