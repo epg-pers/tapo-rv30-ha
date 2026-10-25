@@ -113,40 +113,49 @@ def _names(map_list) -> dict[int, str]:
     return out
 
 
+ONE_OFF_TRIES = 3       # goes at saving the restored map / switching back before giving up on them
+
+
 def tidy(client, pend: dict) -> dict:
     """After a restore onto a carrier (blocking, map lock held): put the carrier's rooms and
     furniture back first, then save the restored map under its name if it is the current
     unsaved map and the name is free, give it the backup's room names and furniture, and for a
     copy make the carrier current again. Each step on its own, so one failing does not skip the
-    others. pend["done"] records the steps that worked, so a retry only redoes the rest and the
-    one-off steps (save, names, switching back) are only tried while the restored map is there."""
+    others. pend["done"] records the steps that worked, so a retry only redoes the rest; the
+    restored map's steps are "finished" once they worked, could not apply, or had
+    ONE_OFF_TRIES goes. A carrier that is no longer on the robot has nothing to put back."""
     from .mapdata import fold
     carrier, landed, name = pend["carrier"], pend["map_id"], pend.get("name")
     done = pend.setdefault("done", {})
     out: dict = {"carrier": None, "carrier_ok": bool(done.get("carrier")), "saved": bool(done.get("saved")),
                  "switched": bool(done.get("switched")), "errors": []}
-    if not done.get("carrier"):
-        try:
-            fix = repair(pend.get("before") or {"rooms": [], "furniture": []}, client.get_map_data(carrier))
-            if fix["rooms"]:
-                client.set_areas(carrier, "room", fix["rooms"])
-            if fix["furniture"] is not None:
-                client.set_furniture(carrier, fix["furniture"])
-            out["carrier"] = {"rooms": len(fix["rooms"] or []),
-                              "furniture": None if fix["furniture"] is None else len(fix["furniture"])}
-            out["carrier_ok"] = done["carrier"] = True
-        except Exception as exc:
-            out["errors"].append(f"putting back map {carrier}: {exc}")
-    if done.get("finished"):
-        return out
     try:
         current, map_list = client.get_map_info()
     except Exception as exc:
         out["errors"].append(f"reading the maps: {exc}")
         return out
+    if not done.get("carrier"):
+        if not any(m.get("map_id") == carrier for m in map_list):
+            out["carrier_ok"] = done["carrier"] = True      # deleted meanwhile: nothing to put back
+        else:
+            try:
+                fix = repair(pend.get("before") or {"rooms": [], "furniture": []}, client.get_map_data(carrier))
+                if fix["rooms"]:
+                    client.set_areas(carrier, "room", fix["rooms"])
+                if fix["furniture"] is not None:
+                    client.set_furniture(carrier, fix["furniture"])
+                out["carrier"] = {"rooms": len(fix["rooms"] or []),
+                                  "furniture": None if fix["furniture"] is None else len(fix["furniture"])}
+                out["carrier_ok"] = done["carrier"] = True
+            except Exception as exc:
+                out["errors"].append(f"putting back map {carrier}: {exc}")
+    if done.get("finished"):
+        return out
     entry = next((m for m in map_list if m.get("map_id") == landed), None)
     if entry is None:
         return out          # not there (yet, or the restore failed): nothing more to do on it
+    done["tries"] = tries = done.get("tries", 0) + 1
+    retry = False
     if entry.get("is_saved") is False:
         others = [n for mid, n in _names(map_list).items() if mid != landed]
         why = ("it has no name to save it under" if not name
@@ -157,14 +166,17 @@ def tidy(client, pend: dict) -> dict:
         else:
             try:
                 if client.save_current_map(name) == 0:
-                    _, map_list = client.get_map_info()
+                    current, map_list = client.get_map_info()
                     entry = next((m for m in map_list if m.get("map_id") == landed), None) or {}
                     if entry.get("is_saved") is False:
                         out["errors"].append(f"map {landed} still reads as unsaved after saving it")
+                        retry = True
                 else:
                     out["errors"].append(f"the robot did not save map {landed}")
+                    retry = True
             except Exception as exc:
                 out["errors"].append(f"saving map {landed}: {exc}")
+                retry = True
     out["saved"] = done["saved"] = entry.get("is_saved") is not False
     if out["saved"] and pend.get("tail") and not done.get("tail"):
         try:
@@ -176,12 +188,17 @@ def tidy(client, pend: dict) -> dict:
             done["tail"] = True
         except Exception as exc:
             out["errors"].append(f"room names and furniture of map {landed}: {exc}")
+            retry = True
     if pend.get("copy") and out["saved"] and not done.get("switched"):
-        try:
-            client.set_current_map(carrier)
-            out["switched"] = done["switched"] = True
-        except Exception as exc:
-            out["errors"].append(f"switching back to map {carrier}: {exc}")
-    # The one-off steps had their go once the restored map was there.
-    done["finished"] = True
+        if current != landed:
+            out["switched"] = done["switched"] = True       # already off the copy (the user moved)
+        else:
+            try:
+                client.set_current_map(carrier)
+                out["switched"] = done["switched"] = True
+            except Exception as exc:
+                out["errors"].append(f"switching back to map {carrier}: {exc}")
+                retry = True
+    if not retry or tries >= ONE_OFF_TRIES:
+        done["finished"] = True
     return out

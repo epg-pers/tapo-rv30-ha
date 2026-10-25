@@ -931,7 +931,7 @@ def async_setup_services(hass: HomeAssistant) -> None:
             raise ServiceValidationError(f"{call.service}: the robot already has a map called '{name}'")
         if len(names) >= MAX_MAPS:
             raise ServiceValidationError(f"{call.service}: the robot holds at most {MAX_MAPS} maps and has "
-                                         f"{len(names)}; delete one in the Tapo app first")
+                                         f"{len(names)}; delete one first (delete_map, or the Tapo app)")
         return name
 
     async def _restore(call: ServiceCall, coord: TapoCoordinator, names: dict[int, str], backup_id: int,

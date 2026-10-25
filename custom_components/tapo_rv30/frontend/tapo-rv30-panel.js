@@ -1330,7 +1330,7 @@ class TapoRV30Panel extends HTMLElement {
     box.className = "restore-opts";
     box.innerHTML = `
       <label><input type="radio" name="${grp}" value="replace" checked>${onRobot ? `Replace "${esc(b.map_name)}" on the robot` : `Put "${esc(b.map_name)}" back (it is no longer on the robot)`}</label>
-      <label class="${full ? "off" : ""}" ${full ? `title="The robot holds at most 3 maps; delete one in the Tapo app first"` : ""}><input type="radio" name="${grp}" value="new" ${full ? "disabled" : ""}>As a new map${full ? " (the robot already has 3)" : ""}</label>
+      <label class="${full ? "off" : ""}" ${full ? `title="The robot holds at most 3 maps; delete one first"` : ""}><input type="radio" name="${grp}" value="new" ${full ? "disabled" : ""}>As a new map${full ? " (the robot already has 3; delete one first)" : ""}</label>
       <input class="rename" maxlength="32" aria-label="New map name" value="${esc(`${b.map_name} copy`.slice(0, 32))}" style="display:none">
       <div class="acts"><button class="btn primary" data-act="go"><ha-icon icon="mdi:backup-restore"></ha-icon>Restore</button><button class="btn" data-act="cancel">Cancel</button></div>`;
     acts.style.display = "none";
@@ -1434,7 +1434,7 @@ class TapoRV30Panel extends HTMLElement {
       <button class="icon-btn" data-turn="${esc(m.id)}" data-to="${((m.rotation || 0) + 270) % 360}" title="Turn anticlockwise"><ha-icon icon="mdi:rotate-left"></ha-icon></button>
       <button class="icon-btn" data-turn="${esc(m.id)}" data-to="${((m.rotation || 0) + 90) % 360}" title="Turn clockwise"><ha-icon icon="mdi:rotate-right"></ha-icon></button>
       <button class="btn" data-rename="${esc(m.id)}" data-name="${esc(m.name || "")}" ${admin ? "" : `disabled title="Only an administrator can rename maps"`}><ha-icon icon="mdi:rename-outline"></ha-icon>Rename</button>
-      <button class="btn" data-copy="${esc(m.id)}" data-name="${esc(m.name || "")}" ${!admin ? `disabled title="Only an administrator can copy maps"` : maps.length >= 3 ? `disabled title="The robot holds at most 3 maps; delete one in the Tapo app first"` : ""}><ha-icon icon="mdi:content-copy"></ha-icon>Copy</button>
+      <button class="btn" data-copy="${esc(m.id)}" data-name="${esc(m.name || "")}" ${!admin ? `disabled title="Only an administrator can copy maps"` : maps.length >= 3 ? `disabled title="The robot holds at most 3 maps; delete one first"` : ""}><ha-icon icon="mdi:content-copy"></ha-icon>Copy</button>
       <button class="icon-btn" data-delete="${esc(m.id)}" data-name="${esc(m.name || "")}" ${!admin ? `disabled title="Only an administrator can delete maps"` : m.current ? `disabled title="This is the current map; switch to another map to delete it"` : maps.length < 2 ? `disabled title="The robot needs at least one map"` : `title="Delete this map"`}><ha-icon icon="mdi:delete-outline"></ha-icon></button></div>`).join("");
     pane.innerHTML = `${maps.length ? `<ha-card><div class="card"><h3><span>Maps</span></h3>${mapRows}</div></ha-card>` : ""}
       <ha-card><div class="card"><h3><span>Settings</span></h3>${sw}${sel}${tim}${num}${(sw || sel || num || tim) ? "" : `<div class="empty">No settings entities.</div>`}</div></ha-card>`;

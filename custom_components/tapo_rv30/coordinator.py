@@ -778,7 +778,13 @@ class TapoCoordinator(DataUpdateCoordinator):
         if self._restore_store is not None:
             self.hass.async_create_task(self._restore_store.async_save({"pending": self.pending_restore}))
 
-    RESTORE_GIVE_UP_S = 600     # a restored map that has not shown up by then is not coming
+    # A restored map that has not shown up by then is not coming (longer than the backup stays
+    # served after the service stops watching, plus time to apply it).
+    RESTORE_GIVE_UP_S = 1800
+    # A robot that still reads "applying" after this is stuck, not applying.
+    RESTORE_APPLYING_S = 1800
+    # A carrier that still cannot be put back after this is left (with a notification).
+    RESTORE_ABANDON_S = 86400
 
     def expect_restore(self, map_id: int, name: str | None, carrier: int, before: dict | None = None,
                        tail: dict | None = None, copy: bool = False) -> None:
@@ -788,6 +794,10 @@ class TapoCoordinator(DataUpdateCoordinator):
         as the map shows up, by the service or, if it stopped watching, by a later poll; if the
         map never shows up, the carrier is still put back. A lost map is then finished once
         saved. Kept across restarts."""
+        old = self.pending_restore
+        if old and old.get("tidied", True) and not old.get("copy") and old.get("map_id") != map_id:
+            _LOGGER.warning("%s: the restored map %s was never saved in the app, so its setup was not put "
+                            "back; a new restore replaces that wait", self.device_name, old.get("map_id"))
         self.pending_restore = {"map_id": map_id, "name": name, "carrier": carrier, "before": before,
                                 "tail": tail, "copy": copy, "tidied": before is None, "started": time.time(),
                                 "done": {}}
@@ -861,7 +871,8 @@ class TapoCoordinator(DataUpdateCoordinator):
         from . import mapcopy
         try:
             br = await self.hass.async_add_executor_job(self.client.get_map_br_process)
-            if _opt_int(br.get("type")) == 2 and _opt_int(br.get("status")) == 2:
+            age = time.time() - (pend.get("started") or 0)
+            if _opt_int(br.get("type")) == 2 and _opt_int(br.get("status")) == 2 and age < self.RESTORE_APPLYING_S:
                 return None
             out = await self.hass.async_add_executor_job(mapcopy.tidy, self.client, pend)
         except Exception as exc:
@@ -882,6 +893,16 @@ class TapoCoordinator(DataUpdateCoordinator):
                     self._drop_restore(pend)
                 else:
                     self._save_restore()
+            elif time.time() - (pend.get("started") or 0) > self.RESTORE_ABANDON_S:
+                # Never block map writes for good: tell the user what is left to do and stop.
+                from homeassistant.components import persistent_notification
+                persistent_notification.async_create(
+                    self.hass, f"Home Assistant could not put map {pend['carrier']} back after the restore of map "
+                    f"{pend['map_id']} ({'; '.join(out['errors']) or 'no answer'}). Its room names or furniture may "
+                    "show the backup's: run apply_map_setup on it to put its own back.",
+                    title=f"{self.device_name}: map restore not tidied up",
+                    notification_id=f"{DOMAIN}_restore_{pend['map_id']}")
+                self._drop_restore(pend)
             else:
                 self._save_restore()    # keep what worked, so a retry only redoes the rest
         await self.async_request_map_refresh()
@@ -893,7 +914,7 @@ class TapoCoordinator(DataUpdateCoordinator):
 
         from . import setup_apply
         pend = self.pending_restore
-        if not pend:
+        if not pend or not pend.get("tidied", True):
             self._finishing = False
             return None
         name = pend.get("name") or f"map {pend['map_id']}"

@@ -214,9 +214,29 @@ def test_reid_rejects_short_or_truncated_input():
 def test_tidy_retry_only_redoes_the_carrier():
     c, pend, good = _robot(fail={"set_areas"})
     first = mapcopy.tidy(c, pend)
-    assert not first["carrier_ok"] and first["saved"] and pend["done"]["finished"]
+    assert not first["carrier_ok"] and first["saved"] and first["switched"]
     c.fail.clear()
     c.calls.clear()
     again = mapcopy.tidy(c, pend)
-    assert again["carrier_ok"] and c.maps[OLD]["area_list"] == good
-    assert [n for n, *_ in c.calls] == ["set_areas", "set_furniture"]       # no second save or switch
+    assert again["carrier_ok"] and c.maps[OLD]["area_list"] == good and pend["done"]["finished"]
+    # the carrier and the copy's names again; no second save or switch
+    assert [n for n, *_ in c.calls] == ["set_areas", "set_furniture", "set_areas", "set_furniture"]
+
+
+def test_tidy_with_the_carrier_deleted_meanwhile_has_nothing_to_put_back():
+    c, pend, _ = _robot()
+    del c.maps[OLD], c.saved[OLD]
+    out = mapcopy.tidy(c, pend)
+    assert out["carrier_ok"] and not [x for x in c.calls if x[1:] == (OLD,) and x[0] != "set_current_map"]
+
+
+def test_tidy_retries_switching_back_a_few_times():
+    c, pend, _ = _robot(fail={"set_current_map"})
+    for n in range(1, mapcopy.ONE_OFF_TRIES + 1):
+        out = mapcopy.tidy(c, pend)
+        assert not out["switched"] and bool(pend["done"].get("finished")) == (n == mapcopy.ONE_OFF_TRIES)
+    assert len([x for x in c.calls if x[0] == "save_current_map"]) == 1        # saved once, not again
+    c2, pend2, _ = _robot(fail={"set_current_map"})
+    mapcopy.tidy(c2, pend2)
+    c2.fail.clear()
+    assert mapcopy.tidy(c2, pend2)["switched"] and pend2["done"]["finished"] and c2.current == OLD

@@ -105,7 +105,7 @@ Assistant reads that map's rooms and furniture first and puts them back straight
 restore, so it ends up as it was; the restored map gets the backup's names and furniture instead.
 That snapshot is kept until it has been put back, so a restore that takes longer than Home
 Assistant watches it, or a Home Assistant restart part way, still ends with it put back (on the
-next poll once the restored map shows up, or after 10 minutes if it never does). Until then other
+next poll once the restored map shows up, or after 30 minutes if it never does). Until then other
 restores, copies and deletes wait. A restore is refused while the current map is not saved yet,
 because the restored map could replace it.
 Versions before 0.35.0 did not do this, so a restore of a lost map could blank the room names and
