@@ -10,7 +10,7 @@
  * the vacuum's device automatically.
  */
 
-const CARD_VERSION = "0.36.4";
+const CARD_VERSION = "0.36.5";
 
 const ICONS = {
   start: "mdi:play", pause: "mdi:pause", stop: "mdi:stop", dock: "mdi:home-import-outline",
@@ -179,7 +179,7 @@ class TapoRV30Card extends HTMLElement {
     if (!config || !config.entity) throw new Error("Set 'entity' to your vacuum (vacuum.xxx)");
     const sameEntity = this._config && this._config.entity === config.entity;
     this._config = { show_presets: true, show_controls: true, rotate: 0, ...config };
-    this._related = null;
+    this._related = null; this._relatedFrom = undefined;
     // _build() replaces the whole DOM, so forget what was last rendered into it.
     this._sig = null; this._statusOpen = false;
     this._selected.clear(); this._zone = null; this._target = null; this._drag = null;
@@ -203,14 +203,18 @@ class TapoRV30Card extends HTMLElement {
   set hass(hass) {
     const first = !this._hass;
     this._hass = hass;
-    if (!this._related) this._related = this._findRelated();
+    // Look again when the entity registry changes: a preset made in the app or with create_preset
+    // gets its button on the next refresh, and an open card should show its chip without a reload.
+    if (!this._related || hass.entities !== this._relatedFrom) {
+      this._related = this._findRelated(); this._relatedFrom = hass.entities;
+    }
     this._checkMapChange();
     const sig = this._signature();
     if (first || sig !== this._sig) { this._sig = sig; this._render(); }
     this._loadImage();
     this._loadMask();
     // Entities found while the vacuum itself is missing may be a guess; look again once it appears.
-    if (!hass.states[this._config.entity]) this._related = null;
+    if (!hass.states[this._config.entity]) { this._related = null; this._relatedFrom = undefined; }
   }
 
   // A floor switch (or a re-map) makes room ids, zones and points from the old map meaningless.

@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.36.5
+
+### Fixed
+
+- **A new preset did not appear on an open card.** The card looked up the robot's buttons once, so a preset made in the Tapo app or with `create_preset` only got its chip after a browser reload (on a wall tablet, never), and with no presets at first the chip row never appeared. The card, and the one on the sidebar page, now picks up new presets as soon as Home Assistant adds their buttons.
+
 ## v0.36.4
 
 ### Fixed
