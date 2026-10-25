@@ -84,6 +84,8 @@ it. The robot must be docked and idle to save. Carpets and room names are drawn 
 are view-only for now. Behind the scenes this is the robot's own editing API (`setAreaInfo` /
 `setFurnitureInfo`), the same one the Tapo app uses.
 
+![The Edit map tab](panel-edit.png){ width="760" }
+
 ### Backups
 
 Every map backup Home Assistant holds, as a grid of thumbnails. Tap one to see it full size, or
@@ -93,6 +95,8 @@ your latest TP-Link backups into `config/tapo_rv30/map_backups/<robot>` without 
 backup is pictured from the robot's own snapshot or the saved map drawn like the live map, and
 its `.bkmap` is decoded to show the explored floor area, dock and room count. See
 [map backup and recovery](map-recovery.md) for the detail.
+
+![The Backups tab, restoring as a new map](panel-backups.png){ width="760" }
 
 ### Maintenance
 
@@ -114,6 +118,8 @@ button deletes a map that is not the current one, after a second press in the ro
 button previews a map full size. The padlock locks or unlocks a map, as in the Tapo app: a
 locked map is kept as it is instead of being updated by later cleans (its room names, no-go zones
 and furniture can still be edited). Copy and restore show a progress bar while they run.
+
+![Maps in the Settings tab](panel-maps.png){ width="760" }
 
 With more than one robot, each gets a tab in the header.
 
