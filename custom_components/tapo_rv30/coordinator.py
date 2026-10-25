@@ -139,6 +139,7 @@ class TapoCoordinator(DataUpdateCoordinator):
         self.map_id: int | None = None
         self.map_name: str | None = None
         self.map_rotation = 0                # the current map's rotate_angle (0, 90, 180, 270)
+        self.rotation_supported = False      # the robot reports rotate_angle for its maps
         self.device_name: str = "Tapo RV30"
         self.device_model: str = "RV30"
         self.fw_version: str | None = None
@@ -569,7 +570,8 @@ class TapoCoordinator(DataUpdateCoordinator):
                     # Drawing and PNG encoding are both CPU-heavy: keep them off the event loop.
                     self.last_clean_image_bytes = await self.hass.async_add_executor_job(
                         lambda d=detail: _png(render_record(d, self.rotation_for(d.get("map_id")))))
-                    self.last_clean_hash = str(rts)
+                    # The rotation is part of it, so the card fetches the turned picture.
+                    self.last_clean_hash = f"{rts}-{self.rotation_for(detail.get('map_id'))}"
                     self.last_clean_info = {**decode_clean_record(rec),
                                             "map_name": b64name(detail.get("map_name", "")),
                                             "map_id": detail.get("map_id")}
@@ -1254,21 +1256,26 @@ class TapoCoordinator(DataUpdateCoordinator):
     def _refresh_map(self) -> None:
         current_id, map_list = self.client.get_map_info()
         self._room_name_cache = {}      # names may have changed in the app
-        self.maps = [{"id": m["map_id"], "name": b64name(m.get("map_name", "")), "current": m["map_id"] == current_id,
-                      "saved": m.get("is_saved", True) is not False,
-                      "rotation": rotation_of(m.get("rotate_angle"))} for m in map_list]
-        rotation = self.rotation_for(current_id)
-        if rotation != self.map_rotation:
-            self._record_rendered_ts = None     # redraw the last clean turned the new way
-        self.map_rotation = rotation
+        maps = [{"id": m["map_id"], "name": b64name(m.get("map_name", "")), "current": m["map_id"] == current_id,
+                 "saved": m.get("is_saved", True) is not False,
+                 "rotation": rotation_of(m.get("rotate_angle"))} for m in map_list]
+        if any("rotate_angle" in m for m in map_list):
+            self.rotation_supported = True
+        rotation = next((m["rotation"] for m in maps if m["id"] == current_id), 0)
+        # Nothing is published until the map is redrawn: a refused map read (routine while the
+        # robot manoeuvres) must not leave a new angle showing over the old picture.
         map_data = self.client.get_map_data(current_id)
+        self._map_base, self.room_geometry, self.map_geometry = render_map(map_data, rotation)
+        last_map = self.last_clean_info.get("map_id")
+        if next((m["rotation"] for m in maps if m["id"] == last_map), 0) != self.rotation_for(last_map):
+            self._record_rendered_ts = None     # redraw the last clean turned the new way
+        self.maps, self.map_rotation = maps, rotation
         self.map_id = current_id
         self.map_name = b64name(map_data.get("map_name", ""))
         self.rooms = [a for a in map_data.get("area_list", []) if a.get("type") == "room"]
         self._map_layers = {"map_id": current_id, "map_name": self.map_name,
                             "area_list": list(map_data.get("area_list") or []),
                             "furniture_list": list(map_data.get("furniture_list") or [])}
-        self._map_base, self.room_geometry, self.map_geometry = render_map(map_data, self.map_rotation)
         self._live_map = {k: map_data.get(k) for k in ("width", "height", "pix_len", "map_data", "resolution", "real_origin_coor", "area_list", "map_id")}
         try:
             self._live_pixels = grid_pixels(map_data)
@@ -1285,8 +1292,27 @@ class TapoCoordinator(DataUpdateCoordinator):
         agree. Display only: nothing on the map itself changes."""
         if rotation not in (0, 90, 180, 270):
             raise ValueError(f"rotation must be 0, 90, 180 or 270, not {rotation!r}")
-        await self.hass.async_add_executor_job(self.client.set_map_rotation, int(map_id), int(rotation))
-        await self.async_request_map_refresh()
+        if self.map_lock.locked():
+            raise ValueError("its map is being written; try again shortly")
+        if self.status_code in (2, 10):
+            raise ValueError("it is building a map; turn it once the map is saved")
+        async with self.map_lock:
+            # From a fresh read: the map must be on the robot and saved (a map still being built
+            # is not touched), and the robot must report the new angle back.
+            _, map_list = await self.hass.async_add_executor_job(self.client.get_map_info)
+            entry = next((m for m in map_list if m.get("map_id") == int(map_id)), None)
+            if entry is None:
+                raise ValueError(f"map {map_id} is not on the robot")
+            if entry.get("is_saved") is not True:
+                raise ValueError("that map is not saved yet; save it in the Tapo app first")
+            await self.hass.async_add_executor_job(self.client.set_map_rotation, int(map_id), int(rotation))
+            try:
+                _, after = await self.hass.async_add_executor_job(self.client.get_map_info)
+            finally:
+                await self.async_request_map_refresh()
+        got = next((m.get("rotate_angle") for m in after if m.get("map_id") == int(map_id)), None)
+        if rotation_of(got) != rotation:
+            raise ValueError(f"the robot accepted the rotation but still reports {got}")
 
     def rotation_for(self, map_id) -> int:
         """A map's rotate_angle as last read (0 for a map not on the robot any more)."""

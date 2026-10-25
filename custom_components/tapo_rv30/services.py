@@ -705,19 +705,17 @@ def async_setup_services(hass: HomeAssistant) -> None:
     async def handle_set_map_rotation(call: ServiceCall) -> ServiceResponse:
         """Turn a map's display (clockwise), stored on the robot as in the app. Display only."""
         coord = _one(hass, call)
-        try:
-            rotation = int(call.data.get("rotation"))
-        except (TypeError, ValueError):
-            rotation = -1
-        if rotation not in (0, 90, 180, 270):
+        value = call.data.get("rotation")
+        # Exactly one of the four (90.7 or "90 " are not quietly taken as 90).
+        if isinstance(value, bool) or str(value) not in ("0", "90", "180", "270"):
             raise ServiceValidationError(f"{call.service}: 'rotation' must be 0, 90, 180 or 270")
-        if coord.map_lock.locked():
-            raise ServiceValidationError(f"{call.service}: {coord.device_name} is having its map written; "
-                                         "try again shortly")
+        rotation = int(str(value))
         names = await _read(hass, call, coord.map_names)
         map_id = _match_map(call, names, call.data.get("map", coord.map_id), exact=True)
         try:
             await coord.async_set_map_rotation(map_id, rotation)
+        except ValueError as exc:
+            raise ServiceValidationError(f"{call.service}: {coord.device_name}: {exc}") from exc
         except Exception as exc:
             raise HomeAssistantError(f"{call.service}: the robot refused the rotation: {exc}") from exc
         return {"map_id": map_id, "name": names.get(map_id), "rotation": rotation}

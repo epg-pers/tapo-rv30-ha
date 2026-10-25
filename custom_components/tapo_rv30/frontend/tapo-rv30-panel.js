@@ -679,11 +679,14 @@ class TapoRV30Panel extends HTMLElement {
     const robot = this._robot, run = list.find((x) => x.started === ts) || {};
     this._runImg = this._runImgFor === robot ? (this._runImg || {}) : {};
     this._runImgFor = robot;
-    if (!this._runImg[ts]) {
+    // Kept per way round: turning the map redraws a run already opened.
+    const cam = this._st(this._related(robot).camera), maps = (cam && cam.attributes.maps) || [];
+    const turn = (maps.find((m) => m.id === run.map_id) || {}).rotation || 0, key = `${ts}-${turn}`;
+    if (!this._runImg[key]) {
       box.innerHTML = `<div class="empty">Drawing the map</div>`;
       try {
         const res = await this._hass.callWS({ type: `${DOMAIN}/history/image`, entity_id: robot, started: ts });
-        this._runImg[ts] = res.image;
+        this._runImg[key] = res.image;
       } catch (e) {
         box.innerHTML = `<div class="err">${esc((e && e.message) || "Could not draw that clean")}</div>`;
         return;
@@ -692,15 +695,15 @@ class TapoRV30Panel extends HTMLElement {
     }
     const d = new Date(ts * 1000), pad = (n) => String(n).padStart(2, "0");
     const name = `${objectId(robot)}-clean-${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}.png`;
-    box.innerHTML = `<img class="runimg" alt="Map of this clean" src="${this._runImg[ts]}">
-      <div class="acts"><a class="btn" download="${esc(name)}" href="${this._runImg[ts]}"><ha-icon icon="mdi:download"></ha-icon>Download</a>
+    box.innerHTML = `<img class="runimg" alt="Map of this clean" src="${this._runImg[key]}">
+      <div class="acts"><a class="btn" download="${esc(name)}" href="${this._runImg[key]}"><ha-icon icon="mdi:download"></ha-icon>Download</a>
       ${run.kept ? `<button class="btn danger forget"><ha-icon icon="mdi:delete-outline"></ha-icon>Forget</button>` : ""}</div>`;
     const f = box.querySelector(".forget");
     if (f) f.onclick = async () => {
       if (!confirm("Forget this clean's map? The run stays in the robot's own history while it has it.")) return;
       try { await this._hass.callWS({ type: `${DOMAIN}/history/delete`, entity_id: robot, started: ts }); }
       catch (e) { this.dispatchEvent(new CustomEvent("hass-notification", { detail: { message: (e && e.message) || "Could not forget that map" }, bubbles: true, composed: true })); return; }
-      delete this._runImg[ts]; this._records = null;
+      delete this._runImg[key]; this._records = null;
       const pane = runs.closest(".pane"); if (pane) this._paneHistory(pane);
     };
   }
@@ -823,7 +826,7 @@ class TapoRV30Panel extends HTMLElement {
     return [clamp((e.clientX - b.left) / b.width * c.width, c.width), clamp((e.clientY - b.top) / b.height * c.height, c.height)];
   }
 
-  async _editLoad() {
+  async _editLoad(retried) {
     const r = this._related(this._robot), cam = this._st(r.camera);
     const geom = cam && cam.attributes.map_geometry, src = cam && cam.attributes.entity_picture;
     const tok = this._editTok = {}, el = this._editEl;    // a newer load (or pane) wins
@@ -837,6 +840,16 @@ class TapoRV30Panel extends HTMLElement {
     img.onerror = () => { if (this._editTok === tok) el.status.textContent = "Could not load the map picture."; };
     img.onload = () => {
       if (this._editTok !== tok) return;
+      // The picture and the geometry must describe the same map the same way round: edits are
+      // placed by the geometry over what the picture shows, so a mismatch (a cached picture, or
+      // the map turned while this loaded) would save them somewhere else. Load again instead.
+      const now = this._st(r.camera), g2 = now && now.attributes.map_geometry;
+      const size = geom.image_size || [];
+      if (!g2 || (g2.rotation || 0) !== (geom.rotation || 0) || img.naturalWidth !== size[0] || img.naturalHeight !== size[1]) {
+        if (!retried) { this._editLoad(true); return; }
+        el.status.textContent = "The map changed while loading; open the Edit tab again.";
+        return;
+      }
       const c = this._editEl.canvas; c.width = img.naturalWidth; c.height = img.naturalHeight;
       this._edit.img = img; this._edit.geom = geom; this._edit.mapId = res.map_id;
       this._edit.areas = res.areas || {}; this._edit.furniture = res.furniture || []; this._edit.rooms = res.rooms || [];
@@ -845,7 +858,9 @@ class TapoRV30Panel extends HTMLElement {
       this._editRenderRooms(); this._editDraw();
       this._editEl.status.textContent = "";
     };
-    img.src = src.startsWith("http") ? src : this._hass.hassUrl(src);
+    // A fresh picture, never the one the browser cached before the map was turned or changed.
+    const url = src.startsWith("http") ? src : this._hass.hassUrl(src);
+    img.src = url + (url.includes("?") ? "&" : "?") + "_c=" + encodeURIComponent(`${geom.rotation || 0}-${cam.last_updated}`);
   }
 
   _editRenderRooms() {
@@ -1390,9 +1405,12 @@ class TapoRV30Panel extends HTMLElement {
     pane.innerHTML = `${maps.length ? `<ha-card><div class="card"><h3><span>Maps</span></h3>${mapRows}</div></ha-card>` : ""}
       <ha-card><div class="card"><h3><span>Settings</span></h3>${sw}${sel}${tim}${num}${(sw || sel || num || tim) ? "" : `<div class="empty">No settings entities.</div>`}</div></ha-card>`;
     pane.querySelectorAll("[data-turn]").forEach((b) => b.onclick = async () => {
-      b.disabled = true;
-      await this._call(DOMAIN, "set_map_rotation", { map: b.dataset.turn, rotation: Number(b.dataset.to) }, { entity_id: this._robot });
-      b.disabled = false;
+      // Both turn buttons of the map wait for the robot's new angle (the pane redraws then), so a
+      // quick second press turns from the new angle instead of repeating the first.
+      const both = pane.querySelectorAll(`[data-turn="${b.dataset.turn}"]`);
+      both.forEach((x) => { x.disabled = true; });
+      if (!(await this._call(DOMAIN, "set_map_rotation", { map: b.dataset.turn, rotation: Number(b.dataset.to) }, { entity_id: this._robot })))
+        both.forEach((x) => { x.disabled = false; });
     });
     // Renamed in place: a text box in the row (no browser prompt, which app webviews may not show).
     pane.querySelectorAll("[data-rename]").forEach((b) => b.onclick = () => {

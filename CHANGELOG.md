@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.34.0b1
+## v0.34.0b2
 
 ### Added
 
@@ -8,6 +8,7 @@
   - A **Map Rotation** select (0 / 90 / 180 / 270, clockwise) for the current map, turn buttons on each map in the sidebar page's Settings tab, and `tapo_rv30.set_map_rotation` for any map. Only the map's id and angle are sent.
   - Everything turns together: the map picture (room labels stay upright), the room mask the card uses for tap-to-clean, room outlines and the dock, the live robot and path, saved zones and furniture, the calibration points for third-party map cards, the Last Clean Map and clean map history. The card's zones and go-to taps and the map editor convert through the same rotation, so a zone drawn or an edit saved on a turned map is exactly what it would be on an unturned one.
   - Display only: rooms, zones, furniture, schedules and cleaning are unaffected.
+  - Refused for a map that is not saved yet and while the robot is building a map; the robot is read back to confirm the new angle. The select is only offered when the robot reports rotations. Nothing new is shown until the turned map has been redrawn, and the map editor reloads rather than pair a picture with the wrong orientation.
 
 ## v0.33.1
 

@@ -37,7 +37,10 @@ async def async_setup_entry(
     if "dust_collection_mode" in (coordinator.settings.get("dust") or {}):
         entities.append(TapoAutoEmptyModeSelect(coordinator, entry))
     entities.append(TapoHistoryRetentionSelect(coordinator, entry))
-    entities.append(TapoMapRotationSelect(coordinator, entry))
+    if coordinator.rotation_supported:      # the robot reports rotate_angle for its maps
+        entities.append(TapoMapRotationSelect(coordinator, entry))
+    else:
+        remove_missing_parts(hass, coordinator, entry, "select", ["map_rotation"])
     async_add_entities(entities)
 
 
@@ -155,7 +158,10 @@ class TapoMapRotationSelect(TapoEntity, SelectEntity):
 
     @property
     def available(self) -> bool:
-        return super().available and self.coordinator.map_id is not None
+        c = self.coordinator
+        # Not for a map still being built (unsaved): the robot is only asked about saved maps.
+        return super().available and c.map_id is not None and any(
+            m.get("id") == c.map_id and m.get("saved") for m in c.maps)
 
     @property
     def current_option(self) -> str:
@@ -164,5 +170,7 @@ class TapoMapRotationSelect(TapoEntity, SelectEntity):
     async def async_select_option(self, option: str) -> None:
         try:
             await self.coordinator.async_set_map_rotation(self.coordinator.map_id, int(option))
+        except ValueError as exc:
+            raise HomeAssistantError(f"{self.coordinator.device_name}: {exc}") from exc
         except Exception as exc:
             raise HomeAssistantError(f"{self.coordinator.device_name}: could not turn the map: {exc}") from exc
