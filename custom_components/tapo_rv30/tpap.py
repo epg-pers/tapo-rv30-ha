@@ -20,6 +20,7 @@ import struct
 import tempfile
 import threading
 import warnings
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -35,7 +36,7 @@ from ecdsa import NIST256p, NIST384p, NIST521p, ellipticcurve
 from requests.adapters import HTTPAdapter
 from urllib3.exceptions import InsecureRequestWarning, NewConnectionError
 
-from .const import CLEANING_CODES, DOCKED_CODES, PAUSED_CODES
+from .const import CLEANING_CODES, CONF_MAC, CONF_SECURITY, DOCKED_CODES, PAUSED_CODES
 
 
 def _ints(value) -> list[int]:
@@ -339,8 +340,38 @@ def security_stronger(new: dict, old: dict) -> bool:
     return bool(new.get("dac")) >= bool(old.get("dac"))
 
 
+def normalise_mac(value) -> str | None:
+    """A MAC as 12 lowercase hex digits ("E0-D3-62-AA-BB-CC" and "e0:d3:62:aa:bb:cc" are the
+    same), or None when it is missing or not a MAC. All zeros or all ones is no MAC either."""
+    if not isinstance(value, str):
+        return None
+    mac = "".join(c for c in value if c in "0123456789abcdefABCDEF").lower()
+    if len(mac) != 12 or mac in ("000000000000", "ffffffffffff"):
+        return None
+    return mac
+
+
+def learned_entry_data(data: Mapping, security: dict | None, mac: str | None) -> dict | None:
+    """Entry data with what a working session showed added (trust on first use), or None when
+    nothing changes. Security only moves up; the MAC is stored once and never replaced (a
+    reconfigure or reauth starts the entry data afresh, so a replaced robot is learned again)."""
+    new = dict(data)
+    stored = data.get(CONF_SECURITY)
+    if security and (not stored or security_stronger(security, stored)):
+        new[CONF_SECURITY] = security
+    mac = normalise_mac(mac)
+    if mac and normalise_mac(data.get(CONF_MAC)) is None:
+        new[CONF_MAC] = mac
+    return new if new != dict(data) else None
+
+
 class NotVacuum(RuntimeError):
     """The device answered but is not a robot vacuum (a plug or bulb on the same address)."""
+
+
+class WrongDevice(RuntimeError):
+    """A different robot answers at the entry's address (two robots swapped addresses, say).
+    Not an AuthError: new credentials would not help, and the entry just stays unavailable."""
 
 
 def _atomic(fn):
@@ -502,6 +533,10 @@ class TapoVacuumClient:
         # use). Discovery is unauthenticated, so a later answer offering less (no pinned
         # certificate, the MAC-derived passcode) is refused rather than followed.
         self.expected_security: dict | None = None
+        # The MAC discovery gave when the entry was set up (entry data, learned on first use):
+        # with two robots on one account a robot that took the other's address would log in
+        # too, so a different MAC is refused. Unknown on either side means no check.
+        self.expected_mac: str | None = None
 
         self._session_id = ""
         self._seq        = 1
@@ -573,6 +608,9 @@ class TapoVacuumClient:
             d = json.loads(self._cache.read_text())
             if d.get("host") != self.host or d.get("user") != self.username:
                 return False
+            want, cached = normalise_mac(self.expected_mac), normalise_mac(d.get("mac"))
+            if want and cached and want != cached:
+                return False    # a session with another robot (one that had this address before)
             self._device_mac = d["mac"];  self._tpap_pake  = list(d["pake"])
             self._session_id = d["sid"];  self._seq        = int(d["seq"])
             self._cipher_id  = d["cid"];  self._hkdf_hash  = d["hkdf"]
@@ -663,6 +701,7 @@ class TapoVacuumClient:
                             "reset") from exc
         _raise_for_error(d, "discover")
         r = d["result"]
+        self._check_device(r.get("mac"))
         tpap = r.get("tpap") or {}
         self._device_mac     = r.get("mac") or ""
         self._tpap_pake      = list(tpap.get("pake") or [])
@@ -680,6 +719,21 @@ class TapoVacuumClient:
         if self._tls_mode is None and not self._tpap_pake:
             return None
         return {"tls": self._tls_mode, "pake": sorted(self._tpap_pake), "dac": bool(self._tpap_dac)}
+
+    @property
+    def session_mac(self) -> str | None:
+        """The MAC discovery gave for the robot the current session is with (normalised), or
+        None without a session or a usable MAC."""
+        return normalise_mac(self._device_mac) if self._session_id else None
+
+    def _check_device(self, mac) -> None:
+        """Refuse a discovery answer from a different robot than the one set up. Only when
+        both MACs are known: a missing or malformed one on either side is no evidence."""
+        want, got = normalise_mac(self.expected_mac), normalise_mac(mac)
+        if want and got and want != got:
+            shown = ":".join(got[i:i + 2] for i in range(0, 12, 2))
+            raise WrongDevice(f"a different robot (MAC {shown}) now answers at {self.host}; "
+                              "if you replaced the robot, reconfigure the integration")
 
     def _check_security(self) -> None:
         """Refuse a discovery answer weaker than what the robot offered before."""
@@ -916,6 +970,8 @@ class TapoVacuumClient:
                     _LOGGER.debug("TPAP session lost (%s), re-authenticating", exc)
                     self._clear_session()
                     try:
+                        # A different robot at this address (WrongDevice) goes to the caller as
+                        # a plain failure: the entry is unavailable, no reauth is asked for.
                         self.authenticate()
                     except _SessionLost as reauth:
                         raise RuntimeError(str(reauth)) from reauth

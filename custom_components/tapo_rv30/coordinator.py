@@ -59,7 +59,7 @@ from .mapdata import (
 )
 from .maprender import _dot, _png, _px_transform, render_map, render_record, room_mask_png, rotation_of
 from .setup_apply import robot_key
-from .tpap import AuthError, TapoVacuumClient, _opt_int
+from .tpap import AuthError, TapoVacuumClient, WrongDevice, _opt_int
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -1220,6 +1220,10 @@ class TapoCoordinator(DataUpdateCoordinator):
                 data = await self.hass.async_add_executor_job(self.client.get_status)
             except AuthError as exc:
                 raise ConfigEntryAuthFailed(str(exc)) from exc
+            except WrongDevice as exc:
+                # Another robot at this address: retrying will not change that, and it is not
+                # the robot dropping out, so no "unreachable" repair either.
+                raise UpdateFailed(str(exc)) from exc
             except Exception as exc:
                 if attempt == STATUS_RETRIES:
                     self._note_failure()

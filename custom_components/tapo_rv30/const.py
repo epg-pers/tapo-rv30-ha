@@ -9,6 +9,7 @@ DEFAULT_PORT  = 4433
 
 CONF_TRANSPORT = "transport"   # how to talk to the vacuum; picked in the config flow
 CONF_SECURITY = "security"     # what the robot offered at setup (TPAP), so a downgrade is refused
+CONF_MAC = "mac"               # the robot's MAC from discovery (TPAP), so another robot is refused
 TRANSPORT_TPAP = "tpap"        # SPAKE2+ (RV30 Max Plus, RV20 Max Plus on 1.2.x+)
 TRANSPORT_AES  = "aes"         # python-kasa AES (RV30C, RV30C Mop, ...)
 

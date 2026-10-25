@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.36.4
+
+### Fixed
+
+- **With two robots on one account, an entry could quietly take over the other robot.** If the robots swapped network addresses (a router restart, or one robot offline long enough to lose its address), an entry would log in to whichever robot now answered at its address, so its buttons, planner and map writes drove the wrong robot. Each entry now remembers its robot (learned from the robot itself the first time it connects, and never replaced) and shows as unavailable, with a message, if a different robot answers. If you replace the robot, reconfigure the integration. Single-robot setups are unaffected.
+
 ## v0.36.3
 
 ### Fixed

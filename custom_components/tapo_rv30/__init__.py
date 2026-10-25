@@ -15,6 +15,7 @@ from homeassistant.loader import async_get_integration
 from .aes import AesVacuumClient
 from .backup_ws import async_setup_backup_ws
 from .const import (
+    CONF_MAC,
     CONF_SECURITY,
     CONF_TRANSPORT,
     DEFAULT_PORT,
@@ -34,7 +35,7 @@ from .services import async_setup_services
 from .voice import async_setup_voice
 
 VOICE_KEY = f"{DOMAIN}_voice"
-from .tpap import TapoVacuumClient, security_stronger
+from .tpap import TapoVacuumClient, learned_entry_data
 
 _LOGGER = logging.getLogger(__name__)
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
@@ -66,6 +67,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     ))
     if client_cls is TapoVacuumClient:
         client.expected_security = entry.data.get(CONF_SECURITY)
+        client.expected_mac = entry.data.get(CONF_MAC)
     coordinator = TapoCoordinator(hass, client, entry)
     try:
         await coordinator.async_config_entry_first_refresh()
@@ -77,10 +79,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # is refused (a reauth or reconfigure stores what the robot offers then).
     # A firmware update that adds security is followed too (never one that removes it): only
     # after a working session, so an answer that merely claims more cannot be stored.
-    learned = getattr(client, "security", None) if client_cls is TapoVacuumClient else None
-    stored = entry.data.get(CONF_SECURITY)
-    if learned and (not stored or security_stronger(learned, stored)):
-        hass.config_entries.async_update_entry(entry, data={**entry.data, CONF_SECURITY: learned})
+    # The robot's MAC from discovery is remembered the same way (never replaced), so another
+    # robot on the same account that takes this address is refused instead of driven.
+    if client_cls is TapoVacuumClient:
+        data = learned_entry_data(entry.data, getattr(client, "security", None),
+                                  getattr(client, "session_mac", None))
+        if data is not None:
+            hass.config_entries.async_update_entry(entry, data=data)
     forwarded = False
     try:
         coordinator.planner = TapoPlanner(hass, coordinator, entry)
