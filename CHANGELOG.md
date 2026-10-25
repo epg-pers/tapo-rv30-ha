@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.36.2
+
+### Fixed
+
+- **Map edits could be undone by an unfinished restore.** If a restore or copy was still being tidied up (for example the robot stopped answering part way), saving in the Edit tab or running `apply_map_setup` on the map it used would later be put back to how it was before the restore, silently losing the edit. Both now refuse that map, with a message, until the restore has finished; other maps can still be edited.
+
 ## v0.36.1
 
 ### Fixed

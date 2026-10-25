@@ -128,12 +128,18 @@ async def ws_edit_apply(hass: HomeAssistant, connection: websocket_api.ActiveCon
         connection.send_error(msg["id"], "busy", f"Another map write to {coord.device_name} is still running")
         return
     async with coord.map_lock:     # one map write per robot at a time (each switches maps)
+        map_id = msg["map_id"]
+        # Tidying a restore writes the carrier's own setup back (and the backup's onto the restored
+        # map), which would quietly undo an edit made to either before then.
+        if (pend := coord.restore_unfinished()) is not None and map_id in (pend.get("carrier"), pend.get("map_id")):
+            connection.send_error(msg["id"], "busy", "This map is part of a restore that is still being tidied up; "
+                                  "try again once the robot is docked and the restore has finished")
+            return
         # Asked live: the last poll may predate the robot's own schedule starting it.
         if await coord._robot_working():
             connection.send_error(msg["id"], "busy", f"{coord.device_name} is working; edit the map once it is "
                                   "docked and idle")
             return
-        map_id = msg["map_id"]
         result: dict[str, Any] = {}
         previous = None
         try:

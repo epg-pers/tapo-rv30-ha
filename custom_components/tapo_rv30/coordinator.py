@@ -817,7 +817,8 @@ class TapoCoordinator(DataUpdateCoordinator):
             "done": done, "error": error})
 
     def restore_unfinished(self) -> dict | None:
-        """A restore whose carrier has not been put back yet: no other map write until it is."""
+        """A restore whose carrier has not been put back yet. Copy, restore and delete wait for it;
+        edits and apply_map_setup refuse only its carrier and restored map."""
         pend = self.pending_restore
         return pend if pend and not pend.get("tidied", True) else None
 

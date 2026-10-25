@@ -138,6 +138,12 @@ async def apply_setup(hass, coord, map_id: int, snap: dict, dry_run: bool = Fals
     if coord.map_lock.locked():
         raise MapBusy(f"another map write to {coord.device_name} is still running; try again shortly")
     async with coord.map_lock:     # one map write per robot at a time (each switches maps)
+        # Tidying a restore writes the carrier's earlier setup back (and the backup's onto the
+        # restored map) over whatever is applied now.
+        # The coordinator finishes a restore with this only once it is tidied, so that still runs.
+        if (pend := coord.restore_unfinished()) is not None and map_id in (pend.get("carrier"), pend.get("map_id")):
+            raise MapBusy("this map is part of a restore that is still being tidied up; try again once the "
+                          "robot is docked and the restore has finished")
         # Asked live: the last poll may predate the robot's own schedule starting it.
         if await coord._robot_working():
             raise MapBusy(f"{coord.device_name} is working (or part way through a clean); map writes wait "

@@ -3,6 +3,7 @@
 custom_components/tapo_rv30/__init__.py imports homeassistant, so register a
 bare package object for it and import the submodules we test directly.
 """
+import importlib.util
 import sys
 import types
 from pathlib import Path
@@ -23,7 +24,8 @@ for name in ("homeassistant", "homeassistant.components", "homeassistant.compone
              "homeassistant.helpers.device_registry", "homeassistant.helpers.entity_platform",
              "homeassistant.helpers.update_coordinator", "homeassistant.exceptions",
              "homeassistant.helpers.issue_registry", "homeassistant.helpers.storage",
-             "homeassistant.util", "homeassistant.util.dt"):
+             "homeassistant.util", "homeassistant.util.dt", "homeassistant.components.websocket_api",
+             "homeassistant.components.persistent_notification", "homeassistant.helpers.entity_registry"):
     if name not in sys.modules:
         sys.modules[name] = types.ModuleType(name)
 _stub = sys.modules
@@ -51,3 +53,16 @@ _stub["homeassistant.exceptions"].HomeAssistantError = Exception
 _stub["homeassistant.exceptions"].ServiceValidationError = Exception
 
 _stub["homeassistant.helpers"].issue_registry = _stub["homeassistant.helpers.issue_registry"]
+
+# map_edit_ws: voluptuous (only if not installed) and the websocket decorators, as pass-throughs.
+if importlib.util.find_spec("voluptuous") is None and "voluptuous" not in sys.modules:
+    _vol = sys.modules["voluptuous"] = types.ModuleType("voluptuous")
+    _vol.Required = _vol.Optional = lambda key, **kw: key
+_ws = _stub["homeassistant.components.websocket_api"]
+if not hasattr(_ws, "websocket_command"):
+    _ws.websocket_command = lambda schema: lambda f: f
+    _ws.require_admin = _ws.async_response = lambda f: f
+    _ws.ActiveConnection = object
+_stub["homeassistant.components"].websocket_api = _ws
+_stub["homeassistant.components"].persistent_notification = _stub["homeassistant.components.persistent_notification"]
+_stub["homeassistant.helpers"].entity_registry = _stub["homeassistant.helpers.entity_registry"]
