@@ -115,19 +115,30 @@ def reid_bkmap(data: bytes, new_id: int) -> bytes:
     anything that is not a version-2 .bkmap laid out as above, so nothing half-understood is
     ever handed to the robot.
     """
-    if data[:len(_PREFIX)] != _PREFIX or data[len(_PREFIX) + 32] != 1:
+    try:
+        return _reid(data, new_id)
+    except (tarfile.TarError, EOFError) as exc:
+        raise ValueError(f"backup archive is damaged ({exc})") from exc
+
+
+def _reid(data: bytes, new_id: int) -> bytes:
+    """reid_bkmap without the archive errors translated."""
+    if len(data) <= _HEAD or data[:len(_PREFIX)] != _PREFIX or data[len(_PREFIX) + 32] != 1:
         raise ValueError("not a version 2 .bkmap")
     size = int.from_bytes(data[len(_PREFIX) + 33:_HEAD], "big")
     gz, tail = data[_HEAD:_HEAD + size], data[_HEAD + size:]
     if len(gz) != size or hashlib.md5(gz).hexdigest().encode() != data[len(_PREFIX):len(_PREFIX) + 32]:
         raise ValueError("backup is damaged: the payload does not match its header")
     dec = zlib.decompressobj(16 + zlib.MAX_WBITS)
-    raw = bytearray(dec.decompress(gz, MAX_UNPACKED))
-    if dec.unconsumed_tail or dec.unused_data:
-        raise ValueError("backup payload is not a single gzip member")
+    try:
+        raw = bytearray(dec.decompress(gz, MAX_UNPACKED))
+    except zlib.error as exc:
+        raise ValueError(f"backup payload is not valid gzip ({exc})") from exc
+    if dec.unconsumed_tail or dec.unused_data or not dec.eof:
+        raise ValueError("backup payload is not a single, complete gzip member")
     old_id = None
     patched = set()
-    with tarfile.open(fileobj=io.BytesIO(bytes(raw))) as tf:
+    with tarfile.open(fileobj=io.BytesIO(bytes(raw)), mode="r:") as tf:
         for m in tf:
             name = m.name.lstrip("./")
             if not m.isfile() or name not in ("map.gridmap", *_AREA_FILES):

@@ -86,7 +86,10 @@ Things to know:
   the Tapo app first.
 - The robot must be docked and idle, and `copy_map` needs the TP-Link cloud login (the same as
   `fetch_cloud_map_backups`), because the robot only writes a backup to the cloud.
-- The original map stays the current map afterwards.
+- The map that was current before stays current afterwards; switch to the copy with the map
+  selector (or `set_map`) when you want to use it.
+- Per-room cleaning settings (suction, water, passes) live in presets on this firmware, so the
+  copy has the backup's room names but not the original's presets.
 
 How it works: a backup carries its map id inside it, and the robot restores a backup under that
 id. Home Assistant changes the id in a copy of the backup file (the original file is left alone),
@@ -100,6 +103,9 @@ robot that is the map itself. Otherwise (a lost map, or a new map) the current m
 and the robot writes the backup's room names, room colours and furniture onto that map. Home
 Assistant reads that map's rooms and furniture first and puts them back straight after the
 restore, so it ends up as it was; the restored map gets the backup's names and furniture instead.
+That snapshot is kept until it has been put back, so a restore that takes longer than Home
+Assistant watches it, or a Home Assistant restart part way, still ends with it put back (on the
+next poll once the restored map shows up).
 Versions before 0.35.0 did not do this, so a restore of a lost map could blank the room names and
 furniture of the map that carried it (put them back with `apply_map_setup`).
 

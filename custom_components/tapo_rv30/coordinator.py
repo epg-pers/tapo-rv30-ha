@@ -778,10 +778,15 @@ class TapoCoordinator(DataUpdateCoordinator):
         if self._restore_store is not None:
             self.hass.async_create_task(self._restore_store.async_save({"pending": self.pending_restore}))
 
-    def expect_restore(self, map_id: int, name: str | None, carrier: int) -> None:
-        """A backup came back as a new, unsaved map; finish it once it is saved in the app.
-        Kept across restarts: the user may take a while to save it in the app."""
-        self.pending_restore = {"map_id": map_id, "name": name, "carrier": carrier}
+    def expect_restore(self, map_id: int, name: str | None, carrier: int, before: dict | None = None,
+                       tail: dict | None = None, copy: bool = False) -> None:
+        """A backup is being restored onto a carrier map and comes back as a new, unsaved map.
+        before is the carrier's rooms and furniture, which the robot overwrites with the
+        backup's: put back (with the restored map saved and given the backup's names) as soon
+        as the map shows up, by the service or, if it stopped watching, by the next poll. A
+        lost map is then finished once saved. Kept across restarts."""
+        self.pending_restore = {"map_id": map_id, "name": name, "carrier": carrier, "before": before,
+                                "tail": tail, "copy": copy, "tidied": before is None}
         self._save_restore()
 
     def _drop_restore(self, pend: dict) -> None:
@@ -797,9 +802,53 @@ class TapoCoordinator(DataUpdateCoordinator):
         m = next((x for x in self.maps if x["id"] == pend["map_id"]), None)
         if m is None:
             return
-        if m.get("saved"):
+        if not pend.get("tidied", True):
+            self._finishing = True
+            self._background(self._tidy_in_background(pend), "tidy restore")
+        elif pend.get("copy"):
+            self._drop_restore(pend)
+        elif m.get("saved"):
             self._finishing = True
             self._background(self.async_finish_restore(), "finish restore")
+
+    async def _tidy_in_background(self, pend: dict) -> None:
+        try:
+            if self.map_busy or self.map_lock.locked() or await self._robot_working():
+                return      # a later poll tries again, once docked
+            async with self.map_lock:
+                out = await self.async_tidy_restore(pend)
+            if out is not None and pend.get("copy") and out["saved"]:
+                from homeassistant.components import persistent_notification
+                persistent_notification.async_create(
+                    self.hass, f"The copy \"{pend.get('name')}\" is saved." + (
+                        f" Not everything went to plan: {'; '.join(out['errors'])}." if out["errors"] else ""),
+                    title=f"{self.device_name}: map copied", notification_id=f"{DOMAIN}_restore_{pend['map_id']}")
+        finally:
+            self._finishing = False
+
+    async def async_tidy_restore(self, pend: dict) -> dict | None:
+        """Run mapcopy.tidy for a pending restore whose map has landed (map lock held by the
+        caller). Marks it tidied once the carrier is put back; a copy is then done. Returns the
+        tidy result, or None if the robot could not be read (tried again on a later poll)."""
+        from . import mapcopy
+        try:
+            out = await self.hass.async_add_executor_job(mapcopy.tidy, self.client, pend)
+        except Exception as exc:
+            _LOGGER.warning("%s: tidying up after the restore of map %s failed (%s); trying again later",
+                            self.device_name, pend.get("map_id"), exc)
+            return None
+        if out["errors"]:
+            _LOGGER.warning("%s: after the restore of map %s: %s", self.device_name, pend.get("map_id"),
+                            "; ".join(out["errors"]))
+        if out["carrier_ok"] and self.pending_restore is pend:
+            pend["tidied"] = True
+            pend.pop("before", None)
+            if pend.get("copy"):
+                self._drop_restore(pend)
+            else:
+                self._save_restore()
+        await self.async_request_map_refresh()
+        return out
 
     async def async_finish_restore(self) -> dict | None:
         """Put the restored map's layers back from its saved setup, then tell the user."""
@@ -836,7 +885,7 @@ class TapoCoordinator(DataUpdateCoordinator):
                 msg = (f"{name} is restored. Put back: {'; '.join(done) or 'nothing was missing'}."
                        + (f" Skipped: {'; '.join(result['skipped'])}." if result.get("skipped") else ""))
             if carrier and pend["carrier"] != pend["map_id"]:
-                msg += (f" \"{carrier}\" carried the restore and its room names and furniture were put back; "
+                msg += (f" \"{carrier}\" carried the restore and was put back as it was; "
                         "if it was only made for this, you can delete it now.")
             self._drop_restore(pend)
         except setup_apply.ApplyError as exc:
@@ -1008,8 +1057,10 @@ class TapoCoordinator(DataUpdateCoordinator):
         layers = self._map_layers
         if not layers or self._presets_raw is None or layers.get("map_id") != self.map_id:
             return
-        if self.pending_restore and self.pending_restore.get("map_id") == layers.get("map_id"):
-            return      # the restored map is still being finished: keep the good setup it needs
+        pend = self.pending_restore
+        if pend and (pend.get("map_id") == layers.get("map_id")
+                     or (not pend.get("tidied", True) and pend.get("carrier") == layers.get("map_id"))):
+            return      # the restored map, or the map it was restored onto, is still being finished
         rules = (self.settings.get("schedules") or {}).get("rule_list")
         if rules is None:
             return

@@ -949,7 +949,7 @@ def async_setup_services(hass: HomeAssistant) -> None:
 
         from homeassistant.components.network import async_get_source_ip
 
-        from . import mapbackup, mapcopy, mapsnapshot
+        from . import mapbackup, mapcopy
         from .map_restore import async_setup_map_restore
         if coord.map_busy:
             raise ServiceValidationError(f"{call.service}: {coord.device_name} must be docked and idle")
@@ -1044,100 +1044,126 @@ def async_setup_services(hass: HomeAssistant) -> None:
             token = secrets.token_urlsafe(24)
             store[token] = tmp or path
             url = f"{base}/api/tapo_rv30/bkmap/{token}"
-        try:
-            map_id, carrier = mapsnapshot.restore_target(names, coord.map_id, backup_id)
-        except ValueError as exc:
-            raise ServiceValidationError(f"{call.service}: {exc}") from exc
         process: dict = {}
         code = None
-        repaired: dict = {}
+        tidy: dict | None = None
         landed = None
+        carrier = False
+        map_id = backup_id
+        keep_url = False
         try:
             async with coord.map_lock:
-                # The carrier's rooms and furniture, as the robot is about to overwrite them.
-                before = (mapcopy.layers(await _read(hass, call, coord.client.get_map_data, map_id))
-                          if carrier else None)
-                if carrier and not new_name:
-                    # Recorded before the robot is asked, so a Home Assistant restart while it applies
-                    # the backup still finishes it; dropped again if the robot refuses or fails it.
-                    coord.expect_restore(backup_id, label, map_id)
-                pend = coord.pending_restore if carrier and not new_name else None
+                # Which map takes the restore, from a fresh read: the backup's own map, or else a
+                # saved map to carry it (the current one if it is saved; never a map still unsaved,
+                # which the restored one could replace).
+                current, map_list = await _read(hass, call, coord.client.get_map_info)
+                saved = [m.get("map_id") for m in map_list if m.get("is_saved") is not False]
+                if not new_name and backup_id in {m.get("map_id") for m in map_list}:
+                    map_id = backup_id
+                elif saved:
+                    map_id, carrier = (current if current in saved else saved[0]), True
+                else:
+                    raise ServiceValidationError(
+                        f"{call.service}: the robot has no saved map to take the restore. Make any map in the "
+                        "Tapo app (a quick mapping run is enough), then run this again: the backup comes back "
+                        "under its own map id and that throwaway map can be deleted")
+                if carrier:
+                    # The robot writes the backup's room names, colours and furniture onto the carrier:
+                    # keep the carrier's own, recorded before the robot is asked so that a Home
+                    # Assistant restart or a slow restore still puts them back (on a later poll).
+                    before = mapcopy.layers(await _read(hass, call, coord.client.get_map_data, map_id))
+                    coord.expect_restore(backup_id, new_name or label, map_id, before,
+                                         mapcopy.tail_subset(tail), copy=bool(new_name))
+                pend = coord.pending_restore if carrier else None
                 try:
-                    try:
-                        code = await hass.async_add_executor_job(coord.client.recover_map, map_id, md5, url)
-                    except RuntimeError as exc:
-                        if pend is not None:
-                            coord._drop_restore(pend)
-                        raise HomeAssistantError(f"{call.service}: {exc}") from exc
-                    if code != 0 and pend is not None:
+                    baseline = await hass.async_add_executor_job(coord.client.get_map_br_process)
+                except Exception:
+                    baseline = {}
+                try:
+                    code = await hass.async_add_executor_job(coord.client.recover_map, map_id, md5, url)
+                except RuntimeError as exc:
+                    if pend is not None:
                         coord._drop_restore(pend)
-                    misses = 0
-                    for _ in range(45):
-                        await asyncio.sleep(2)
+                    raise HomeAssistantError(f"{call.service}: {exc}") from exc
+                if code != 0:
+                    if pend is not None:
+                        coord._drop_restore(pend)
+                else:
+                    process = await _wait_br(coord, 2, baseline)
+                    if carrier and _opt_int(process.get("status")) not in (3, 13):
+                        # The map id was not on the robot before, so seeing it now means it landed
+                        # (the job status can look unchanged when an earlier restore left the same).
                         try:
-                            process = await hass.async_add_executor_job(coord.client.get_map_br_process)
-                            misses = 0
-                        except Exception as exc:
-                            # The robot is busy unpacking; one missed read is not a failed restore.
-                            misses += 1
-                            _LOGGER.debug("getMapBRProcess failed (%s), %d in a row", exc, misses)
-                            if misses >= 5:
-                                break
-                            continue
-                        # status 2 is "still running": wait for success (3) or failure (13).
-                        if process.get("status") in (3, 13, "3", "13"):
-                            break
-                finally:
-                    if store is not None and token is not None:
-                        if _opt_int(process.get("status")) in (None, 2):
-                            # Still applying (or unknown): keep serving the backup for a while longer.
-                            hass.loop.call_later(600, store.pop, token, None)
-                        else:
-                            await asyncio.sleep(3)  # let a slow fetch finish before the URL stops serving
-                            store.pop(token, None)
+                            _, now_list = await hass.async_add_executor_job(coord.client.get_map_info)
+                            if any(m.get("map_id") == backup_id for m in now_list):
+                                process = {**process, "type": 2, "status": 3}
+                        except Exception:
+                            pass
                 status = _opt_int(process.get("status"))
+                keep_url = code == 0 and status in (None, 2)
+                # The restore can take minutes; if the entry was reloaded meanwhile, carry on with
+                # its new coordinator (the old one's client is closed).
+                live = hass.data.get(DOMAIN, {}).get(coord.entry.entry_id, coord) if coord.entry else coord
+                if carrier and code == 0 and status in (3, 13):
+                    # Done (or failed, when the carrier may still have been written to): tidy up now.
+                    lp = live.pending_restore
+                    if lp and lp.get("map_id") == backup_id and not lp.get("tidied", True):
+                        tidy = await live.async_tidy_restore(lp)
+                    if status == 13 and live.pending_restore and live.pending_restore.get("map_id") == backup_id:
+                        live._drop_restore(live.pending_restore)
                 if status == 3:
                     try:
-                        current, map_list = await hass.async_add_executor_job(coord.client.get_map_info)
+                        _, map_list = await hass.async_add_executor_job(live.client.get_map_info)
                         landed = next((m for m in map_list if m.get("map_id") == backup_id), None)
                     except Exception:  # the restore itself already succeeded
-                        current, landed = None, None
-                    if carrier:
-                        repaired = await _after_carrier(call, coord, map_id, before, backup_id, landed,
-                                                        current, tail, new_name or label,
-                                                        bool(new_name))
+                        landed = None
+                coord = live
         finally:
+            if store is not None and token is not None:
+                if keep_url:
+                    # Still applying (or unknown): keep serving the backup for a while longer.
+                    hass.loop.call_later(600, store.pop, token, None)
+                else:
+                    await asyncio.sleep(3)  # let a slow fetch finish before the URL stops serving
+                    store.pop(token, None)
             if tmp:
-                hass.loop.call_later(600, lambda: os.path.exists(tmp) and os.remove(tmp))
-        # The restore can take minutes; if the entry was reloaded meanwhile, carry on with its
-        # new coordinator (the old one's client is closed and its pending restore is lost).
-        coord = hass.data.get(DOMAIN, {}).get(coord.entry.entry_id, coord) if coord.entry else coord
+                def _rm() -> None:
+                    try:
+                        os.remove(tmp)
+                    except OSError:
+                        pass
+                hass.loop.call_later(600 if keep_url else 5,
+                                     lambda: hass.async_create_task(hass.async_add_executor_job(_rm)))
         await coord.async_request_map_refresh()
         status = _opt_int(process.get("status"))
-        if status == 13 and carrier and not new_name and (coord.pending_restore or {}).get("map_id") == backup_id:
-            coord._drop_restore(coord.pending_restore)
-        saved = bool(repaired.get("saved")) or (bool(landed) and landed.get("is_saved", True) is not False)
+        saved = bool(tidy and tidy["saved"]) or (bool(landed) and landed.get("is_saved", True) is not False)
+        carrier_name = names.get(map_id)
         # The robot reports status 3 when the map is applied, 13 on failure, 2 while still working.
-        note = ("restore failed on the robot (status 13); if the backup is served through a reverse "
+        note = (f"the robot refused the restore (error {code})" if code not in (0, None)
+                else "restore failed on the robot (status 13); if the backup is served through a reverse "
                 "proxy, set base_url to HA's direct LAN address" if status == 13
-                else "still applying when polling ended" if status == 2 else None)
-        if repaired.get("error"):
-            note = repaired["error"]
+                else "still applying when polling ended" if status in (2, None) else None)
+        if tidy and tidy["errors"]:
+            note = ((note + "; ") if note else "") + "after the restore: " + "; ".join(tidy["errors"])
+        put_back = bool(tidy and tidy["carrier_ok"])
         next_steps = None
-        if new_name:
-            if status == 3 and saved:
-                next_steps = (f"Restored as a new map, \"{new_name}\", with the backup's room names and furniture. "
-                              f"\"{names.get(map_id)}\" is still the current map and was put back as it was.")
-            elif status == 3:
+        if code not in (0, None):
+            pass
+        elif status in (2, None) and carrier:
+            # Polling ended before the robot finished; it will most likely land, and the next polls
+            # put the carrier back (and save a named map) once it does.
+            next_steps = (f"The robot is still applying the backup. Once it lands, Home Assistant puts \"{carrier_name}\" "
+                          "back as it was" + (f" and saves the new map as \"{new_name}\"." if new_name else
+                                              (f" and saves it as \"{label}\"." if label else
+                                               "; then save the restored map in the Tapo app.")))
+        elif status == 3 and new_name:
+            if saved:
+                next_steps = (f"Restored as a new map, \"{new_name}\", with the backup's room names and furniture."
+                              + (f" \"{carrier_name}\" is the current map again and was put back as it was."
+                                 if put_back else ""))
+            else:
                 next_steps = (f"The copy came back as an unsaved map (id {backup_id}) but saving it failed; save it "
                               "in the Tapo app.")
-        elif status in (2, None) and carrier and code == 0:
-            # Polling ended before the robot finished; it will most likely land, so watch for it
-            # (the watcher only acts once the map shows up and is saved).
-            coord.expect_restore(backup_id, label, map_id)
-            next_steps = ("The robot is still applying the backup. Once the map appears, save it in the Tapo app"
-                          + (f" as \"{label}\"" if label else "") + "; Home Assistant then puts back its "
-                          "room names, zones, furniture, presets and schedules by itself.")
         elif status == 3 and landed and carrier:
             # The map had been deleted: finished automatically once it is saved.
             next_steps = (("The map came back as a new, unsaved map. Save it in the Tapo app"
@@ -1152,54 +1178,53 @@ def async_setup_services(hass: HomeAssistant) -> None:
         elif status == 3:
             next_steps = ("Run apply_map_setup on this map (dry_run: true first to preview) to put back anything "
                           "the backup does not carry: room names, zones, furniture, presets, schedules.")
-        return {"map_id": map_id, "map_name": names.get(map_id), "backup_map_id": backup_id,
+        return {"map_id": map_id, "map_name": carrier_name, "backup_map_id": backup_id,
                 "backup_map_name": new_name or label, "carrier": carrier, "as_new": bool(new_name),
-                "restored_map_saved": saved if status == 3 else None, "carrier_repaired": repaired.get("carrier"),
+                "restored_map_saved": saved if status == 3 else None,
+                "carrier_repaired": tidy["carrier"] if put_back else None,
                 "source": src, "md5": md5, "url": url, "error_code": code, "process": process,
                 "applied": status == 3, "note": note, "next_steps": next_steps}
 
-    async def _after_carrier(call: ServiceCall, coord: TapoCoordinator, carrier_id: int, before: dict | None,
-                             landed_id: int, landed: dict | None, current, tail: dict | None,
-                             save_as: str | None, is_copy: bool) -> dict:
-        """After a restore onto a carrier (map lock held): save the restored map when its name
-        is known, give it the backup's room names and furniture, put the carrier's back, and for
-        a copy make the carrier current again. Each step is best effort: the restore already
-        happened, so a failed step is reported, not raised."""
-        from . import mapcopy
-        client = coord.client
-        out: dict = {"saved": False, "carrier": None}
-        try:
-            if landed is not None and landed.get("is_saved") is False and save_as and current == landed_id:
-                code = await hass.async_add_executor_job(client.save_current_map, save_as)
-                _, maps_now = await hass.async_add_executor_job(client.get_map_info)
-                now = next((m for m in maps_now if m.get("map_id") == landed_id), {})
-                out["saved"] = code == 0 and now.get("is_saved") is not False
-            if landed is not None and out["saved"]:
-                new = mapcopy.tail_layers(tail, await hass.async_add_executor_job(client.get_map_data, landed_id))
-                if new["rooms"]:
-                    await hass.async_add_executor_job(client.set_areas, landed_id, "room", new["rooms"])
-                if new["furniture"]:
-                    await hass.async_add_executor_job(client.set_furniture, landed_id, new["furniture"])
-            if before is not None:
-                fix = mapcopy.repair(before, await hass.async_add_executor_job(client.get_map_data, carrier_id))
-                if fix["rooms"]:
-                    await hass.async_add_executor_job(client.set_areas, carrier_id, "room", fix["rooms"])
-                if fix["furniture"] is not None:
-                    await hass.async_add_executor_job(client.set_furniture, carrier_id, fix["furniture"])
-                out["carrier"] = {"rooms": len(fix["rooms"] or []),
-                                  "furniture": None if fix["furniture"] is None else len(fix["furniture"])}
-            if is_copy and out["saved"]:
-                await hass.async_add_executor_job(client.set_current_map, carrier_id)
-        except Exception as exc:
-            _LOGGER.warning("%s: finishing the restore onto %s failed: %s", coord.device_name, carrier_id, exc)
-            out["error"] = (f"the restore worked, but tidying up after it failed ({exc}); check the map "
-                            "it was restored onto and run apply_map_setup on it if its room names or furniture changed")
-        return out
+    async def _wait_br(coord: TapoCoordinator, kind: int, baseline: dict, src: int | None = None,
+                       tries: int = 45) -> dict:
+        """Poll getMapBRProcess until a job of this kind (1 backup, 2 recovery) has finished
+        (status 3) or failed (13). A finished job of the same kind still shown from before the
+        request (baseline) does not count until something else has been read; a backup that has
+        run and been cleared back to all zeros counts as finished. {} if it never got there."""
+        import asyncio
+        stale = dict(baseline or {})
+        seen = misses = 0
+        last: dict = {}
+        for _ in range(tries):
+            await asyncio.sleep(2)
+            try:
+                p = await hass.async_add_executor_job(coord.client.get_map_br_process)
+                misses = 0
+            except Exception as exc:
+                # The robot is busy unpacking; one missed read is not a failed job.
+                misses += 1
+                _LOGGER.debug("getMapBRProcess failed (%s), %d in a row", exc, misses)
+                if misses >= 5:
+                    break
+                continue
+            t, st = _opt_int(p.get("type")), _opt_int(p.get("status"))
+            if p == stale:
+                continue
+            stale = {}
+            if t == kind and (src is None or _opt_int(p.get("map_id")) == src):
+                seen += 1
+                last = p
+                if st in (3, 13):
+                    return p
+            elif seen and t == 0 and st == 0 and kind == 1:
+                return {**last, "status": 3}
+        return last
+
 
     async def handle_copy_map(call: ServiceCall) -> ServiceResponse:
         """Copy a map to a new map: back it up to the TP-Link cloud, download that backup and
         restore it under a fresh map id with the given name. The original is not written to."""
-        import asyncio
+        import time
         import uuid
 
         from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
@@ -1211,28 +1236,28 @@ def async_setup_services(hass: HomeAssistant) -> None:
         names = await _read(hass, call, coord.map_names)
         ref = call.data.get("map")
         src = _match_map(call, names, ref, exact=True) if ref not in (None, "") else coord.map_id
-        if src not in names:
-            raise ServiceValidationError(f"{call.service}: no saved map to copy")
         name = _new_map_name(call, names, call.data.get("name"))
         if coord.map_busy:
             raise ServiceValidationError(f"{call.service}: {coord.device_name} must be docked and idle")
         if coord.map_lock.locked():
             raise ServiceValidationError(f"{call.service}: a map write is running; try again shortly")
-        # 1. A fresh backup of the source map, to the cloud (the only place the robot puts one).
-        code = await _read(hass, call, coord.client.backup_map, src)
-        if code != 0:
-            raise HomeAssistantError(f"{call.service}: the robot refused to back up '{names[src]}' (error {code})")
-        process: dict = {}
-        for _ in range(45):
-            await asyncio.sleep(2)
+        started = time.time()
+        async with coord.map_lock:
+            _, map_list = await _read(hass, call, coord.client.get_map_info)
+            if not any(m.get("map_id") == src and m.get("is_saved") is not False for m in map_list):
+                raise ServiceValidationError(f"{call.service}: only a saved map can be copied")
+            # 1. A fresh backup of the source map, to the cloud (the only place the robot puts one).
             try:
-                process = await hass.async_add_executor_job(coord.client.get_map_br_process)
+                baseline = await hass.async_add_executor_job(coord.client.get_map_br_process)
             except Exception:
-                continue
-            if _opt_int(process.get("status")) in (3, 13) or (process.get("type") == 0 and process.get("status") == 0):
-                break
-        if _opt_int(process.get("status")) == 13:
-            raise HomeAssistantError(f"{call.service}: the robot could not back up '{names[src]}'")
+                baseline = {}
+            code = await _read(hass, call, coord.client.backup_map, src)
+            if code != 0:
+                raise HomeAssistantError(f"{call.service}: the robot refused to back up '{names[src]}' (error {code})")
+            process = await _wait_br(coord, 1, baseline, src, tries=60)
+        if _opt_int(process.get("status")) != 3:
+            raise HomeAssistantError(f"{call.service}: the robot did not finish backing up '{names[src]}'"
+                                     + (" (it reported a failure)" if _opt_int(process.get("status")) == 13 else ""))
         # 2. Download it.
         terminal = str(uuid.uuid5(uuid.NAMESPACE_URL, f"{DOMAIN}:{coord.entry.entry_id}"))
         try:
@@ -1244,9 +1269,12 @@ def async_setup_services(hass: HomeAssistant) -> None:
         if got.get("status") == "code_sent":
             raise ServiceValidationError(f"{call.service}: TP-Link emailed a verification code; run copy_map "
                                          "again with verification_code set to it")
-        mine = [b for b in got.get("backups", []) if b.get("map_id") == src and b.get("file") and not b.get("error")]
+        # Only the backup just made (cloud timestamps are seconds; a few minutes' slack for clocks).
+        mine = [b for b in got.get("backups", []) if b.get("map_id") == src and b.get("file") and not b.get("error")
+                and (_opt_int(b.get("timestamp")) or 0) >= started - 300]
         if not mine:
-            raise HomeAssistantError(f"{call.service}: the cloud has no backup of '{names[src]}' to copy")
+            raise HomeAssistantError(f"{call.service}: the cloud does not have the new backup of '{names[src]}' "
+                                     "yet; try again in a minute")
         newest = max(mine, key=lambda b: b.get("timestamp") or 0)
         # 3. Restore it as a new map.
         result = await _restore(call, coord, names, src, None, newest["file"], name)

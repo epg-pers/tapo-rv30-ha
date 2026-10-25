@@ -1296,7 +1296,7 @@ class TapoRV30Panel extends HTMLElement {
           </div></div></div>`;
     }).join("");
     grid.querySelectorAll(".thumb[data-i], .bkview").forEach((el) => el.onclick = () => this._backupView(list[+el.dataset.i]));
-    grid.querySelectorAll(".bkrestore").forEach((el) => { el.onclick = () => this._backupRestore(list[+el.dataset.i], status); el.disabled = !this._isAdmin(); });
+    grid.querySelectorAll(".bkrestore").forEach((el) => { el.onclick = () => this._backupRestore(list[+el.dataset.i], status, el); el.disabled = !this._isAdmin(); });
   }
 
   async _backupView(b) {
@@ -1318,10 +1318,10 @@ class TapoRV30Panel extends HTMLElement {
 
   // Restore choices, in the card (no browser dialog, which app webviews may not show): over the
   // map the backup came from, or as a new map with its own name next to it.
-  _backupRestore(b, status) {
-    const card = [...this.shadowRoot.querySelectorAll(".bkrestore")].find((x) => this._backups[+x.dataset.i] === b);
-    const meta = card && card.closest(".meta");
-    if (!meta) return;
+  _backupRestore(b, status, btn) {
+    const meta = btn && btn.closest(".meta");
+    if (!meta || meta.querySelector(".restore-opts")) return;
+    const grp = `how-${Math.random().toString(36).slice(2)}`;   // one radio group per card
     const cam = this._st(this._related(this._robot).camera), maps = ((cam && cam.attributes.maps) || []);
     const onRobot = maps.some((m) => String(m.id) === String(b.map_id));
     const full = maps.length >= 3;
@@ -1329,14 +1329,14 @@ class TapoRV30Panel extends HTMLElement {
     const box = document.createElement("div");
     box.className = "restore-opts";
     box.innerHTML = `
-      <label><input type="radio" name="how" value="replace" checked>${onRobot ? `Replace "${esc(b.map_name)}" on the robot` : `Put "${esc(b.map_name)}" back (it is no longer on the robot)`}</label>
-      <label class="${full ? "off" : ""}" ${full ? `title="The robot holds at most 3 maps; delete one in the Tapo app first"` : ""}><input type="radio" name="how" value="new" ${full ? "disabled" : ""}>As a new map${full ? " (the robot already has 3)" : ""}</label>
+      <label><input type="radio" name="${grp}" value="replace" checked>${onRobot ? `Replace "${esc(b.map_name)}" on the robot` : `Put "${esc(b.map_name)}" back (it is no longer on the robot)`}</label>
+      <label class="${full ? "off" : ""}" ${full ? `title="The robot holds at most 3 maps; delete one in the Tapo app first"` : ""}><input type="radio" name="${grp}" value="new" ${full ? "disabled" : ""}>As a new map${full ? " (the robot already has 3)" : ""}</label>
       <input class="rename" maxlength="32" aria-label="New map name" value="${esc(`${b.map_name} copy`.slice(0, 32))}" style="display:none">
       <div class="acts"><button class="btn primary" data-act="go"><ha-icon icon="mdi:backup-restore"></ha-icon>Restore</button><button class="btn" data-act="cancel">Cancel</button></div>`;
     acts.style.display = "none";
     meta.appendChild(box);
-    const name = box.querySelector("input.rename"), how = () => box.querySelector("input[name=how]:checked").value;
-    box.querySelectorAll("input[name=how]").forEach((r) => r.onchange = () => { name.style.display = how() === "new" ? "" : "none"; if (how() === "new") name.focus(); });
+    const name = box.querySelector("input.rename"), how = () => (box.querySelector(`input[name="${grp}"]:checked`) || {}).value;
+    box.querySelectorAll(`input[name="${grp}"]`).forEach((r) => r.onchange = () => { name.style.display = how() === "new" ? "" : "none"; if (how() === "new") name.focus(); });
     const close = () => { box.remove(); acts.style.display = ""; };
     box.querySelector("[data-act=cancel]").onclick = close;
     box.querySelector("[data-act=go]").onclick = () => {
@@ -1479,7 +1479,18 @@ class TapoRV30Panel extends HTMLElement {
         if (!name) return input.focus();
         save.disabled = cancel.disabled = input.disabled = true;
         row.querySelector(".copynote").textContent = `Copying to "${name}"...`;
-        if (await this._call(DOMAIN, "copy_map", { map: id, name }, { entity_id: this._robot })) return done();
+        try {
+          const res = await this._hass.callService(DOMAIN, "copy_map", { map: id, name }, { entity_id: this._robot }, false, true);
+          const r = (res && res.response) ? res.response : res || {};
+          const message = [r.next_steps, r.note].filter(Boolean).join(" ") || `Copied to "${name}".`;
+          this.dispatchEvent(new CustomEvent("hass-notification", { detail: { message }, bubbles: true, composed: true }));
+          return done();
+        } catch (e) {
+          const message = (e && (e.message || (e.body && e.body.message))) || "The robot rejected that";
+          this.dispatchEvent(new CustomEvent("hass-notification", { detail: { message }, bubbles: true, composed: true }));
+        }
+        if (!row.isConnected) return;
+        row.querySelector(".copynote").textContent = "";
         save.disabled = cancel.disabled = input.disabled = false; input.focus();
       };
       save.onclick = submit;

@@ -122,3 +122,90 @@ def test_room_colour_is_kept_in_map_setups():
                              [], [], [], "now")
     plan = mapsnapshot.plan(snap, OLD, [{"type": "room", "id": 4, "name": "SGFsbHdheQ=="}], [], [], [])
     assert plan["rooms"] == [{"type": "room", "id": 4, "name": "SGFsbHdheQ==", "color": 3}]
+
+
+class _Client:
+    """Just enough of the robot for mapcopy.tidy, recording the order of writes."""
+
+    def __init__(self, maps, current, saved, fail=()):
+        self.maps, self.current, self.saved, self.fail, self.calls = maps, current, saved, set(fail), []
+
+    def _go(self, name, *a):
+        self.calls.append((name, *a))
+        if name in self.fail:
+            raise RuntimeError(f"{name} failed")
+
+    def get_map_data(self, mid):
+        return json.loads(json.dumps(self.maps[mid]))
+
+    def get_map_info(self):
+        import base64
+        return self.current, [{"map_id": m, "map_name": base64.b64encode(d.get("name", "").encode()).decode(),
+                               "is_saved": self.saved[m]} for m, d in self.maps.items()]
+
+    def set_areas(self, mid, t, rooms):
+        self._go("set_areas", mid)
+        self.maps[mid]["area_list"] = [a for a in self.maps[mid]["area_list"] if a["type"] != t] + rooms
+
+    def set_furniture(self, mid, f):
+        self._go("set_furniture", mid)
+        self.maps[mid]["furniture_list"] = list(f)
+
+    def save_current_map(self, name):
+        self._go("save_current_map", name)
+        self.saved[self.current] = True
+        self.maps[self.current]["name"] = name
+        return 0
+
+    def set_current_map(self, mid):
+        self._go("set_current_map", mid)
+        self.current = mid
+
+
+def _robot(fail=()):
+    good = [{"type": "room", "id": 4, "name": "SGFsbHdheQ==", "color": 3}]
+    maps = {OLD: {"name": "Downstairs", "area_list": [{"type": "room", "id": 4}], "furniture_list": FURNITURE},
+            7: {"name": "", "area_list": [{"type": "room", "id": 4}, {"type": "room", "id": 2}], "furniture_list": []}}
+    c = _Client(maps, 7, {OLD: True, 7: False}, fail)
+    pend = {"map_id": 7, "carrier": OLD, "name": "Copy", "copy": True,
+            "before": {"rooms": good, "furniture": []},
+            "tail": mapcopy.tail_subset({"area_list": ROOMS, "furniture_list": FURNITURE})}
+    return c, pend, good
+
+
+def test_tidy_puts_the_carrier_back_first_then_finishes_the_copy():
+    c, pend, good = _robot()
+    out = mapcopy.tidy(c, pend)
+    assert out["carrier_ok"] and out["saved"] and not out["errors"]
+    assert c.calls[0] == ("set_areas", OLD)                                  # the carrier first
+    assert c.maps[OLD]["area_list"] == good and c.maps[OLD]["furniture_list"] == []
+    assert c.maps[7]["name"] == "Copy" and c.saved[7]
+    assert {r["id"]: r.get("name") for r in c.maps[7]["area_list"]} == {4: "SGFsbHdheQ==", 2: "S2l0Y2hlbg=="}
+    assert c.maps[7]["furniture_list"] == FURNITURE
+    assert c.calls[-1] == ("set_current_map", OLD)
+
+
+def test_tidy_carries_on_after_a_failed_step():
+    c, pend, good = _robot(fail={"save_current_map"})
+    out = mapcopy.tidy(c, pend)
+    assert out["carrier_ok"] and not out["saved"] and out["errors"]
+    assert c.maps[OLD]["area_list"] == good
+    assert ("set_current_map", OLD) not in c.calls                          # the unsaved copy stays put
+
+
+def test_tidy_never_saves_under_a_name_already_taken():
+    c, pend, _ = _robot()
+    pend["name"] = "downstairs"
+    out = mapcopy.tidy(c, pend)
+    assert not out["saved"] and ("save_current_map", "downstairs") not in c.calls
+
+
+def test_reid_rejects_short_or_truncated_input():
+    data = _bkmap()
+    with pytest.raises(ValueError):
+        mapbackup.reid_bkmap(data[:40], 1792933921)
+    size = int.from_bytes(data[58:62], "big")
+    cut = data[:62 + size - 20]
+    head = cut[:25] + hashlib.md5(cut[62:]).hexdigest().encode() + b"\x01" + (size - 20).to_bytes(4, "big")
+    with pytest.raises(ValueError):
+        mapbackup.reid_bkmap(head + cut[62:], 1792933921)

@@ -91,3 +91,71 @@ def tail_layers(tail: dict | None, map_data: dict) -> dict[str, list | None]:
     have = furniture_of(map_data.get("furniture_list"))
     return {"rooms": rooms if changed else None,
             "furniture": furniture if furniture and not same(furniture, have) else None}
+
+
+def tail_subset(tail: dict | None) -> dict | None:
+    """The part of a backup's tail worth keeping for the tidy-up (it is stored until then)."""
+    if not tail:
+        return None
+    rooms = [{k: a[k] for k in ("type", "id", *_TAIL_ROOM_KEYS) if a.get(k) is not None}
+             for a in tail.get("area_list") or [] if isinstance(a, dict) and a.get("type") == "room"]
+    return {"area_list": rooms, "furniture_list": furniture_of(tail.get("furniture_list"))}
+
+
+def _names(map_list) -> dict[int, str]:
+    import base64
+    out = {}
+    for m in map_list or []:
+        try:
+            out[m.get("map_id")] = base64.b64decode(m.get("map_name") or "").decode("utf-8", "replace")
+        except Exception:
+            out[m.get("map_id")] = ""
+    return out
+
+
+def tidy(client, pend: dict) -> dict:
+    """After a restore onto a carrier (blocking, map lock held): put the carrier's rooms and
+    furniture back first, then save the restored map under its name if it is the current
+    unsaved map and the name is free, give it the backup's room names and furniture, and for a
+    copy make the carrier current again. Each step on its own, so one failing does not skip the
+    others; the carrier step failing is the only one worth retrying (carrier_ok False)."""
+    from .mapdata import fold
+    carrier, landed, name = pend["carrier"], pend["map_id"], pend.get("name")
+    out: dict = {"carrier": None, "carrier_ok": False, "saved": False, "errors": []}
+    try:
+        fix = repair(pend.get("before") or {"rooms": [], "furniture": []}, client.get_map_data(carrier))
+        if fix["rooms"]:
+            client.set_areas(carrier, "room", fix["rooms"])
+        if fix["furniture"] is not None:
+            client.set_furniture(carrier, fix["furniture"])
+        out["carrier"] = {"rooms": len(fix["rooms"] or []),
+                          "furniture": None if fix["furniture"] is None else len(fix["furniture"])}
+        out["carrier_ok"] = True
+    except Exception as exc:
+        out["errors"].append(f"putting back map {carrier}: {exc}")
+    try:
+        current, map_list = client.get_map_info()
+        entry = next((m for m in map_list if m.get("map_id") == landed), None)
+        others = [n for mid, n in _names(map_list).items() if mid != landed]
+        if (entry is not None and entry.get("is_saved") is False and name and current == landed
+                and not any(fold(n) == fold(name) for n in others) and client.save_current_map(name) == 0):
+            _, map_list = client.get_map_info()
+            entry = next((m for m in map_list if m.get("map_id") == landed), None)
+        out["saved"] = entry is not None and entry.get("is_saved") is not False
+    except Exception as exc:
+        out["errors"].append(f"saving map {landed}: {exc}")
+    if out["saved"] and pend.get("tail"):
+        try:
+            new = tail_layers(pend["tail"], client.get_map_data(landed))
+            if new["rooms"]:
+                client.set_areas(landed, "room", new["rooms"])
+            if new["furniture"]:
+                client.set_furniture(landed, new["furniture"])
+        except Exception as exc:
+            out["errors"].append(f"room names and furniture of map {landed}: {exc}")
+    if pend.get("copy") and out["saved"]:
+        try:
+            client.set_current_map(carrier)
+        except Exception as exc:
+            out["errors"].append(f"switching back to map {carrier}: {exc}")
+    return out
