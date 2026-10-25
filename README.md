@@ -65,6 +65,30 @@ Same domain, so your config entry and entities carry over; see
 - Adaptive polling, hardened TPAP login, a repair issue when the robot stops answering,
   diagnostics, reconfigure and reauth from the integration page
 
+## What the Tapo app can't do
+
+Everything the app does for day-to-day cleaning is here too. These are the things it has no way
+to do at all:
+
+- **Copy a map**, or restore a backup as a **new map** beside the original, so you can edit and
+  try things on a copy and keep the map you rely on untouched (the app only restores over a map)
+- **Keep your own map backups**: local copies of your cloud backups that survive TP-Link losing
+  them, or the app deleting them along with a map, and restores served from your own network
+- **Put a lost map back together**: restore it onto any map the robot has, and Home Assistant
+  saves it under its old name and re-applies its room names, zones, furniture, presets and
+  schedules from its saved setup
+- **Clean map history**: every run's map kept for as long as you choose, long after the robot
+  forgets the run, and downloadable
+- **Per-room freshness**: when each room was last really cleaned, worked out from the robot's own
+  run maps, for automations and the planner
+- **Clean when it suits the house**: the planner keeps each room within a target like "every 2
+  days", cleans when nobody is home and stays out of rooms whose motion sensors say they are in
+  use
+- **Home Assistant itself**: voice through Assist, rooms as Home Assistant areas, device
+  triggers and events for automations, the last clean map in a phone notification, and several
+  robots on one page
+- **No cloud for control**: everything runs on your own network
+
 ## The upstream project
 
 This is the upstream project: new features, fixes and protocol work land here first, and the
