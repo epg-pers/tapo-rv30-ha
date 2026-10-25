@@ -504,7 +504,7 @@
     },
     "restore_map_backup": {
       "name": "Restore map backup",
-      "description": "Put a whole map backup back on the robot. Home Assistant serves the backup on your network and the robot fetches it; the robot must be docked and idle. Works even if the map was deleted: any map on the robot carries the restore.",
+      "description": "Put a whole map backup back on the robot, over its map, or as a new map with new_name. Home Assistant serves the backup on your network and the robot fetches it; the robot must be docked and idle. Works even if the map was deleted: the current map carries the restore, and its room names and furniture are put back afterwards.",
       "fields": {
         "map": {
           "name": "Map",
@@ -526,9 +526,35 @@
           "name": "Verification code",
           "description": "The code TP-Link emailed you, when the cloud download asks for one."
         },
+        "new_name": {
+          "name": "New map name",
+          "description": "Restore the backup as a new map with this name, next to the map it came from (a copy), instead of over it. The robot holds at most 3 maps."
+        },
         "confirm": {
           "name": "Confirm",
-          "description": "Must be on: this replaces the map on the robot."
+          "description": "Must be on: this replaces the map on the robot (or, with a new name, adds one)."
+        }
+      }
+    },
+    "copy_map": {
+      "name": "Copy map",
+      "description": "Copy a map to a new map with its own name: rooms, room names, no-go zones and furniture. The original is left as it is. Uses a fresh TP-Link cloud backup of the map, so it needs the account's cloud login; the robot must be docked and idle.",
+      "fields": {
+        "map": {
+          "name": "Map",
+          "description": "The map to copy: its name or id. Defaults to the current map."
+        },
+        "name": {
+          "name": "Name",
+          "description": "The new map's name. The robot holds at most 3 maps."
+        },
+        "base_url": {
+          "name": "Base URL",
+          "description": "Home Assistant's direct LAN address (for example http://192.168.1.10:8123) if the robot cannot reach it through the detected one, such as behind a reverse proxy."
+        },
+        "verification_code": {
+          "name": "Verification code",
+          "description": "The code TP-Link emailed you, when the cloud login asks for one."
         }
       }
     }

@@ -1640,6 +1640,18 @@ class TapoVacuumClient:
         r = self.send("mapRecovery", {"map_id": int(map_id), "map_md5": str(map_md5), "url": str(url)})
         return r.get("error_code", 0)
 
+    def backup_map(self, map_id: int) -> int:
+        """Back a map up to the TP-Link cloud (the app's "back up map"); progress in
+        get_map_br_process (type 1). Returns the error_code."""
+        r = self.send("mapBackup", {"map_id": int(map_id)})
+        return r.get("error_code", 0)
+
+    def save_current_map(self, name: str) -> int:
+        """Save the current unsaved map (a restored backup) under name, keeping its id. This is
+        saveMap without replace_map_id: with one, the robot would save it over that map."""
+        r = self.send("saveMap", {"new_map_name": _b64e(name.encode("utf-8"))})
+        return r.get("error_code", 0)
+
     def get_map_br_process(self) -> dict:
         """Backup / recovery progress: {type, process, status}."""
         return self.send("getMapBRProcess").get("result", {})

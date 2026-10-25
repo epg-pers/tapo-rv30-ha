@@ -40,6 +40,14 @@ def write_json(path: str, data) -> None:
     os.replace(tmp, path)
 
 
+def write_bytes(path: str, data: bytes) -> None:
+    """write_json for bytes. Blocking."""
+    tmp = f"{path}.tmp"
+    with open(tmp, "wb") as fh:
+        fh.write(data)
+    os.replace(tmp, path)
+
+
 def _legacy(hass) -> bool:
     """Before 0.28 every robot's files went into one shared folder. With one robot they are its
     own; with several there is no telling whose they are, so they are not offered (a backup of

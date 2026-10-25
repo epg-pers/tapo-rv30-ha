@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.35.0
+
+### Added
+
+- **Restore a backup as a new map.** Restore on the sidebar page's Backups tab now asks whether to replace the map or restore the backup as a new map with a name you choose; `restore_map_backup` takes `new_name` for the same. The new map sits next to the original with its own id, room names, colours, no-go zones and furniture.
+- **Copy a map.** A **Copy** button on each map in the Settings tab, and `tapo_rv30.copy_map`, make a new map from an existing one, so you can edit or try things on the copy and keep the original as it is. It backs the map up to your TP-Link cloud, downloads that backup and restores it as a new map (cloud login needed; docked and idle; the robot holds at most 3 maps). Admin only.
+- How it works, verified on an RV30 Max Plus (firmware 1.3.3): a backup carries its map id inside it and the robot restores it under that id, so Home Assistant changes the id in a copy of the backup file and saves the new map with `saveMap` under your name (never with `replace_map_id`, which would save over another map). The `.bkmap` layout is documented in protocol.md.
+
+### Fixed
+
+- **A restore no longer damages the map that carries it.** When a backup is restored onto another map (a lost map, or now a new one), the robot writes the backup's room names, colours and furniture onto that map instead of the restored one. Home Assistant now reads that map's rooms and furniture first and puts them back right after the restore, and gives the restored map the backup's names and furniture. Before, restoring a lost map onto a real map could blank its room names and furniture.
+- **A lost map whose name is known is saved automatically** after it is restored (it used to wait for you to save it in the Tapo app), and its setup is then put back as before.
+- **Map setups keep room colours**, so `apply_map_setup` puts them back too.
+- Restores hold the map lock, so a clean, the planner or another map write cannot start part way through one.
+
 ## v0.34.0
 
 ### Added

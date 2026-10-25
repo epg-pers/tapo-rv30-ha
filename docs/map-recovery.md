@@ -48,12 +48,68 @@ If the robot can't reach Home Assistant on the LAN at all, `use_cloud_url: true`
 handing the robot the backup's own TP-Link URL instead (this needs your TP-Link login, as for
 `fetch_cloud_map_backups`).
 
+## Restore as a new map, or copy a map
+
+A backup can also come back as a **new map** next to the one it came from, instead of over it.
+Give it a name with `new_name`:
+
+```yaml
+service: tapo_rv30.restore_map_backup
+data:
+  map: Downstairs
+  new_name: Downstairs copy
+  confirm: true
+target:
+  entity_id: vacuum.jarvis
+```
+
+`tapo_rv30.copy_map` does the same from the map as it is now: it backs the map up to your TP-Link
+cloud, downloads that backup and restores it as a new map.
+
+```yaml
+service: tapo_rv30.copy_map
+data:
+  map: Downstairs
+  name: Downstairs copy
+target:
+  entity_id: vacuum.jarvis
+```
+
+The copy has the same grid, rooms, room names and colours, no-go zones and furniture. It is a
+separate map with its own id, so you can edit it (the **Edit map** tab works on the current map:
+switch to the copy first), clean with it, and switch back, while the original stays exactly as it
+was. Presets and schedules belong to a map, so the copy starts without them.
+
+Things to know:
+
+- The robot holds at most **3 maps**. A new map is refused when it already has 3; delete one in
+  the Tapo app first.
+- The robot must be docked and idle, and `copy_map` needs the TP-Link cloud login (the same as
+  `fetch_cloud_map_backups`), because the robot only writes a backup to the cloud.
+- The original map stays the current map afterwards.
+
+How it works: a backup carries its map id inside it, and the robot restores a backup under that
+id. Home Assistant changes the id in a copy of the backup file (the original file is left alone),
+so the robot brings it back as a new, unsaved map; Home Assistant then saves it under your name.
+Checked on an RV30 Max Plus (firmware 1.3.3).
+
+### What a restore does to the map that carries it
+
+The robot only takes a restore onto a map it already has. When the backup's own map is on the
+robot that is the map itself. Otherwise (a lost map, or a new map) the current map carries it,
+and the robot writes the backup's room names, room colours and furniture onto that map. Home
+Assistant reads that map's rooms and furniture first and puts them back straight after the
+restore, so it ends up as it was; the restored map gets the backup's names and furniture instead.
+Versions before 0.35.0 did not do this, so a restore of a lost map could blank the room names and
+furniture of the map that carried it (put them back with `apply_map_setup`).
+
 ## See your backups before you restore
 
 The sidebar page's **Backups** tab shows every backup Home Assistant holds as a grid of
 thumbnails, so you can tell which map a backup is and what it looked like before you put it
 back. Tap a thumbnail to see it full size; press **Restore** on one to restore it to the robot
-(the same `restore_map_backup` as above, docked and idle). **Fetch from cloud** downloads your
+(the same `restore_map_backup` as above, docked and idle). Restore asks whether to replace
+the map or restore it as a new map with a name you choose. **Fetch from cloud** downloads your
 latest TP-Link backups without leaving the page.
 
 Each backup is pictured from the best source it has: the robot's own snapshot image, or - when
@@ -123,10 +179,14 @@ This is the recovery that has been done for real on an RV30 Max Plus, step by st
    The service uses the throwaway map as the carrier. The robot brings the backup back under the
    lost map's **original id**, so presets, schedules and history that referred to it line up
    again. The response says where it landed and what to do next.
-4. **Save it in the Tapo app.** The restored map arrives *unsaved* and unnamed; open it in the
-   app, save it with its old name.
-5. **Put the layers back:** `apply_map_setup` on that map (`dry_run: true` first if you like).
-6. **Delete the throwaway map** in the app.
+4. **Saving it.** The restored map arrives *unsaved*. When Home Assistant knows its name (from its
+   saved setup) it saves it under that name itself and puts its room names, zones, furniture,
+   presets and schedules back, then lets you know. Otherwise save it in the Tapo app with its old
+   name and Home Assistant does the rest.
+5. **Check the layers:** `apply_map_setup` on that map puts back anything still missing
+   (`dry_run: true` first if you like).
+6. **Delete the throwaway map** in the app. Its room names and furniture were put back after the
+   restore, so if it was a real map you can keep it.
 
 **What causes it:** this robot has lost every map twice. The second time came minutes after calls
 from the robot's first-time setup family (`setInheritInfo`, which decides whether the robot keeps

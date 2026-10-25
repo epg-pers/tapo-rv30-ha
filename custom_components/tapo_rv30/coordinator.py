@@ -836,7 +836,8 @@ class TapoCoordinator(DataUpdateCoordinator):
                 msg = (f"{name} is restored. Put back: {'; '.join(done) or 'nothing was missing'}."
                        + (f" Skipped: {'; '.join(result['skipped'])}." if result.get("skipped") else ""))
             if carrier and pend["carrier"] != pend["map_id"]:
-                msg += f" You can now delete the map \"{carrier}\" that carried the restore."
+                msg += (f" \"{carrier}\" carried the restore and its room names and furniture were put back; "
+                        "if it was only made for this, you can delete it now.")
             self._drop_restore(pend)
         except setup_apply.ApplyError as exc:
             msg = f"{name} is restored, but putting its setup back failed: {exc}. Run apply_map_setup to retry."

@@ -220,6 +220,10 @@ input.rename { width: 100%; box-sizing: border-box; padding: 8px 10px; border-ra
 .bkcard .meta .s { font-size: .8em; color: var(--secondary-text-color); margin-top: 2px; }
 .bkcard .meta .acts { display: flex; gap: 6px; margin-top: 9px; }
 .bkcard .meta .acts .btn { flex: 1; justify-content: center; padding: 7px 6px; }
+.bkcard .restore-opts { margin-top: 9px; display: grid; gap: 6px; font-size: .86em; }
+.bkcard .restore-opts label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+.bkcard .restore-opts label.off { opacity: .5; cursor: default; }
+.bkcard .restore-opts input.rename { margin: 0; }
 .src { font-size: .68em; text-transform: uppercase; letter-spacing: .04em; padding: 2px 6px; border-radius: 6px;
   background: color-mix(in srgb, var(--primary-text-color) 10%, transparent); color: var(--secondary-text-color); }
 button[disabled], select[disabled], input[disabled] { opacity: .5; cursor: default; }
@@ -1312,16 +1316,44 @@ class TapoRV30Panel extends HTMLElement {
     } catch (e) { box.querySelector(".lb-info").textContent = "Could not load image: " + (e.message || e); }
   }
 
+  // Restore choices, in the card (no browser dialog, which app webviews may not show): over the
+  // map the backup came from, or as a new map with its own name next to it.
   _backupRestore(b, status) {
-    if (!window.confirm(`Restore "${b.map_name}" from ${b.when}?\n\nThis replaces that map's shape and layout on the robot with this backup. The robot must be docked and idle.`)) return;
-    status.textContent = `Restoring "${b.map_name}"...`;
-    this._hass.callService(DOMAIN, "restore_map_backup", { map: String(b.map_id), file: b.file, confirm: true }, { entity_id: this._robot }, false, true)
-      .then((res) => {
-        const r = (res && res.response) ? res.response : res;
-        if (r && r.applied) status.textContent = `Restored "${b.map_name}". ${r.next_steps || ""}`;
-        else status.textContent = `Restore ended without confirmation: ${r && r.note ? r.note : "check the robot"}.`;
-      })
-      .catch((e) => { status.textContent = "Restore failed: " + (e.message || e); });
+    const card = [...this.shadowRoot.querySelectorAll(".bkrestore")].find((x) => this._backups[+x.dataset.i] === b);
+    const meta = card && card.closest(".meta");
+    if (!meta) return;
+    const cam = this._st(this._related(this._robot).camera), maps = ((cam && cam.attributes.maps) || []);
+    const onRobot = maps.some((m) => String(m.id) === String(b.map_id));
+    const full = maps.length >= 3;
+    const acts = meta.querySelector(".acts");
+    const box = document.createElement("div");
+    box.className = "restore-opts";
+    box.innerHTML = `
+      <label><input type="radio" name="how" value="replace" checked>${onRobot ? `Replace "${esc(b.map_name)}" on the robot` : `Put "${esc(b.map_name)}" back (it is no longer on the robot)`}</label>
+      <label class="${full ? "off" : ""}" ${full ? `title="The robot holds at most 3 maps; delete one in the Tapo app first"` : ""}><input type="radio" name="how" value="new" ${full ? "disabled" : ""}>As a new map${full ? " (the robot already has 3)" : ""}</label>
+      <input class="rename" maxlength="32" aria-label="New map name" value="${esc(`${b.map_name} copy`.slice(0, 32))}" style="display:none">
+      <div class="acts"><button class="btn primary" data-act="go"><ha-icon icon="mdi:backup-restore"></ha-icon>Restore</button><button class="btn" data-act="cancel">Cancel</button></div>`;
+    acts.style.display = "none";
+    meta.appendChild(box);
+    const name = box.querySelector("input.rename"), how = () => box.querySelector("input[name=how]:checked").value;
+    box.querySelectorAll("input[name=how]").forEach((r) => r.onchange = () => { name.style.display = how() === "new" ? "" : "none"; if (how() === "new") name.focus(); });
+    const close = () => { box.remove(); acts.style.display = ""; };
+    box.querySelector("[data-act=cancel]").onclick = close;
+    box.querySelector("[data-act=go]").onclick = () => {
+      const asNew = how() === "new", newName = name.value.trim();
+      if (asNew && !newName) { name.focus(); return; }
+      close();
+      const data = { map: String(b.map_id), file: b.file, confirm: true };
+      if (asNew) data.new_name = newName;
+      status.textContent = asNew ? `Restoring "${b.map_name}" as a new map, "${newName}"...` : `Restoring "${b.map_name}"...`;
+      this._hass.callService(DOMAIN, "restore_map_backup", data, { entity_id: this._robot }, false, true)
+        .then((res) => {
+          const r = (res && res.response) ? res.response : res;
+          if (r && r.applied) status.textContent = `${asNew ? `Restored as "${newName}".` : `Restored "${b.map_name}".`} ${r.next_steps || ""}${r.note ? " " + r.note : ""}`;
+          else status.textContent = `Restore ended without confirmation: ${r && r.note ? r.note : "check the robot"}.`;
+        })
+        .catch((e) => { status.textContent = "Restore failed: " + (e.message || e); });
+    };
   }
 
   async _backupFetch(status, grid) {
@@ -1401,7 +1433,8 @@ class TapoRV30Panel extends HTMLElement {
     const mapRows = maps.map((m) => `<div class="row" data-map="${esc(m.id)}"><div class="main"><div class="t">${esc(m.name || `Map ${m.id}`)}</div><div class="s">${m.current ? "Current map" : "Saved map"} &middot; turned ${esc(m.rotation || 0)}&deg; &middot; id ${esc(m.id)}</div></div>
       <button class="icon-btn" data-turn="${esc(m.id)}" data-to="${((m.rotation || 0) + 270) % 360}" title="Turn anticlockwise"><ha-icon icon="mdi:rotate-left"></ha-icon></button>
       <button class="icon-btn" data-turn="${esc(m.id)}" data-to="${((m.rotation || 0) + 90) % 360}" title="Turn clockwise"><ha-icon icon="mdi:rotate-right"></ha-icon></button>
-      <button class="btn" data-rename="${esc(m.id)}" data-name="${esc(m.name || "")}" ${admin ? "" : `disabled title="Only an administrator can rename maps"`}><ha-icon icon="mdi:rename-outline"></ha-icon>Rename</button></div>`).join("");
+      <button class="btn" data-rename="${esc(m.id)}" data-name="${esc(m.name || "")}" ${admin ? "" : `disabled title="Only an administrator can rename maps"`}><ha-icon icon="mdi:rename-outline"></ha-icon>Rename</button>
+      <button class="btn" data-copy="${esc(m.id)}" data-name="${esc(m.name || "")}" ${!admin ? `disabled title="Only an administrator can copy maps"` : maps.length >= 3 ? `disabled title="The robot holds at most 3 maps; delete one in the Tapo app first"` : ""}><ha-icon icon="mdi:content-copy"></ha-icon>Copy</button></div>`).join("");
     pane.innerHTML = `${maps.length ? `<ha-card><div class="card"><h3><span>Maps</span></h3>${mapRows}</div></ha-card>` : ""}
       <ha-card><div class="card"><h3><span>Settings</span></h3>${sw}${sel}${tim}${num}${(sw || sel || num || tim) ? "" : `<div class="empty">No settings entities.</div>`}</div></ha-card>`;
     pane.querySelectorAll("[data-turn]").forEach((b) => b.onclick = async () => {
@@ -1429,6 +1462,28 @@ class TapoRV30Panel extends HTMLElement {
       };
       save.onclick = submit;
       row.querySelector("[data-act=cancel]").onclick = done;
+      input.onkeydown = (e) => { if (e.key === "Enter") submit(); else if (e.key === "Escape") done(); };
+      input.focus(); input.select();
+    });
+    // Copied to a new map beside it, to edit without touching the original; switch to it with the
+    // map selector and back the same way.
+    pane.querySelectorAll("[data-copy]").forEach((b) => b.onclick = () => {
+      const row = b.closest(".row"), id = b.dataset.copy, old = b.dataset.name;
+      row.innerHTML = `<div class="main"><input class="rename" maxlength="32" aria-label="Name for the copy" value="${esc(`${old} copy`.slice(0, 32))}">
+        <div class="s copynote">A new map with the same rooms, names, no-go zones and furniture. Takes a minute or two: the map is backed up to your TP-Link cloud and restored beside the original, which stays as it is. Docked and idle only.</div></div>
+        <button class="btn primary" data-act="save">Copy</button><button class="btn" data-act="cancel">Cancel</button>`;
+      const input = row.querySelector("input"), save = row.querySelector("[data-act=save]"), cancel = row.querySelector("[data-act=cancel]");
+      const done = () => { input.blur(); this._paneSettings(pane); };
+      const submit = async () => {
+        const name = input.value.trim();
+        if (!name) return input.focus();
+        save.disabled = cancel.disabled = input.disabled = true;
+        row.querySelector(".copynote").textContent = `Copying to "${name}"...`;
+        if (await this._call(DOMAIN, "copy_map", { map: id, name }, { entity_id: this._robot })) return done();
+        save.disabled = cancel.disabled = input.disabled = false; input.focus();
+      };
+      save.onclick = submit;
+      cancel.onclick = done;
       input.onkeydown = (e) => { if (e.key === "Enter") submit(); else if (e.key === "Escape") done(); };
       input.focus(); input.select();
     });

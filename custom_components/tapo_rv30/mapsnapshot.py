@@ -15,7 +15,7 @@ from typing import Any
 VERSION = 2
 ZONE_TYPES = ("forbid", "virtual_wall", "carpet_rectangle", "carpet_round")
 AREA_TYPES = ("room", *ZONE_TYPES)
-_ROOM_KEEP = ("name", "carpet_strategy", "floor_texture", "floor_material")
+_ROOM_KEEP = ("name", "color", "carpet_strategy", "floor_texture", "floor_material")
 _ROOM_WRITE = ("type", "id", "name", "color", "define_type", "floor_material",
                "floor_texture", "carpet_strategy", "label")
 _ZONE_WRITE = ("type", "id", "vertexs", "carpet_strategy", "label", "define_type")

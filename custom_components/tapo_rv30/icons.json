@@ -90,6 +90,9 @@
     "restore_map_backup": {
       "service": "mdi:backup-restore"
     },
+    "copy_map": {
+      "service": "mdi:content-copy"
+    },
     "remote_drive": {
       "service": "mdi:gamepad-variant"
     },

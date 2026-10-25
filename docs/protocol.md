@@ -187,6 +187,26 @@ keeps its own map setup snapshots (`addCustomizationRule` with the same body
 `getCustomizationRuleData` returns, minus `rule_id`, recreates a preset; the robot assigns a new
 id).
 
+**Where the backup's room names and furniture go.** The `.bkmap` ends in a JSON tail
+(`area_list` with room names, colours and per-room flags, plus `furniture_list`). The robot
+writes that tail onto the map that **carried** the restore (the `map_id` passed), not onto the
+map it restored. Over its own map that is the same map; onto a carrier it blanks the carrier's
+room names and colours and swaps its furniture for the backup's, while the restored map gets
+none. The integration snapshots the carrier's rooms and furniture before `mapRecovery` and writes
+them back afterwards, and writes the tail onto the restored map. `setAreaInfo` and
+`setFurnitureInfo` honour the `map_id` they are given, current map or not.
+
+**The `.bkmap` layout and copies.** A 25-byte fixed prefix (`MZ`, 16 constant bytes, `AA 55`,
+uint32 version 2, a length byte of 32), the 32-character hex MD5 of the gzip member, `01` and the
+member's length (uint32 big-endian), the gzip'd tar, then `03`, a uint32 big-endian length and the
+JSON tail. The map id is the last 8 bytes of `map.gridmap` (int64 little-endian) and `"mapId"` in
+`area_info.json` and `area_user.json`. Changing it there (same width, so no tar header changes),
+re-gzipping and rewriting the MD5 and length gives a backup the robot restores as a **new** map
+beside the original. `saveMap` with only `new_map_name` (base64) then saves the current unsaved
+map under that name, keeping its id; its `replace_map_id` would save it over another map and is
+never sent. `mapBackup` (`map_id`) writes a fresh backup to the cloud; `getMapBRProcess` reports
+it (`type` 1 backup, 2 recovery; `status` 3 done, 13 failed). The firmware keeps at most 3 maps.
+
 ### Writing the editable layers (setAreaInfo)
 
 `setAreaInfo` is the method the app uses for

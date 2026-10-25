@@ -247,11 +247,38 @@ restore_map_backup:
       example: "123456"
       selector:
         text: {}
+    new_name:
+      example: Downstairs copy
+      selector:
+        text: {}
     confirm:
       required: true
       default: false
       selector:
         boolean: {}
+copy_map:
+  target:
+    entity:
+      domain: vacuum
+      integration: tapo_rv30
+  fields:
+    map:
+      example: Downstairs
+      selector:
+        text: {}
+    name:
+      required: true
+      example: Downstairs copy
+      selector:
+        text: {}
+    base_url:
+      example: http://192.168.1.10:8123
+      selector:
+        text: {}
+    verification_code:
+      example: "123456"
+      selector:
+        text: {}
 run_preset:
   target:
     entity:
