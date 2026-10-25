@@ -19,7 +19,7 @@ robot in it is refused with a clear message. With one vacuum set up the target i
 | `add_schedule` | Create a schedule on the robot: time, days, rooms (or `room_ids`) / preset / whole house, levels. Returns the id. Refused when the start time is inside the robot's Do Not Disturb window (the robot would never run it); `ignore_dnd: true` saves it anyway. |
 | `set_schedule` | Change a schedule (enable / disable, time, days, rooms or `room_ids`, levels). Same Do Not Disturb check when the time changes or the schedule is enabled. |
 | `remove_schedule` | Delete one schedule or all. |
-| `rename_map` | Rename a saved map on the robot (`map`: name or id, `name`: 1 to 32 characters). The robot must be idle; another map's name is refused. Returns the old and new name. |
+| `rename_map` | Admin only. Rename a saved map on the robot (`map`: its id or full name, `name`: 1 to 32 characters). The robot must be idle; a name that equals, contains or is part of another map's name is refused. Returns the old and new name. |
 | `remove_matter_fabric` | Unpair the robot from one Matter ecosystem (fabric index from the Matter sensor). Untested. |
 | `get_matter_setup_code` | Admin only, returns a response. The robot's Matter manual pairing code and QR payload. |
 | `remote_drive` | The app's remote control, one step per call: `enter` (the robot leaves the dock; the response carries `leaving_dock_ms`), `forward` / `backward` / `left` / `right` (a short nudge; repeat while held), `stop`, `exit`. Refused while a clean is running. |

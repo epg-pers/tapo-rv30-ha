@@ -13,7 +13,7 @@ from homeassistant.helpers import entity_registry as er
 from . import backupstore
 from .const import DOMAIN, FAN_NAME_TO_INT, REMOTE_CONTROL_CODE, REMOTE_DIRECTIONS, WATER_NAME_TO_INT
 from .coordinator import TapoCoordinator
-from .mapdata import build_schedule_rule, decode_clean_record, dnd_active, dnd_window, encode_weekdays, parse_hhmm
+from .mapdata import b64name, build_schedule_rule, decode_clean_record, dnd_active, dnd_window, encode_weekdays, parse_hhmm
 from .targets import INDIRECT_TARGET_KEYS, TargetError, as_list, has_indirect_target, resolve
 from .tpap import RobotBusy, _opt_int
 
@@ -193,18 +193,32 @@ async def _send(hass: HomeAssistant, call: ServiceCall, fn, *args) -> None:
 MAP_NAME_MAX = 32     # the Tapo app's map name limit
 
 
-def _match_map(call: ServiceCall, names: dict[int, str], ref) -> int:
-    """One map from a name or id: an id or exact name first, then a unique partial name."""
+def _match_map(call: ServiceCall, names: dict[int, str], ref, exact: bool = False) -> int:
+    """One map from a name or id: an id or exact name first, then (unless exact) a unique
+    partial name. Writes use exact, so a short name cannot land on the wrong map."""
     if ref in (None, ""):
         raise ServiceValidationError(f"{call.service}: 'map' (name or id) is required")
     from .mapdata import fold
     wanted = fold(str(ref).strip())
     hits = [mid for mid, n in names.items() if str(mid) == wanted or fold(n) == wanted]
-    hits = hits or [mid for mid, n in names.items() if wanted and wanted in fold(n)]
+    if not exact:
+        hits = hits or [mid for mid, n in names.items() if wanted and wanted in fold(n)]
     if len(hits) != 1:
         raise ServiceValidationError(
             f"{call.service}: no unique map matching '{ref}'. Available: {sorted(names.values())}")
     return hits[0]
+
+
+def _map_name(call: ServiceCall, value) -> str:
+    """A new map name as the app would store it: NFC, runs of spaces collapsed, no control or
+    invisible characters, 1 to MAP_NAME_MAX UTF-16 units (how the app counts)."""
+    import unicodedata
+    name = " ".join(unicodedata.normalize("NFC", str(value or "")).split())
+    if any(unicodedata.category(ch).startswith("C") for ch in name):
+        raise ServiceValidationError(f"{call.service}: 'name' contains control or invisible characters")
+    if not name or len(name.encode("utf-16-le")) // 2 > MAP_NAME_MAX:
+        raise ServiceValidationError(f"{call.service}: 'name' must be 1 to {MAP_NAME_MAX} characters")
+    return name
 
 
 async def _read(hass: HomeAssistant, call: ServiceCall, fn, *args):
@@ -220,7 +234,7 @@ async def _read(hass: HomeAssistant, call: ServiceCall, fn, *args):
 # are allowed; a script runs as whoever started it, as with Home Assistant's own admin services.
 ADMIN_SERVICES = frozenset({"send_raw", "restore_map_backup", "apply_map_setup", "save_map_setup",
                             "fetch_cloud_map_backups", "delete_preset", "remove_schedule",
-                            "remove_matter_fabric"})
+                            "remove_matter_fabric", "rename_map"})
 
 
 def _admin_only(hass: HomeAssistant, handler):
@@ -694,33 +708,37 @@ def async_setup_services(hass: HomeAssistant) -> None:
         the old name (automations passing map: <name>) need updating."""
         coord = _one(hass, call)
         _require_idle(call, coord)
-        new = " ".join(str(call.data.get("name") or "").split())
-        # The app's limit, counted as it counts (UTF-16 units).
-        if not new or len(new.encode("utf-16-le")) // 2 > MAP_NAME_MAX:
-            raise ServiceValidationError(f"{call.service}: 'name' must be 1 to {MAP_NAME_MAX} characters")
+        new = _map_name(call, call.data.get("name"))
         if coord.map_lock.locked():
             raise ServiceValidationError(f"{call.service}: {coord.device_name} is having its map written; "
                                          "try again shortly")
         async with coord.map_lock:
-            names = await _read(hass, call, coord.map_names)
-            map_id = _match_map(call, names, call.data.get("map"))
+            # Names and saved state from one fresh read: the cached map list can lag a new map.
+            _, map_list = await _read(hass, call, coord.client.get_map_info)
+            names = {m["map_id"]: b64name(m.get("map_name", "")) for m in map_list}
+            map_id = _match_map(call, names, call.data.get("map"), exact=True)
             old = names.get(map_id) or ""
-            if any(m.get("id") == map_id and m.get("saved") is False for m in coord.maps):
+            if next(m for m in map_list if m["map_id"] == map_id).get("is_saved") is not True:
                 raise ServiceValidationError(f"{call.service}: that map is not saved yet; save it in the "
                                              "Tapo app first")
             if new == old:
                 raise ServiceValidationError(f"{call.service}: the map is already called '{old}'")
             from .mapdata import fold
-            clash = [n for mid, n in names.items() if mid != map_id and fold(n) == fold(new)]
+            # Another map's name may not equal, contain or sit inside the new one: references by
+            # name match exactly first, then by part, so either would retarget them silently.
+            clash = [n for mid, n in names.items() if mid != map_id and n
+                     and (fold(n) in fold(new) or fold(new) in fold(n))]
             if clash:
-                # Two maps of one name would make every map: <name> reference ambiguous.
-                raise ServiceValidationError(f"{call.service}: another map is already called '{clash[0]}'")
+                raise ServiceValidationError(f"{call.service}: '{new}' is too close to another map's name "
+                                             f"'{clash[0]}'; references by name could pick the wrong map")
             await _send(hass, call, coord.client.rename_map, map_id, new)
-            after = await _read(hass, call, coord.map_names)
+            try:
+                after = await _read(hass, call, coord.map_names)
+            finally:
+                await coord.async_request_map_refresh()
         if after.get(map_id) != new:
             raise HomeAssistantError(f"{call.service}: the robot accepted the rename but still reports "
                                      f"'{after.get(map_id)}'")
-        await coord.async_request_map_refresh()
         return {"map_id": map_id, "old_name": old, "name": new}
 
     async def handle_fetch_cloud_map_backups(call: ServiceCall) -> ServiceResponse:
@@ -1070,7 +1088,9 @@ def async_setup_services(hass: HomeAssistant) -> None:
             fn = _admin_only(hass, fn)
         hass.services.async_register(DOMAIN, name, fn, supports_response=SupportsResponse.OPTIONAL)
     hass.services.async_register(DOMAIN, "set_map", handle_set_map)
-    hass.services.async_register(DOMAIN, "rename_map", handle_rename_map, supports_response=SupportsResponse.OPTIONAL)
+    # Renaming rewrites the robot and can break automations that name the map: admins only.
+    hass.services.async_register(DOMAIN, "rename_map", _admin_only(hass, handle_rename_map),
+                                 supports_response=SupportsResponse.OPTIONAL)
     hass.services.async_register(DOMAIN, "go_to", handle_go_to)
     hass.services.async_register(DOMAIN, "remote_drive", handle_remote_drive,
                                  supports_response=SupportsResponse.OPTIONAL)

@@ -99,8 +99,8 @@ Omni dock actions where the dock has them.
 
 Every switch, select, number and time the robot exposes, Do Not Disturb included.
 
-**Maps** lists the robot's saved maps with a **Rename** button (the same as renaming in the
-Tapo app; the robot must be idle). Everything in the integration follows a map by its id, so
+**Maps** lists the robot's saved maps with a **Rename** button for administrators (the same as
+renaming in the Tapo app; the robot must be idle). Everything in the integration follows a map by its id, so
 only automations that pass the old name as `map:` need updating.
 
 With more than one robot, each gets a tab in the header.

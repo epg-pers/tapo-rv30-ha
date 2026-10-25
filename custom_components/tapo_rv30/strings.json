@@ -192,15 +192,15 @@
     },
     "rename_map": {
       "name": "Rename map",
-      "description": "Rename a saved map on the robot, as the Tapo app does. The robot must be idle. Schedules, presets, room freshness, the planner, area mappings and saved setups follow the map by id and are unaffected; automations that pass the old name as 'map' need the new one (passing the map id avoids that).",
+      "description": "Admin only. Rename a saved map on the robot, as the Tapo app does. The robot must be idle. Schedules, presets, room freshness, the planner, area mappings and saved setups follow the map by id and are unaffected; automations that pass the old name as 'map' need the new one (passing the map id avoids that).",
       "fields": {
         "map": {
           "name": "Map",
-          "description": "The map to rename: its current name (partial, accent-insensitive) or id."
+          "description": "The map to rename: its id or its full current name (not part of it)."
         },
         "name": {
           "name": "New name",
-          "description": "1 to 32 characters, not already used by another map."
+          "description": "1 to 32 characters. It may not equal, contain or be part of another map's name."
         }
       }
     },

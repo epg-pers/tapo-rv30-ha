@@ -196,6 +196,8 @@ canvas.chart { width: 100%; height: 140px; display: block; }
 .runmap .acts { display: flex; gap: 8px; justify-content: center; }
 .runmap a.btn { text-decoration: none; }
 .mapbtn { flex: none; padding: 7px 10px; }
+input.rename { width: 100%; box-sizing: border-box; padding: 8px 10px; border-radius: 8px; font: inherit; margin-bottom: 4px;
+  border: 1px solid color-mix(in srgb, var(--primary-text-color) 20%, transparent); background: var(--card-background-color); color: var(--primary-text-color); }
 .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .err { color: var(--error-color, #db4437); font-size: .86em; }
 .bkgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; }
@@ -1368,16 +1370,30 @@ class TapoRV30Panel extends HTMLElement {
     // Saved maps, renamed on the robot as in the app. Everything here follows a map by id, so a
     // rename only touches automations that name the map.
     const cam = this._st(r.camera), maps = ((cam && cam.attributes.maps) || []).filter((m) => m.saved !== false);
-    const mapRows = maps.map((m) => `<div class="row"><div class="main"><div class="t">${esc(m.name || `Map ${m.id}`)}</div><div class="s">${m.current ? "Current map" : "Saved map"} &middot; id ${esc(m.id)}</div></div>
-      <button class="btn" data-rename="${esc(m.id)}" data-name="${esc(m.name || "")}"><ha-icon icon="mdi:rename-outline"></ha-icon>Rename</button></div>`).join("");
+    const admin = this._isAdmin();
+    const mapRows = maps.map((m) => `<div class="row" data-map="${esc(m.id)}"><div class="main"><div class="t">${esc(m.name || `Map ${m.id}`)}</div><div class="s">${m.current ? "Current map" : "Saved map"} &middot; id ${esc(m.id)}</div></div>
+      <button class="btn" data-rename="${esc(m.id)}" data-name="${esc(m.name || "")}" ${admin ? "" : `disabled title="Only an administrator can rename maps"`}><ha-icon icon="mdi:rename-outline"></ha-icon>Rename</button></div>`).join("");
     pane.innerHTML = `${maps.length ? `<ha-card><div class="card"><h3><span>Maps</span></h3>${mapRows}</div></ha-card>` : ""}
       <ha-card><div class="card"><h3><span>Settings</span></h3>${sw}${sel}${tim}${num}${(sw || sel || num || tim) ? "" : `<div class="empty">No settings entities.</div>`}</div></ha-card>`;
-    pane.querySelectorAll("[data-rename]").forEach((b) => b.onclick = async () => {
-      const name = prompt(`New name for "${b.dataset.name}" (up to 32 characters). Automations that use the old name will need the new one.`, b.dataset.name);
-      if (name == null || !name.trim() || name.trim() === b.dataset.name) return;
-      b.disabled = true;
-      await this._call(DOMAIN, "rename_map", { map: b.dataset.rename, name: name.trim() }, { entity_id: this._robot });
-      b.disabled = false;
+    // Renamed in place: a text box in the row (no browser prompt, which app webviews may not show).
+    pane.querySelectorAll("[data-rename]").forEach((b) => b.onclick = () => {
+      const row = b.closest(".row"), id = b.dataset.rename, old = b.dataset.name;
+      row.innerHTML = `<div class="main"><input class="rename" maxlength="32" aria-label="New map name" value="${esc(old)}">
+        <div class="s">Up to 32 characters. Automations that name this map will need the new name.</div></div>
+        <button class="btn primary" data-act="save">Save</button><button class="btn" data-act="cancel">Cancel</button>`;
+      const input = row.querySelector("input"), save = row.querySelector("[data-act=save]");
+      const done = () => { input.blur(); this._paneSettings(pane); };
+      const submit = async () => {
+        const name = input.value.trim();
+        if (!name || name === old) return done();
+        save.disabled = true;
+        if (await this._call(DOMAIN, "rename_map", { map: id, name }, { entity_id: this._robot })) return done();
+        save.disabled = false; input.focus();
+      };
+      save.onclick = submit;
+      row.querySelector("[data-act=cancel]").onclick = done;
+      input.onkeydown = (e) => { if (e.key === "Enter") submit(); else if (e.key === "Escape") done(); };
+      input.focus(); input.select();
     });
     pane.querySelectorAll("[data-sw]").forEach((b) => b.onclick = () => this._call("switch", b.classList.contains("on") ? "turn_off" : "turn_on", {}, { entity_id: b.dataset.sw }));
     // A refused change puts the control back to what the entity really holds, so it does not look saved.

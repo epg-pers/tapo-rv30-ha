@@ -1,5 +1,22 @@
 # Changelog
 
+## v0.33.1
+
+Fixes from a review of the map rename in 0.33.0.
+
+### Changed
+
+- **`rename_map` is admin only**, like the other services that rewrite what is on the robot. The Rename button is disabled for other users.
+- **The map to rename must be named in full, or by id.** A partial name could land on the wrong map ("Gard" renaming "Garden" instead of "Garage").
+- **A new name may not equal, contain or be part of another map's name.** Services that take a map by name match exactly first and then by part, so such a name could silently move existing automations to a different map. (Two maps called "Floor 1" and "Floor 10" therefore cannot coexist through a rename.)
+
+### Fixed
+
+- Whether the map is saved is checked against a fresh read of the robot's maps, not the cached list, which can lag a just-finished mapping run.
+- Names are stored composed (NFC), and control or invisible characters (such as zero-width spaces) are refused, so the 32-character limit counts the same way the app does.
+- If the robot does not confirm the new name, Home Assistant still refreshes its maps rather than showing stale names until the next map read.
+- The Rename button edits the name in place instead of opening a browser prompt, which the mobile app's web view may not show.
+
 ## v0.33.0
 
 ### Added
