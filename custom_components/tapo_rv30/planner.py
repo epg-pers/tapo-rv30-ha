@@ -334,6 +334,7 @@ class TapoPlanner:
         snap = self.snapshot()
         await self._follow_run(snap)
         d = decide(snap, self.config)
+        started = False
         if d.action == "clean" and time.time() >= self._retry_at:
             if self.config.get("preview"):
                 self.ran_window = self._preview_window = window_key(snap.now)
@@ -342,16 +343,30 @@ class TapoPlanner:
                 self._fire("preview", d, by="planner")
                 self._save()
             else:
-                await self._start(snap, d.rooms, d.names, d.chips, by="planner")
+                started = await self._start(snap, d.rooms, d.names, d.chips, by="planner")
             d = decide(self.snapshot(), self.config)
         elif d.action == "wait" and d.rooms and d.waiting_for not in ("window", "ran", "skipped") \
                 and d.status != self._last_wait:
             self._log("wait", d.status)
             self._save()
-        self._last_wait = d.status if d.action == "wait" else None
+        if d.action == "clean" and not started and not self.config.get("preview"):
+            d = self._not_started(d)
+        # A "retry" wait is never logged (the failure already was) and does not count as the last one.
+        self._last_wait = d.status if d.action == "wait" and d.waiting_for != "retry" else None
         self.decision = d
         self.view = self._build_view(snap, d)
         self._notify()
+
+    def _not_started(self, d: Decision) -> Decision:
+        """The rooms are due but the robot was not started (a failed start and its hold-off, or a
+        map write in progress): say so, rather than "Cleaning" while it sits on the dock. The
+        rooms stay, so the due rooms and "Clean due rooms now" still work."""
+        now = time.time()
+        if now >= self._retry_at and self.coordinator.map_lock.locked():
+            return Decision("wait", "Waiting for a map change to finish", d.rooms, d.names, d.chips, "retry")
+        at = dt_util.as_local(dt_util.utc_from_timestamp(self._retry_at if now < self._retry_at else now + 60))
+        return Decision("wait", f"Could not start; trying again at {at.strftime('%H:%M')}",
+                        d.rooms, d.names, d.chips, "retry")
 
     async def _start(self, snap: Snapshot, keys: list[str], names: list[str], chips: list[str], by: str) -> bool:
         if self.coordinator.map_lock.locked():      # a map write is switching maps right now

@@ -82,7 +82,8 @@ so the robot setting off motion sensors as it cleans does not stop it.
 
 - `switch.<name>_planner`: the planner on or off, for automations and dashboards.
 - `sensor.<name>_planner_status`: what it is doing or waiting for, in one line ("Waiting:
-  Alex is home"), with the due rooms and the reasons as attributes.
+  Alex is home"), with the due rooms and the reasons as attributes. After a failed start it
+  shows "Could not start; trying again at HH:MM", with `action: wait` and `waiting_for: retry`.
 - Event `tapo_rv30_planner`: fired when the planner starts a run (`kind: start`) or, in
   preview, when it would have (`kind: preview`), with the rooms.
 

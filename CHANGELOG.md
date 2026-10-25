@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.36.3
+
+### Fixed
+
+- **The planner said "Cleaning" when the robot had not started.** If the smart planner's start failed (or a map change was holding it up), its status sensor and the sidebar headline kept saying "Cleaning <rooms>" for the 15 minutes until it tried again, while the robot sat on the dock. It now says "Could not start; trying again at HH:MM" (or that it is waiting for a map change), with `action: wait` and `waiting_for: retry`, so automations reading the status see the truth.
+
 ## v0.36.2
 
 ### Fixed

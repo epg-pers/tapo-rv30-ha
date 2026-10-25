@@ -211,7 +211,8 @@ class Decision:
     rooms: list[str] = field(default_factory=list)      # room keys, most overdue first
     names: list[str] = field(default_factory=list)
     chips: list[str] = field(default_factory=list)       # why these rooms
-    waiting_for: str | None = None    # short code: off, nothing_due, skipped, window, ran, busy, error, dnd, battery, people, schedule, in_use
+    waiting_for: str | None = None    # short code: off, nothing_due, skipped, window, ran, busy, error, dnd, battery, people,
+                                      # schedule, in_use; and retry, set by planner.py: due, but the start failed or was held off
 
 
 def _names(names: list[str]) -> str:
