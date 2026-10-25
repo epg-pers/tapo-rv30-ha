@@ -74,7 +74,10 @@ RV30 Max Plus. If yours misbehaves, press Stop or Send home.
 
 ### Edit map
 
-Draw on the live map and save the result to the robot - no app. Pick a tool (**No-go**,
+Draw on a map and save the result to the robot - no app. Pick which saved map to edit at the top
+(the current one by default); a map the robot is not using is drawn and saved without switching
+the robot to it. The turn buttons rotate the map being edited, keeping any unsaved edits, and
+**Use this map** makes it the robot's current map. Pick a tool (**No-go**,
 **Wall** or **Furniture**), draw on the map, and the change is held locally with **Undo** until
 you press **Save to robot**; **Discard** throws the lot away. Select an item to move or delete
 it. The robot must be docked and idle to save. Carpets and room names are drawn for context but
@@ -107,7 +110,10 @@ renaming in the Tapo app; the robot must be idle). Everything in the integration
 only automations that pass the old name as `map:` need updating. **Copy** makes a new map from
 it with a name you give (rooms, names, no-go zones and furniture), so you can edit or try things
 on the copy and leave the original alone; see [copying a map](map-recovery.md#restore-as-a-new-map-or-copy-a-map). The bin
-button deletes a map that is not the current one, after a second press in the row.
+button deletes a map that is not the current one, after a second press in the row. The eye
+button previews a map full size. The padlock locks or unlocks a map, as in the Tapo app: a
+locked map is kept as it is instead of being updated by later cleans (its room names, no-go zones
+and furniture can still be edited). Copy and restore show a progress bar while they run.
 
 With more than one robot, each gets a tab in the header.
 

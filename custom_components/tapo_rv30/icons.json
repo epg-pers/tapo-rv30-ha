@@ -54,6 +54,9 @@
     "rename_map": {
       "service": "mdi:rename-outline"
     },
+    "set_map_lock": {
+      "service": "mdi:lock-outline"
+    },
     "set_map_rotation": {
       "service": "mdi:rotate-right"
     },

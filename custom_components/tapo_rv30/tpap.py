@@ -1151,6 +1151,11 @@ class TapoVacuumClient:
         clockwise): one map_list entry with only its id and the angle."""
         self.send("setMapInfo", {"map_list": [{"map_id": int(map_id), "rotate_angle": int(rotation)}]})
 
+    def set_map_locked(self, map_id: int, locked: bool) -> None:
+        """Lock or unlock a map, as the Tapo app does: one map_list entry with only its id and
+        map_locked. A locked map is kept as it is instead of being updated by later cleans."""
+        self.send("setMapInfo", {"map_list": [{"map_id": int(map_id), "map_locked": bool(locked)}]})
+
     def rename_map(self, map_id: int, name: str) -> None:
         """Rename a saved map, as the Tapo app does: one map_list entry with only its id and the
         new name (base64 UTF-8). Nothing else goes in it: the same entry's is_base_exist would

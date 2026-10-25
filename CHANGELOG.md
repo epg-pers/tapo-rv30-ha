@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.36.0
+
+### Added
+
+- **Progress bar for copying and restoring maps.** The Copy button in the Settings tab and Restore on the Backups tab now show a bar with the stage (backing up to the cloud, downloading, restoring on the robot, saving and putting the maps back) and how far along it is, using the robot's own progress where it reports one.
+- **Map lock.** A padlock on each map in the Settings tab and `tapo_rv30.set_map_lock` lock or unlock a map, as in the Tapo app: locked, later cleans no longer update the map (room names, no-go zones and furniture can still be edited). The map list shows whether each map is locked, or locked by the robot itself. Admin only; the robot is read back to confirm. Only shown when the robot supports it.
+- **Map preview.** An eye button on each map in the Settings tab shows that map full size, any map, not just the current one.
+- **The Edit map tab works on any saved map.** Pick the map at the top; maps the robot is not using are drawn and saved without disturbing it. **Turn** buttons rotate the map being edited (unsaved edits are kept), and **Use this map** makes it the robot's current map.
+
+### Fixed
+
+- Saving room names from the map editor (`tapo_rv30/map/edit_apply` with `rooms`) no longer clears the rooms' colours and floor settings: the rest of each room is kept as the robot has it.
+
 ## v0.35.0
 
 ### Added

@@ -335,6 +335,20 @@ rename_map:
       selector:
         text: {}
 
+set_map_lock:
+  target:
+    entity:
+      domain: vacuum
+      integration: tapo_rv30
+  fields:
+    map:
+      example: Downstairs
+      selector:
+        text: {}
+    locked:
+      required: true
+      selector:
+        boolean: {}
 set_map_rotation:
   target:
     entity:

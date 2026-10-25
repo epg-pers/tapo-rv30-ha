@@ -125,6 +125,11 @@ h5 { margin: 12px 0 6px; font-size: .76em; font-weight: 500; letter-spacing: .04
 .stat .l { font-size: .78em; color: var(--secondary-text-color); }
 canvas.chart { width: 100%; height: 140px; display: block; }
 .etools { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 8px; }
+.maprow { flex-wrap: wrap; }
+.maprow .main { flex: 1 1 100%; }
+.maprow .mapacts { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; justify-content: flex-end; width: 100%; margin-top: 6px; }
+.emaps { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 8px; }
+.emaps select { flex: 1; min-width: 140px; }
 .etool.on { background: var(--primary-color); color: var(--text-primary-color, #fff); }
 .efurn { padding: 7px 10px; border-radius: 10px; border: 1px solid var(--divider-color); background: var(--card-background-color); color: var(--primary-text-color); }
 .ehint { font-size: .8em; color: var(--secondary-text-color); margin-bottom: 8px; }
@@ -221,6 +226,11 @@ input.rename { width: 100%; box-sizing: border-box; padding: 8px 10px; border-ra
 .bkcard .meta .acts { display: flex; gap: 6px; margin-top: 9px; }
 .bkcard .meta .acts .btn { flex: 1; justify-content: center; padding: 7px 6px; }
 .bkcard .restore-opts { margin-top: 9px; display: grid; gap: 6px; font-size: .86em; }
+.jobbar { margin-top: 8px; }
+.jobbar .track { height: 8px; border-radius: 4px; overflow: hidden; background: color-mix(in srgb, var(--primary-text-color) 12%, transparent); }
+.jobbar .fill { height: 100%; width: 0; background: var(--primary-color); border-radius: 4px; transition: width .6s ease; }
+.jobbar.bad .fill { background: var(--error-color, #db4437); }
+.jobbar .lbl { font-size: .8em; color: var(--secondary-text-color); margin-top: 4px; display: flex; justify-content: space-between; gap: 8px; }
 .bkcard .restore-opts label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
 .bkcard .restore-opts label.off { opacity: .5; cursor: default; }
 .bkcard .restore-opts input.rename { margin: 0; }
@@ -770,6 +780,10 @@ class TapoRV30Panel extends HTMLElement {
     const tools = [["select", "mdi:cursor-move", "Select"], ["forbid", "mdi:cancel", "No-go"],
       ["virtual_wall", "mdi:wall", "Wall"], ["furniture", "mdi:sofa", "Furniture"]];
     pane.innerHTML = `<ha-card><div class="card">
+      <div class="emaps"><select class="emap" aria-label="Map to edit"></select>
+        <button class="icon-btn eturn" data-dir="270" title="Turn the map anticlockwise"><ha-icon icon="mdi:rotate-left"></ha-icon></button>
+        <button class="icon-btn eturn" data-dir="90" title="Turn the map clockwise"><ha-icon icon="mdi:rotate-right"></ha-icon></button>
+        <button class="btn euse" style="display:none" title="Make this the map the robot uses"><ha-icon icon="mdi:map-check-outline"></ha-icon>Use this map</button></div>
       <div class="etools">${tools.map(([k, i, l]) => `<button class="btn etool" data-tool="${k}"><ha-icon icon="${i}"></ha-icon>${l}</button>`).join("")}
         <select class="efurn" title="Furniture type"></select>
         <button class="btn edel" title="Delete selected"><ha-icon icon="mdi:delete"></ha-icon></button></div>
@@ -785,7 +799,36 @@ class TapoRV30Panel extends HTMLElement {
     </div></ha-card>`;
     const q = (s) => pane.querySelector(s);
     this._editEl = { canvas: q(".ecanvas"), rooms: q(".erooms"), status: q(".estatus"), furn: q(".efurn") };
-    this._edit = { tool: "select", sel: null, areas: null, furniture: [], rooms: [], undo: [], img: null, geom: null, mapId: null };
+    this._edit = { tool: "select", sel: null, areas: null, furniture: [], rooms: [], undo: [], img: null, geom: null, mapId: null,
+      want: this._editWant || null };
+    this._editEl.map = q(".emap"); this._editEl.use = q(".euse");
+    q(".emap").onchange = (e) => {
+      if (this._edit.undo.length) {     // never drop unsaved edits by switching maps
+        e.target.value = String(this._edit.mapId);
+        this._editEl.status.textContent = "Save or discard your changes before editing another map.";
+        return;
+      }
+      this._editWant = this._edit.want = Number(e.target.value); this._editLoad();
+    };
+    pane.querySelectorAll(".eturn").forEach((b) => b.onclick = async () => {
+      if (this._edit.mapId == null || !this._edit.geom) return;
+      const to = ((this._edit.geom.rotation || 0) + Number(b.dataset.dir)) % 360;
+      pane.querySelectorAll(".eturn").forEach((x) => { x.disabled = true; });
+      this._editEl.status.textContent = "Turning the map...";
+      // Edits are kept in mm, so unsaved ones survive the turn: only the picture is redrawn.
+      if (await this._call(DOMAIN, "set_map_rotation", { map: String(this._edit.mapId), rotation: to }, { entity_id: this._robot }))
+        await this._editLoad(true);
+      else this._editEl.status.textContent = "";
+      pane.querySelectorAll(".eturn").forEach((x) => { x.disabled = !this._isAdmin(); });
+    });
+    q(".euse").onclick = async () => {
+      const b = q(".euse"); b.disabled = true;
+      if (await this._call(DOMAIN, "set_map", { map: String(this._edit.mapId) }, { entity_id: this._robot })) {
+        b.style.display = "none"; this._editEl.status.textContent = "The robot now uses this map.";
+      }
+      b.disabled = false;
+    };
+    if (!this._isAdmin()) pane.querySelectorAll(".eturn").forEach((x) => { x.disabled = true; x.title = "Only an administrator can turn maps"; });
     this._editFurnTypes(null);
     pane.querySelectorAll(".etool").forEach((b) => b.onclick = () => {
       this._edit.tool = b.dataset.tool; this._edit.sel = null;
@@ -830,41 +873,42 @@ class TapoRV30Panel extends HTMLElement {
     return [clamp((e.clientX - b.left) / b.width * c.width, c.width), clamp((e.clientY - b.top) / b.height * c.height, c.height)];
   }
 
-  async _editLoad(retried) {
+  // Loads the chosen map (the current one by default) with its own picture and geometry, drawn
+  // together by the integration so they always agree. keep: after a turn, keep the edits made so
+  // far (they are in mm) and only redraw.
+  async _editLoad(keep) {
     const r = this._related(this._robot), cam = this._st(r.camera);
-    const geom = cam && cam.attributes.map_geometry, src = cam && cam.attributes.entity_picture;
+    const maps = ((cam && cam.attributes.maps) || []).filter((m) => m.saved !== false);
     const tok = this._editTok = {}, el = this._editEl;    // a newer load (or pane) wins
-    el.status.textContent = "Loading map...";
-    if (!geom || !src) { el.status.textContent = "No map available yet."; return; }
+    let want = this._edit.want;
+    if (want == null || !maps.some((m) => m.id === want)) want = cam ? cam.attributes.map_id : null;
+    el.map.innerHTML = maps.map((m) => `<option value="${m.id}" ${m.id === want ? "selected" : ""}>${esc(m.name || `Map ${m.id}`)}${m.current ? " (current)" : ""}</option>`).join("");
+    el.map.style.display = maps.length > 1 ? "" : "none";
+    el.status.textContent = keep ? "Redrawing the map..." : "Loading map...";
+    if (want == null) { el.status.textContent = "No map available yet."; return; }
     let res;
-    try { res = await this._hass.callWS({ type: "tapo_rv30/map/edit_get", entity_id: this._robot }); }
+    try { res = await this._hass.callWS({ type: "tapo_rv30/map/edit_get", entity_id: this._robot, map_id: want, picture: true }); }
     catch (err) { if (this._editTok === tok) el.status.textContent = "Could not read the map: " + (err.message || err); return; }
     if (this._editTok !== tok) return;
+    if (!res.picture || !res.geometry) { el.status.textContent = "Could not draw the map."; return; }
     const img = new Image();
     img.onerror = () => { if (this._editTok === tok) el.status.textContent = "Could not load the map picture."; };
     img.onload = () => {
       if (this._editTok !== tok) return;
-      // The picture and the geometry must describe the same map the same way round: edits are
-      // placed by the geometry over what the picture shows, so a mismatch (a cached picture, or
-      // the map turned while this loaded) would save them somewhere else. Load again instead.
-      const now = this._st(r.camera), g2 = now && now.attributes.map_geometry;
-      const size = geom.image_size || [];
-      if (!g2 || (g2.rotation || 0) !== (geom.rotation || 0) || img.naturalWidth !== size[0] || img.naturalHeight !== size[1]) {
-        if (!retried) { this._editLoad(true); return; }
-        el.status.textContent = "The map changed while loading; open the Edit tab again.";
-        return;
-      }
       const c = this._editEl.canvas; c.width = img.naturalWidth; c.height = img.naturalHeight;
-      this._edit.img = img; this._edit.geom = geom; this._edit.mapId = res.map_id;
-      this._edit.areas = res.areas || {}; this._edit.furniture = res.furniture || []; this._edit.rooms = res.rooms || [];
+      this._edit.img = img; this._edit.geom = res.geometry; this._edit.mapId = res.map_id;
+      el.use.style.display = res.current ? "none" : "";
+      if (!keep) {
+        this._edit.areas = res.areas || {}; this._edit.furniture = res.furniture || []; this._edit.rooms = res.rooms || [];
+        this._edit.sel = null; this._edit.undo = [];
+      }
       this._editFurnTypes(res.furniture_types);
-      this._edit.sel = null; this._edit.undo = [];
       this._editRenderRooms(); this._editDraw();
-      this._editEl.status.textContent = "";
+      const info = maps.find((m) => m.id === res.map_id) || {};
+      this._editEl.status.textContent = [res.current ? "" : "Editing a map the robot is not using right now; saving writes to this map.",
+        info.locked ? "This map is locked: cleans do not update it, but no-go zones, walls and furniture can still be edited." : ""].filter(Boolean).join(" ");
     };
-    // A fresh picture, never the one the browser cached before the map was turned or changed.
-    const url = src.startsWith("http") ? src : this._hass.hassUrl(src);
-    img.src = url + (url.includes("?") ? "&" : "?") + "_c=" + encodeURIComponent(`${geom.rotation || 0}-${cam.last_updated}`);
+    img.src = res.picture;
   }
 
   _editRenderRooms() {
@@ -1316,6 +1360,31 @@ class TapoRV30Panel extends HTMLElement {
     } catch (e) { box.querySelector(".lb-info").textContent = "Could not load image: " + (e.message || e); }
   }
 
+  // A progress bar for a long map job (copy, restore), fed by the integration's tapo_rv30_map_job
+  // events for this robot. Returns { stop() }; it also stops itself when the job ends.
+  _jobBar(host, job, first) {
+    const box = document.createElement("div");
+    box.className = "jobbar";
+    box.innerHTML = `<div class="track"><div class="fill"></div></div><div class="lbl"><span class="st"></span><span class="pc"></span></div>`;
+    host.appendChild(box);
+    const set = (stage, pc, bad) => {
+      box.querySelector(".fill").style.width = `${Math.max(3, pc)}%`;
+      box.querySelector(".st").textContent = stage;
+      box.querySelector(".pc").textContent = `${Math.round(pc)}%`;
+      box.classList.toggle("bad", !!bad);
+    };
+    set(first || "Starting...", 0);
+    let unsub = null, stopped = false;
+    const stop = () => { stopped = true; if (unsub) { unsub(); unsub = null; } };
+    this._hass.connection.subscribeEvents((ev) => {
+      const d = ev.data || {};
+      if (d.entity_id !== this._robot || d.job !== job) return;
+      set(d.error ? `${d.stage}: ${d.error}` : d.stage, d.percent, !!d.error);
+      if (d.done) stop();
+    }, "tapo_rv30_map_job").then((u) => { if (stopped) u(); else unsub = u; }).catch(() => {});
+    return { stop, set, el: box };
+  }
+
   // Restore choices, in the card (no browser dialog, which app webviews may not show): over the
   // map the backup came from, or as a new map with its own name next to it.
   _backupRestore(b, status, btn) {
@@ -1345,14 +1414,17 @@ class TapoRV30Panel extends HTMLElement {
       close();
       const data = { map: String(b.map_id), file: b.file, confirm: true };
       if (asNew) data.new_name = newName;
-      status.textContent = asNew ? `Restoring "${b.map_name}" as a new map, "${newName}"...` : `Restoring "${b.map_name}"...`;
+      status.textContent = (asNew ? `Restoring "${b.map_name}" as a new map, "${newName}".` : `Restoring "${b.map_name}".`)
+        + " This takes a minute or two; keep the robot docked.";
+      const bar = this._jobBar(status, "restore", "Starting the restore");
       this._hass.callService(DOMAIN, "restore_map_backup", data, { entity_id: this._robot }, false, true)
         .then((res) => {
+          bar.stop(); bar.el.remove();
           const r = (res && res.response) ? res.response : res;
           if (r && r.applied) status.textContent = `${asNew ? `Restored as "${newName}".` : `Restored "${b.map_name}".`} ${r.next_steps || ""}${r.note ? " " + r.note : ""}`;
           else status.textContent = `Restore ended without confirmation: ${r && r.note ? r.note : "check the robot"}.`;
         })
-        .catch((e) => { status.textContent = "Restore failed: " + (e.message || e); });
+        .catch((e) => { bar.stop(); bar.el.remove(); status.textContent = "Restore failed: " + (e.message || e); });
     };
   }
 
@@ -1430,12 +1502,16 @@ class TapoRV30Panel extends HTMLElement {
     // rename only touches automations that name the map.
     const cam = this._st(r.camera), maps = ((cam && cam.attributes.maps) || []).filter((m) => m.saved !== false);
     const admin = this._isAdmin();
-    const mapRows = maps.map((m) => `<div class="row" data-map="${esc(m.id)}"><div class="main"><div class="t">${esc(m.name || `Map ${m.id}`)}</div><div class="s">${m.current ? "Current map" : "Saved map"} &middot; turned ${esc(m.rotation || 0)}&deg; &middot; id ${esc(m.id)}</div></div>
+    const lockTxt = (m) => m.locked === undefined ? "" : m.auto_locked ? " &middot; locked by the robot" : m.locked ? " &middot; locked" : " &middot; unlocked";
+    const mapRows = maps.map((m) => `<div class="row maprow" data-map="${esc(m.id)}"><div class="main"><div class="t">${esc(m.name || `Map ${m.id}`)}</div><div class="s">${m.current ? "Current map" : "Saved map"} &middot; turned ${esc(m.rotation || 0)}&deg;${lockTxt(m)} &middot; id ${esc(m.id)}</div></div>
+      <div class="mapacts">
+      ${m.locked === undefined ? "" : `<button class="icon-btn" data-lock="${esc(m.id)}" data-to="${m.locked ? "0" : "1"}" ${admin ? `title="${m.locked ? "Unlock: let later cleans update this map" : "Lock: keep this map as it is; later cleans no longer update it"}"` : `disabled title="Only an administrator can lock maps"`}><ha-icon icon="${m.locked ? "mdi:lock" : "mdi:lock-open-variant-outline"}"></ha-icon></button>`}
+      <button class="icon-btn" data-preview="${esc(m.id)}" data-name="${esc(m.name || `Map ${m.id}`)}" title="Preview this map"><ha-icon icon="mdi:eye-outline"></ha-icon></button>
       <button class="icon-btn" data-turn="${esc(m.id)}" data-to="${((m.rotation || 0) + 270) % 360}" title="Turn anticlockwise"><ha-icon icon="mdi:rotate-left"></ha-icon></button>
       <button class="icon-btn" data-turn="${esc(m.id)}" data-to="${((m.rotation || 0) + 90) % 360}" title="Turn clockwise"><ha-icon icon="mdi:rotate-right"></ha-icon></button>
       <button class="btn" data-rename="${esc(m.id)}" data-name="${esc(m.name || "")}" ${admin ? "" : `disabled title="Only an administrator can rename maps"`}><ha-icon icon="mdi:rename-outline"></ha-icon>Rename</button>
       <button class="btn" data-copy="${esc(m.id)}" data-name="${esc(m.name || "")}" ${!admin ? `disabled title="Only an administrator can copy maps"` : maps.length >= 3 ? `disabled title="The robot holds at most 3 maps; delete one first"` : ""}><ha-icon icon="mdi:content-copy"></ha-icon>Copy</button>
-      <button class="icon-btn" data-delete="${esc(m.id)}" data-name="${esc(m.name || "")}" ${!admin ? `disabled title="Only an administrator can delete maps"` : m.current ? `disabled title="This is the current map; switch to another map to delete it"` : maps.length < 2 ? `disabled title="The robot needs at least one map"` : `title="Delete this map"`}><ha-icon icon="mdi:delete-outline"></ha-icon></button></div>`).join("");
+      <button class="icon-btn" data-delete="${esc(m.id)}" data-name="${esc(m.name || "")}" ${!admin ? `disabled title="Only an administrator can delete maps"` : m.current ? `disabled title="This is the current map; switch to another map to delete it"` : maps.length < 2 ? `disabled title="The robot needs at least one map"` : `title="Delete this map"`}><ha-icon icon="mdi:delete-outline"></ha-icon></button></div></div>`).join("");
     pane.innerHTML = `${maps.length ? `<ha-card><div class="card"><h3><span>Maps</span></h3>${mapRows}</div></ha-card>` : ""}
       <ha-card><div class="card"><h3><span>Settings</span></h3>${sw}${sel}${tim}${num}${(sw || sel || num || tim) ? "" : `<div class="empty">No settings entities.</div>`}</div></ha-card>`;
     pane.querySelectorAll("[data-turn]").forEach((b) => b.onclick = async () => {
@@ -1445,6 +1521,26 @@ class TapoRV30Panel extends HTMLElement {
       both.forEach((x) => { x.disabled = true; });
       if (!(await this._call(DOMAIN, "set_map_rotation", { map: b.dataset.turn, rotation: Number(b.dataset.to) }, { entity_id: this._robot })))
         both.forEach((x) => { x.disabled = false; });
+    });
+    // Drawn on request for any saved map (not just the current one), full size over the page.
+    pane.querySelectorAll("[data-preview]").forEach((b) => b.onclick = async () => {
+      const box = document.createElement("div");
+      box.className = "lightbox";
+      box.innerHTML = `<img alt="map preview"><div class="lb-info">Drawing ${esc(b.dataset.name)}...</div>`;
+      box.onclick = () => box.remove();
+      this.shadowRoot.appendChild(box);
+      try {
+        const res = await this._hass.callWS({ type: "tapo_rv30/map/edit_get", entity_id: this._robot, map_id: Number(b.dataset.preview), picture: true });
+        box.querySelector("img").src = res.picture;
+        const rooms = (res.rooms || []).map((r) => r.name).filter(Boolean);
+        box.querySelector(".lb-info").textContent = [b.dataset.name, rooms.length ? `${rooms.length} rooms: ${rooms.join(", ")}` : "",
+          "tap to close"].filter(Boolean).join("   ·   ");
+      } catch (e) { box.querySelector(".lb-info").textContent = "Could not draw the map: " + (e.message || e); }
+    });
+    pane.querySelectorAll("[data-lock]").forEach((b) => b.onclick = async () => {
+      b.disabled = true;
+      if (!(await this._call(DOMAIN, "set_map_lock", { map: b.dataset.lock, locked: b.dataset.to === "1" }, { entity_id: this._robot })))
+        b.disabled = false;
     });
     // Renamed in place: a text box in the row (no browser prompt, which app webviews may not show).
     pane.querySelectorAll("[data-rename]").forEach((b) => b.onclick = () => {
@@ -1479,18 +1575,23 @@ class TapoRV30Panel extends HTMLElement {
         const name = input.value.trim();
         if (!name) return input.focus();
         save.disabled = cancel.disabled = input.disabled = true;
-        row.querySelector(".copynote").textContent = `Copying to "${name}"...`;
+        const note = row.querySelector(".copynote");
+        note.textContent = `Copying to "${name}". This takes a minute or two; keep the robot docked.`;
+        const bar = this._jobBar(note.parentElement, "copy", "Starting the copy");
         try {
           const res = await this._hass.callService(DOMAIN, "copy_map", { map: id, name }, { entity_id: this._robot }, false, true);
+          bar.stop();
           const r = (res && res.response) ? res.response : res || {};
           const message = [r.next_steps, r.note].filter(Boolean).join(" ") || `Copied to "${name}".`;
           this.dispatchEvent(new CustomEvent("hass-notification", { detail: { message }, bubbles: true, composed: true }));
           return done();
         } catch (e) {
+          bar.stop();
           const message = (e && (e.message || (e.body && e.body.message))) || "The robot rejected that";
           this.dispatchEvent(new CustomEvent("hass-notification", { detail: { message }, bubbles: true, composed: true }));
         }
         if (!row.isConnected) return;
+        bar.el.remove();
         row.querySelector(".copynote").textContent = "";
         save.disabled = cancel.disabled = input.disabled = false; input.focus();
       };

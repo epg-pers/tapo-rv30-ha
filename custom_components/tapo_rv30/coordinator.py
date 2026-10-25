@@ -140,6 +140,7 @@ class TapoCoordinator(DataUpdateCoordinator):
         self.map_name: str | None = None
         self.map_rotation = 0                # the current map's rotate_angle (0, 90, 180, 270)
         self.rotation_supported = False      # the robot reports rotate_angle for its maps
+        self.lock_supported = False          # the robot lists map_lock and reports map_locked
         self.device_name: str = "Tapo RV30"
         self.device_model: str = "RV30"
         self.fw_version: str | None = None
@@ -803,6 +804,18 @@ class TapoCoordinator(DataUpdateCoordinator):
                                 "done": {}}
         self._save_restore()
 
+    MAP_JOB_EVENT = f"{DOMAIN}_map_job"
+
+    def map_job(self, job: str, stage: str, percent: float, *, done: bool = False, error: str | None = None) -> None:
+        """Tell the sidebar page how a long map job (copy, restore) is getting on: a stage and
+        0-100 overall. Fired on the event bus (admin pages subscribe; both jobs are admin only)."""
+        from homeassistant.helpers import entity_registry as er
+        entity_id = (er.async_get(self.hass).async_get_entity_id("vacuum", DOMAIN, f"{self.entry.entry_id}_vacuum")
+                     if self.entry else None)
+        self.hass.bus.async_fire(self.MAP_JOB_EVENT, {
+            "entity_id": entity_id, "job": job, "stage": stage, "percent": max(0, min(100, round(percent))),
+            "done": done, "error": error})
+
     def restore_unfinished(self) -> dict | None:
         """A restore whose carrier has not been put back yet: no other map write until it is."""
         pend = self.pending_restore
@@ -1366,9 +1379,15 @@ class TapoCoordinator(DataUpdateCoordinator):
     def _refresh_map(self) -> None:
         current_id, map_list = self.client.get_map_info()
         self._room_name_cache = {}      # names may have changed in the app
+        if any("map_locked" in m for m in map_list) and self.has("map_lock"):
+            self.lock_supported = True
         maps = [{"id": m["map_id"], "name": b64name(m.get("map_name", "")), "current": m["map_id"] == current_id,
                  "saved": m.get("is_saved", True) is not False,
-                 "rotation": rotation_of(m.get("rotate_angle"))} for m in map_list]
+                 "rotation": rotation_of(m.get("rotate_angle")),
+                 # map_locked: 1 locked in the app (or here), 2 locked by the robot itself
+                 **({"locked": _opt_int(m.get("map_locked")) in (1, 2),
+                     "auto_locked": _opt_int(m.get("map_locked")) == 2} if self.lock_supported else {})}
+                for m in map_list]
         if any("rotate_angle" in m for m in map_list):
             self.rotation_supported = True
         rotation = next((m["rotation"] for m in maps if m["id"] == current_id), 0)
@@ -1423,6 +1442,27 @@ class TapoCoordinator(DataUpdateCoordinator):
         got = next((m.get("rotate_angle") for m in after if m.get("map_id") == int(map_id)), None)
         if rotation_of(got) != rotation:
             raise ValueError(f"the robot accepted the rotation but still reports {got}")
+
+    async def async_set_map_locked(self, map_id: int, locked: bool) -> None:
+        """Lock or unlock a map on the robot. Locked, the robot keeps the map as it is instead of
+        updating it from later cleans; the editable layers can still be changed."""
+        if self.map_lock.locked():
+            raise ValueError("its map is being written; try again shortly")
+        async with self.map_lock:
+            _, map_list = await self.hass.async_add_executor_job(self.client.get_map_info)
+            entry = next((m for m in map_list if m.get("map_id") == int(map_id)), None)
+            if entry is None:
+                raise ValueError(f"map {map_id} is not on the robot")
+            if entry.get("is_saved") is not True:
+                raise ValueError("that map is not saved yet; save it in the Tapo app first")
+            await self.hass.async_add_executor_job(self.client.set_map_locked, int(map_id), bool(locked))
+            try:
+                _, after = await self.hass.async_add_executor_job(self.client.get_map_info)
+            finally:
+                await self.async_request_map_refresh()
+        got = next((_opt_int(m.get("map_locked")) for m in after if m.get("map_id") == int(map_id)), None)
+        if (got in (1, 2)) != bool(locked):
+            raise ValueError(f"the robot accepted the change but still reports map_locked {got}")
 
     def rotation_for(self, map_id) -> int:
         """A map's rotate_angle as last read (0 for a map not on the robot any more)."""

@@ -196,6 +196,14 @@ none. The integration snapshots the carrier's rooms and furniture before `mapRec
 them back afterwards, and writes the tail onto the restored map. `setAreaInfo` and
 `setFurnitureInfo` honour the `map_id` they are given, current map or not.
 
+**Map lock.** `getMapInfo` reports `map_locked` per map (0 unlocked, 1 locked, 2 locked by the
+robot itself) on robots that list the `map_lock` component. The app locks and unlocks with
+`setMapInfo` and one `map_list` entry holding only `map_id` and `map_locked` (true / false).
+Checked on an RV30 Max Plus (1.3.3): the lock reads back at once, and `setAreaInfo` /
+`setFurnitureInfo` are still accepted on a locked map. When the robot finds changes on a locked
+map the app offers the update (`getOldMapData`, `setUpdateMapDataInfo` with `applied` and
+`map_locked`); the integration does not use those yet.
+
 **The `.bkmap` layout and copies.** A 25-byte fixed prefix (`MZ`, 16 constant bytes, `AA 55`,
 uint32 version 2, a length byte of 32), the 32-character hex MD5 of the gzip member, `01` and the
 member's length (uint32 big-endian), the gzip'd tar, then `03`, a uint32 big-endian length and the

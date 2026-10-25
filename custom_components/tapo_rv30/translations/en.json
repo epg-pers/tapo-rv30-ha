@@ -204,6 +204,20 @@
         }
       }
     },
+    "set_map_lock": {
+      "name": "Lock or unlock map",
+      "description": "Lock a map so later cleans no longer update it, or unlock it so they do, as in the Tapo app. Room names, no-go zones and furniture can still be edited on a locked map. Admin only.",
+      "fields": {
+        "map": {
+          "name": "Map",
+          "description": "The map: its full name or id. Defaults to the current map."
+        },
+        "locked": {
+          "name": "Locked",
+          "description": "On to lock the map, off to unlock it."
+        }
+      }
+    },
     "set_map_rotation": {
       "name": "Set map rotation",
       "description": "Turn a map's display clockwise by 0, 90, 180 or 270 degrees. Stored on the robot as the Tapo app stores it, so the app shows the map the same way. Display only: rooms, zones, furniture and cleaning are unaffected.",

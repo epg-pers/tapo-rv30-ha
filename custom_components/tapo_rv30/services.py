@@ -21,7 +21,7 @@ _LOGGER = logging.getLogger(__name__)
 SERVICES = ("clean_rooms", "set_room_settings", "clean_zone", "run_schedule", "send_raw",
             "get_clean_records", "run_preset", "set_map", "go_to",
             "add_schedule", "set_schedule", "remove_schedule", "remove_matter_fabric", "get_matter_setup_code",
-            "rename_map", "set_map_rotation",
+            "rename_map", "set_map_rotation", "set_map_lock",
             "fetch_cloud_map_backups", "save_map_setup", "apply_map_setup", "restore_map_backup", "copy_map", "delete_map",
             "create_preset", "update_preset", "delete_preset", "remote_drive")
 
@@ -234,7 +234,7 @@ async def _read(hass: HomeAssistant, call: ServiceCall, fn, *args):
 # are allowed; a script runs as whoever started it, as with Home Assistant's own admin services.
 ADMIN_SERVICES = frozenset({"send_raw", "restore_map_backup", "apply_map_setup", "save_map_setup",
                             "fetch_cloud_map_backups", "delete_preset", "remove_schedule",
-                            "remove_matter_fabric", "rename_map", "copy_map", "delete_map"})
+                            "remove_matter_fabric", "rename_map", "copy_map", "delete_map", "set_map_lock"})
 
 
 def _admin_only(hass: HomeAssistant, handler):
@@ -720,6 +720,22 @@ def async_setup_services(hass: HomeAssistant) -> None:
             raise HomeAssistantError(f"{call.service}: the robot refused the rotation: {exc}") from exc
         return {"map_id": map_id, "name": names.get(map_id), "rotation": rotation}
 
+    async def handle_set_map_lock(call: ServiceCall) -> ServiceResponse:
+        """Lock or unlock a map, as in the app: locked, later cleans no longer update it."""
+        coord = _one(hass, call)
+        locked = call.data.get("locked")
+        if not isinstance(locked, bool):
+            raise ServiceValidationError(f"{call.service}: 'locked' must be true or false")
+        names = await _read(hass, call, coord.map_names)
+        map_id = _match_map(call, names, call.data.get("map", coord.map_id), exact=True)
+        try:
+            await coord.async_set_map_locked(map_id, locked)
+        except ValueError as exc:
+            raise ServiceValidationError(f"{call.service}: {coord.device_name}: {exc}") from exc
+        except Exception as exc:
+            raise HomeAssistantError(f"{call.service}: the robot refused the change: {exc}") from exc
+        return {"map_id": map_id, "name": names.get(map_id), "locked": locked}
+
     async def handle_rename_map(call: ServiceCall) -> ServiceResponse:
         """Rename a saved map. Everything in this integration (schedules, presets, room freshness,
         the planner, area mappings, setups, history) follows maps by id, so only references by
@@ -873,7 +889,26 @@ def async_setup_services(hass: HomeAssistant) -> None:
         result["map_name"] = names.get(map_id)
         return result
 
+    async def _with_progress(call: ServiceCall, job: str, run) -> ServiceResponse:
+        """Run a long map job, telling the page when it ends (done, or failed with the reason)."""
+        coord = _one(hass, call)
+        try:
+            result = await run(call)
+        except Exception as exc:
+            coord.map_job(job, "Failed", 100, done=True, error=str(exc))
+            raise
+        ok = bool(result.get("applied")) and not result.get("note")
+        coord.map_job(job, "Done" if ok else "Finished with a problem", 100, done=True,
+                      error=None if ok else (result.get("note") or "the robot did not confirm it"))
+        return result
+
     async def handle_restore_map_backup(call: ServiceCall) -> ServiceResponse:
+        return await _with_progress(call, "restore", _restore_map_backup)
+
+    async def handle_copy_map(call: ServiceCall) -> ServiceResponse:
+        return await _with_progress(call, "copy", _copy_map)
+
+    async def _restore_map_backup(call: ServiceCall) -> ServiceResponse:
         """Restore a map backup to the robot. By default HA serves the backup it already holds
         on a short-lived LAN URL and the robot fetches and applies it - a fully local restore,
         no cloud. use_cloud_url hands the robot the backup's own TP-Link URL instead, for when
@@ -935,7 +970,8 @@ def async_setup_services(hass: HomeAssistant) -> None:
         return name
 
     async def _restore(call: ServiceCall, coord: TapoCoordinator, names: dict[int, str], backup_id: int,
-                       snap_name: str | None, fname, new_name: str | None) -> dict:
+                       snap_name: str | None, fname, new_name: str | None, job: str = "restore",
+                       span: tuple[float, float] = (0, 100)) -> dict:
         """mapRecovery with everything around it. Over the backup's own map when the robot has
         it; otherwise onto a carrier (the current map), whose rooms and furniture the robot
         overwrites with the backup's and which are put back here. With new_name the backup is
@@ -1088,6 +1124,9 @@ def async_setup_services(hass: HomeAssistant) -> None:
                     coord.expect_restore(backup_id, new_name or label, map_id, before,
                                          mapcopy.tail_subset(tail), copy=bool(new_name))
                 pend = coord.pending_restore if carrier else None
+                lo, hi = span
+                applying = "Restoring the map on the robot"
+                coord.map_job(job, applying, lo)
                 try:
                     code = await hass.async_add_executor_job(coord.client.recover_map, map_id, md5, url)
                 except RuntimeError as exc:
@@ -1105,7 +1144,9 @@ def async_setup_services(hass: HomeAssistant) -> None:
                     if pend is not None:
                         coord._drop_restore(pend)
                 else:
-                    process = await _wait_br(coord, 2, baseline)
+                    process = await _wait_br(coord, 2, baseline, progress=lambda pc: coord.map_job(
+                        job, applying, lo + (hi - lo) * 0.85 * pc / 100))
+                    coord.map_job(job, "Saving it and putting the maps back as they were", lo + (hi - lo) * 0.9)
                     if carrier and _opt_int(process.get("status")) not in (3, 13):
                         # The map id was not on the robot before, so seeing it now means it landed
                         # (the job status can look unchanged when an earlier restore left the same).
@@ -1206,7 +1247,7 @@ def async_setup_services(hass: HomeAssistant) -> None:
                 "applied": status == 3, "note": note, "next_steps": next_steps}
 
     async def _wait_br(coord: TapoCoordinator, kind: int, baseline: dict, src: int | None = None,
-                       tries: int = 45) -> dict:
+                       tries: int = 45, progress=None) -> dict:
         """Poll getMapBRProcess until a job of this kind (1 backup, 2 recovery) has finished
         (status 3) or failed (13). A finished job of the same kind still shown from before the
         request (baseline) does not count until something else has been read; a backup that has
@@ -1234,6 +1275,8 @@ def async_setup_services(hass: HomeAssistant) -> None:
             if t == kind and (src is None or _opt_int(p.get("map_id")) == src):
                 seen += 1
                 last = p
+                if progress is not None:
+                    progress(_opt_int(p.get("process")) or 0)
                 if st in (3, 13):
                     return p
             elif seen and t == 0 and st == 0 and kind == 1:
@@ -1241,7 +1284,7 @@ def async_setup_services(hass: HomeAssistant) -> None:
         return last
 
 
-    async def handle_copy_map(call: ServiceCall) -> ServiceResponse:
+    async def _copy_map(call: ServiceCall) -> ServiceResponse:
         """Copy a map to a new map: back it up to the TP-Link cloud, download that backup and
         restore it under a fresh map id with the given name. The original is not written to."""
         import time
@@ -1277,11 +1320,14 @@ def async_setup_services(hass: HomeAssistant) -> None:
             code = await _read(hass, call, coord.client.backup_map, src)
             if code != 0:
                 raise HomeAssistantError(f"{call.service}: the robot refused to back up '{names[src]}' (error {code})")
-            process = await _wait_br(coord, 1, baseline, src, tries=60)
+            coord.map_job("copy", "Backing the map up to your TP-Link cloud", 0)
+            process = await _wait_br(coord, 1, baseline, src, tries=60, progress=lambda pc: coord.map_job(
+                "copy", "Backing the map up to your TP-Link cloud", 40 * pc / 100))
         if _opt_int(process.get("status")) != 3:
             raise HomeAssistantError(f"{call.service}: the robot did not finish backing up '{names[src]}'"
                                      + (" (it reported a failure)" if _opt_int(process.get("status")) == 13 else ""))
         # 2. Download it.
+        coord.map_job("copy", "Downloading the backup", 42)
         terminal = str(uuid.uuid5(uuid.NAMESPACE_URL, f"{DOMAIN}:{coord.entry.entry_id}"))
         try:
             got = await hass.async_add_executor_job(
@@ -1300,7 +1346,7 @@ def async_setup_services(hass: HomeAssistant) -> None:
                                      "yet; try again in a minute")
         newest = max(mine, key=lambda b: b.get("timestamp") or 0)
         # 3. Restore it as a new map.
-        result = await _restore(call, coord, names, src, None, newest["file"], name)
+        result = await _restore(call, coord, names, src, None, newest["file"], name, job="copy", span=(50, 100))
         result["copied_from"] = {"map_id": src, "map_name": names[src], "backup": newest["file"]}
         return result
 
@@ -1377,6 +1423,8 @@ def async_setup_services(hass: HomeAssistant) -> None:
     hass.services.async_register(DOMAIN, "rename_map", _admin_only(hass, handle_rename_map),
                                  supports_response=SupportsResponse.OPTIONAL)
     hass.services.async_register(DOMAIN, "set_map_rotation", handle_set_map_rotation,
+                                 supports_response=SupportsResponse.OPTIONAL)
+    hass.services.async_register(DOMAIN, "set_map_lock", _admin_only(hass, handle_set_map_lock),
                                  supports_response=SupportsResponse.OPTIONAL)
     hass.services.async_register(DOMAIN, "go_to", handle_go_to)
     hass.services.async_register(DOMAIN, "remote_drive", handle_remote_drive,
