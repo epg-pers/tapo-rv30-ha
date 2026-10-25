@@ -24,6 +24,9 @@ there.
   `rooms`, `room_geometry`, `map_geometry` (grid, mm to px transform, saved zones, furniture),
   `calibration_points`, `rooms_mask_url`, `path_points`, `rooms_last_cleaned` (per room: last cleaned
   timestamp and coverage percent, from the robot's own run maps), `last_clean`, `last_clean_url`.
+  Each entry of `maps` is one map on the robot: `id`, `name`, `current`, `saved`, `rotation`
+  (degrees, clockwise) and, on robots that support locking, `locked` and `auto_locked` (locked by
+  the robot itself).
 - `image.<name>_last_clean_map`: the newest clean record rendered from the robot's own copy:
   cleaned cells, skipped rooms, path, start, end and dock. Attributes: area, minutes, start
   type, map name.

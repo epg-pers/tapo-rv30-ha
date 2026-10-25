@@ -47,6 +47,7 @@ names in it, so it shows in the UI and in automation traces.
 | `tapo_rv30_planner` | the planner starts a run, or in preview would have | `device`, `kind` (`start` or `preview`), `rooms`, `by` |
 | `tapo_rv30_error` | the robot reports a new error | `device`, `code`, `error`, `current_room` |
 | `tapo_rv30_prompt` | the robot raises a notice (dust bag full, area unreachable, cleaning finished, water tank empty and others), once each time | `device`, `code`, `prompt` (for example `dust_bag_full`), `description`, `prompt_id`, `current_room`. Codes in [protocol.md](protocol.md#status-prompts) |
+| `tapo_rv30_map_job` | progress of a `copy_map` or `restore_map_backup` (what the sidebar page's progress bar shows) | `entity_id`, `job` (`copy` or `restore`), `stage`, `percent` (0 to 100 overall), `done`, `error` |
 
 ## Xiaomi Vacuum Map Card calibration
 
