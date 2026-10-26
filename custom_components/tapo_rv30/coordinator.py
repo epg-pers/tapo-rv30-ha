@@ -53,6 +53,7 @@ from .mapdata import (
     fold,
     grid_pixels,
     new_prompts,
+    preset_ref_id,
     resolve_rooms,
     room_at_vac,
     room_coverage,
@@ -1215,18 +1216,18 @@ class TapoCoordinator(DataUpdateCoordinator):
 
     def find_preset(self, ref, map_id: int | None = None) -> dict | None:
         """Preset by id, or by name (accent-insensitive, exact then partial); only on map_id when
-        given (the robot keeps presets per map, so an id or name can be on more than one)."""
+        given (the robot keeps presets per map, so an id or name can be on more than one).
+        A number (6 or "6") that is no preset's id matches a name only exactly: a preset made in
+        the app since the last read must not land on an older one called "Kids 6+"."""
         presets = [p for p in self.presets if map_id is None or p["map_id"] == map_id]
-        try:
-            rid = int(ref)
+        rid = preset_ref_id(ref)
+        if rid is not None:
             hits = [p for p in presets if p["id"] == rid]
             if hits:
                 return hits[0] if len(hits) == 1 else None     # on two maps: say which
-        except (TypeError, ValueError, OverflowError):
-            pass
         wanted = fold(str(ref).strip())
         exact = [p for p in presets if fold(p["name"]) == wanted]
-        partial = [p for p in presets if wanted and wanted in fold(p["name"])]
+        partial = [p for p in presets if wanted and wanted in fold(p["name"])] if rid is None else []
         hits = exact or partial
         return hits[0] if len(hits) == 1 else None
 

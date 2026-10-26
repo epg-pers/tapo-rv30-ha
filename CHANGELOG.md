@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.38.1
+
+### Fixed
+
+- **Run, delete or schedule could pick the wrong preset.** The Presets tab lists presets straight from the robot, but these actions looked them up in Home Assistant's copy, read every few minutes. For a preset just made in the Tapo app, its number could match another preset's name instead ("Kids 6+" for preset 6), so the wrong preset could run, be deleted or be scheduled. A preset given by number now only ever matches that number (or a preset named exactly that); a number Home Assistant has not seen yet makes it read the presets again first, and a delete never falls back to a name at all.
+
 ## v0.38.0
 
 ### Added

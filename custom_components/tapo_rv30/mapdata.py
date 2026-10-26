@@ -611,6 +611,19 @@ def new_prompts(prev: dict | None, new: dict) -> list[dict]:
     return out
 
 
+def preset_ref_id(ref) -> int | None:
+    """The preset id a ref names when it is a number (an int, or a string of digits), else None.
+    A number is matched by id, and by name only exactly: never as part of a longer name."""
+    if isinstance(ref, bool):
+        return None
+    if isinstance(ref, int):
+        return ref
+    if isinstance(ref, float):
+        return int(ref) if ref.is_integer() else None
+    text = str(ref).strip() if isinstance(ref, str) else ""
+    return int(text) if text.isascii() and text.isdigit() else None
+
+
 def preset_body(name: str, map_id: int, rooms: list[dict], clean_order: bool = True,
                 rule_id: int | None = None) -> dict:
     """The addCustomizationRule body the app sends (create, or edit when rule_id is given).

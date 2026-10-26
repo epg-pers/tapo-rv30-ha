@@ -176,7 +176,7 @@
       "fields": {
         "preset": {
           "name": "Preset",
-          "description": "Preset name (partial, accent-insensitive) or id. See the preset buttons."
+          "description": "Preset name (partial, accent-insensitive) or id (a number matches an id, or a name exactly). See the preset buttons."
         },
         "map": {
           "name": "Map",

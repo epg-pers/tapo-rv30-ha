@@ -13,7 +13,16 @@ from homeassistant.helpers import entity_registry as er
 from . import backupstore
 from .const import DOMAIN, FAN_NAME_TO_INT, REMOTE_CONTROL_CODE, REMOTE_DIRECTIONS, WATER_NAME_TO_INT
 from .coordinator import TapoCoordinator
-from .mapdata import b64name, build_schedule_rule, decode_clean_record, dnd_active, dnd_window, encode_weekdays, parse_hhmm
+from .mapdata import (
+    b64name,
+    build_schedule_rule,
+    decode_clean_record,
+    dnd_active,
+    dnd_window,
+    encode_weekdays,
+    parse_hhmm,
+    preset_ref_id,
+)
 from .targets import INDIRECT_TARGET_KEYS, TargetError, as_list, has_indirect_target, resolve
 from .tpap import RobotBusy, _opt_int
 
@@ -375,10 +384,7 @@ def async_setup_services(hass: HomeAssistant) -> None:
         if "rooms" in call.data or "room_ids" in call.data or "preset" in call.data:
             attr.pop("room_list", None); attr.pop("custom_rule_id", None)
             if call.data.get("preset") not in (None, ""):
-                preset = coord.find_preset(call.data["preset"], await _preset_map(call, coord))
-                if preset is None:
-                    raise ServiceValidationError(f"{call.service}: no unique preset matching {call.data['preset']!r}"
-                                                 "; name its map with map: if more than one map has it")
+                preset = await _lookup_preset(call, coord)
                 attr.update({"clean_mode": 5, "custom_rule_id": preset["id"], "map_id": preset.get("map_id") or coord.map_id})
             elif call.data.get("rooms") or call.data.get("room_ids"):
                 room_ids, map_id = await _resolve(hass, call, coord)
@@ -593,14 +599,7 @@ def async_setup_services(hass: HomeAssistant) -> None:
     async def handle_run_preset(call: ServiceCall) -> None:
         coord = _one(hass, call)
         _require_idle(call, coord)
-        ref = call.data.get("preset")
-        if ref in (None, ""):
-            raise ServiceValidationError(f"{call.service}: 'preset' (name or id) is required")
-        preset = coord.find_preset(ref, await _preset_map(call, coord))
-        if preset is None:
-            names = [p["name"] for p in coord.presets]
-            raise ServiceValidationError(
-                f"{call.service}: no unique preset matching '{ref}'. Available: {names}")
+        preset = await _lookup_preset(call, coord)
         await _send(hass, call, coord.client.run_preset, preset["id"], preset["map_id"],
                     preset.get("clean_order", True))
         await coord.async_refresh_soon()
@@ -631,14 +630,40 @@ def async_setup_services(hass: HomeAssistant) -> None:
             return None
         return _match_map(call, await _read(hass, call, coord.map_names), ref, exact=True)
 
-    async def _preset_for(call: ServiceCall, coord: TapoCoordinator) -> dict:
+    async def _lookup_preset(call: ServiceCall, coord: TapoCoordinator, by_name: bool = True) -> dict:
+        """The preset a call names (preset: name or id, map: optional). A name matches as
+        find_preset does. An id the cached presets lack (made in the app since the last read;
+        the Presets page lists them live) re-reads them once, then falls back to a preset
+        named exactly that, never one whose name only contains it (not even that for a delete,
+        by_name False: an id no longer on the robot must never delete another preset)."""
         ref = call.data.get("preset")
         if ref in (None, ""):
             raise ServiceValidationError(f"{call.service}: 'preset' (name or id) is required")
-        preset = coord.find_preset(ref, await _preset_map(call, coord))
-        if preset is None:
+        map_id = await _preset_map(call, coord)
+        rid = preset_ref_id(ref)
+        if rid is None:
+            preset = coord.find_preset(ref, map_id)
+            if preset is None:
+                raise ServiceValidationError(
+                    f"{call.service}: no unique preset matching '{ref}' (name its map with map: if more than "
+                    f"one map has it). Available: {[p['name'] for p in coord.presets]}")
+            return preset
+
+        def by_id() -> list[dict]:
+            return [p for p in coord.presets if p["id"] == rid and (map_id is None or p["map_id"] == map_id)]
+
+        if not by_id():
+            await coord.async_settings_changed()
+        hits = by_id()
+        if len(hits) > 1:
             raise ServiceValidationError(
-                f"{call.service}: no unique preset matching '{ref}'. Available: {[p['name'] for p in coord.presets]}")
+                f"{call.service}: preset id {rid} is on more than one map; name its map with map:")
+        preset = hits[0] if hits else coord.find_preset(ref, map_id) if by_name else None     # one named exactly "6"
+        if preset is None:
+            where = f" on map '{call.data['map']}'" if map_id is not None else ""
+            have = [f"{p['id']}: {p['name']}" for p in sorted(coord.presets, key=lambda p: p["id"])
+                    if map_id is None or p["map_id"] == map_id]
+            raise ServiceValidationError(f"{call.service}: no preset with id {rid}{where}. Available: {have}")
         return preset
 
     async def _write_preset(call: ServiceCall, coord: TapoCoordinator, body: dict) -> None:
@@ -667,7 +692,7 @@ def async_setup_services(hass: HomeAssistant) -> None:
     async def handle_update_preset(call: ServiceCall) -> ServiceResponse:
         from .mapdata import b64name, preset_body
         coord = _one(hass, call)
-        preset = await _preset_for(call, coord)
+        preset = await _lookup_preset(call, coord)
         map_id, rule_id = preset["map_id"], preset["id"]
         try:
             detail = await hass.async_add_executor_job(coord.client.get_preset_detail, map_id, rule_id)
@@ -694,7 +719,7 @@ def async_setup_services(hass: HomeAssistant) -> None:
         coord = _one(hass, call)
         if not call.data.get("confirm"):
             raise ServiceValidationError(f"{call.service}: this deletes the preset; set confirm: true")
-        preset = await _preset_for(call, coord)
+        preset = await _lookup_preset(call, coord, by_name=False)
         try:
             code = await hass.async_add_executor_job(coord.client.delete_preset, preset["map_id"], preset["id"])
         except Exception as exc:

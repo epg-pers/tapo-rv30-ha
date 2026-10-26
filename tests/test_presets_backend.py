@@ -234,3 +234,26 @@ def test_find_preset_needs_the_map_when_two_maps_share_an_id():
     assert find(c, 3, 2)["name"] == "Up" and find(c, "3", 1)["name"] == "Mop"
     assert find(c, 4)["name"] == "Vac" and find(c, "vac")["name"] == "Vac"
     assert find(c, "Up", 1) is None
+
+
+def test_find_preset_never_matches_a_number_inside_a_name():
+    # A preset made in the app since the last read: its id must not land on "Kids 6+".
+    import types
+
+    from custom_components.tapo_rv30.coordinator import TapoCoordinator
+    c = types.SimpleNamespace(presets=[{"id": 1, "map_id": 1, "name": "Kids 6+"}, {"id": 3, "map_id": 1, "name": "2"},
+                                       {"id": 4, "map_id": 2, "name": "Kitchen"}])
+    find = TapoCoordinator.find_preset
+    assert find(c, 6) is None and find(c, "6") is None and find(c, " 6 ", 1) is None
+    assert find(c, 2)["id"] == 3 and find(c, "2", 1)["id"] == 3     # named exactly "2", no id 2
+    assert find(c, 2, 2) is None                                     # not on that map
+    assert find(c, 1)["name"] == "Kids 6+"                           # an id still wins
+    assert find(c, "kids")["id"] == 1 and find(c, "kitch")["id"] == 4 and find(c, "Kids 6+")["id"] == 1
+    assert find(c, "kit", 2)["id"] == 4 and find(c, "k") is None     # text: exact, then a unique part
+
+
+def test_preset_ref_id():
+    from custom_components.tapo_rv30.mapdata import preset_ref_id
+    assert preset_ref_id(6) == 6 and preset_ref_id("6") == 6 and preset_ref_id(" 12 ") == 12 and preset_ref_id(6.0) == 6
+    for ref in ("Kids 6+", "6a", "", "-1", "\u00b2", True, None, 6.5, [6]):
+        assert preset_ref_id(ref) is None, ref
