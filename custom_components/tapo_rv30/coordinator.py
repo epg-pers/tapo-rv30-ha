@@ -143,6 +143,8 @@ class TapoCoordinator(DataUpdateCoordinator):
         self.map_name: str | None = None
         self.map_rotation = 0                # the current map's rotate_angle (0, 90, 180, 270)
         self.rotation_supported = False      # the robot reports rotate_angle for its maps
+        self.rotation_known = False          # a map list was read, so rotation_supported is an answer
+        self._rotation_at_setup = False      # what the select platform saw at setup
         self.lock_supported = False          # the robot lists map_lock and reports map_locked
         self.device_name: str = "Tapo RV30"
         self.device_model: str = "RV30"
@@ -432,6 +434,7 @@ class TapoCoordinator(DataUpdateCoordinator):
                     _LOGGER.debug("Map refresh skipped: %s", exc)
                     if self._map_base is not None:
                         self._map_retry = True   # retry the map alone next poll; settings keep their own cycle
+            self._note_rotation()
             if cycle or self.settings_read_at is None:
                 try:
                     await self._refresh_settings()
@@ -772,6 +775,14 @@ class TapoCoordinator(DataUpdateCoordinator):
             return
         if keys - self._setting_keys:
             self._ask_reload("settings that did not answer at setup now do", keys - self._setting_keys)
+
+    def _note_rotation(self) -> None:
+        """The rotation select is made at setup only: when the first map read failed or listed
+        no maps, rotation is learnt later, so reload then to add it."""
+        if self.data is None:       # setup: what the select platform will see
+            self._rotation_at_setup = self.rotation_supported
+        elif self.rotation_supported and not self._rotation_at_setup:
+            self._ask_reload("the robot now reports map rotation", {"map_rotation"})
 
     async def _load_restore(self) -> None:
         if self._restore_loaded or self._restore_store is None:
@@ -1438,6 +1449,8 @@ class TapoCoordinator(DataUpdateCoordinator):
                 for m in map_list]
         if any("rotate_angle" in m for m in map_list):
             self.rotation_supported = True
+        if map_list:        # an empty list (no map yet) says nothing about rotation
+            self.rotation_known = True
         rotation = next((m["rotation"] for m in maps if m["id"] == current_id), 0)
         # Nothing is published until the map is redrawn: a refused map read (routine while the
         # robot manoeuvres) must not leave a new angle showing over the old picture.

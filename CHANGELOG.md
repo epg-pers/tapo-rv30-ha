@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.38.6
+
+### Fixed
+
+- **The Map Rotation select could be deleted after a restart.** If the robot's map list could not be read on the first poll (a timeout while it wakes, or no map yet), the select was removed from Home Assistant, losing its name, area and hidden or disabled state. It is now only removed when the maps were read and none report rotation, and if rotation is reported later the integration reloads once to add it back.
+
 ## v0.38.5
 
 ### Fixed

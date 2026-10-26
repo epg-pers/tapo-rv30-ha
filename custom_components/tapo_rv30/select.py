@@ -39,7 +39,7 @@ async def async_setup_entry(
     entities.append(TapoHistoryRetentionSelect(coordinator, entry))
     if coordinator.rotation_supported:      # the robot reports rotate_angle for its maps
         entities.append(TapoMapRotationSelect(coordinator, entry))
-    else:
+    elif coordinator.rotation_known:        # a map list was read and none has rotate_angle
         remove_missing_parts(hass, coordinator, entry, "select", ["map_rotation"])
     async_add_entities(entities)
 
