@@ -177,6 +177,10 @@
         "preset": {
           "name": "Preset",
           "description": "Preset name (partial, accent-insensitive) or id. See the preset buttons."
+        },
+        "map": {
+          "name": "Map",
+          "description": "The preset's map (name or id), when more than one map has a preset with that name or id."
         }
       }
     },
@@ -499,6 +503,10 @@
         "clean_order": {
           "name": "Clean in this order",
           "description": "Clean the rooms in the listed order."
+        },
+        "map": {
+          "name": "Map",
+          "description": "The preset's map (name or id), when more than one map has a preset with that name or id."
         }
       }
     },
@@ -513,6 +521,10 @@
         "confirm": {
           "name": "Confirm",
           "description": "Required: this deletes the preset."
+        },
+        "map": {
+          "name": "Map",
+          "description": "The preset's map (name or id), when more than one map has a preset with that name or id."
         }
       }
     },

@@ -65,6 +65,79 @@ const ago = (ts) => {
   return `${Math.floor(d / 30)} months ago`;
 };
 
+// ---- map and preset helpers (plain functions, so the tests can run them) ------------------
+// World mm (y up) -> the map picture's px and back, through the map's geometry and its turn.
+// Map cell (gx, gy) covers ox + gx * res to ox + (gx + 1) * res (the robot rounds mm down into
+// cells), so ox, oy is a cell corner: the bottom left corner of the picture.
+const mmToPx = (x, y, g) => { const s = g.scale_px_per_cell, r = g.resolution_mm, [ox, oy] = g.real_origin_mm, gh = g.grid_size[1]; return turnPx(((x - ox) / r) * s, (gh - (y - oy) / r) * s, g); };
+const pxToMm = (px, py, g) => { const s = g.scale_px_per_cell, r = g.resolution_mm, [ox, oy] = g.real_origin_mm, gh = g.grid_size[1]; const [x, y] = unturnPx(px, py, g); return [Math.round(ox + (x / s) * r), Math.round(oy + (gh - y / s) * r)]; };
+// A polygon's area (shoelace), in the square of its units; and whether a point is inside it.
+const polyArea = (verts) => { const v = verts || []; let s = 0; for (let i = 0, j = v.length - 1; i < v.length; j = i++) s += v[j][0] * v[i][1] - v[i][0] * v[j][1]; return Math.abs(s) / 2; };
+const inPoly = (x, y, pts) => { let hit = false; for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) { const [xi, yi] = pts[i], [xj, yj] = pts[j]; if ((yi > y) !== (yj > y) && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) hit = !hit; } return hit; };
+// A point inside a room's outline for its badge: the centroid, or for a room shaped so that the
+// centroid falls outside it (an L, a U), the middle of the widest span across it at that height.
+const polyLabel = (verts) => {
+  const n = verts.length; let a = 0, cx = 0, cy = 0;
+  for (let i = 0, j = n - 1; i < n; j = i++) {
+    const f = verts[j][0] * verts[i][1] - verts[i][0] * verts[j][1];
+    a += f; cx += (verts[j][0] + verts[i][0]) * f; cy += (verts[j][1] + verts[i][1]) * f;
+  }
+  if (!a) return [verts.reduce((s, p) => s + p[0], 0) / n, verts.reduce((s, p) => s + p[1], 0) / n];
+  cx /= 3 * a; cy /= 3 * a;
+  if (inPoly(cx, cy, verts)) return [cx, cy];
+  const xs = [];
+  for (let i = 0, j = n - 1; i < n; j = i++) { const [xi, yi] = verts[i], [xj, yj] = verts[j]; if ((yi > cy) !== (yj > cy)) xs.push(xi + ((cy - yi) * (xj - xi)) / (yj - yi)); }
+  xs.sort((p, q) => p - q);
+  let best = null;
+  for (let k = 0; k + 1 < xs.length; k += 2) if (!best || xs[k + 1] - xs[k] > best[1] - best[0]) best = [xs[k], xs[k + 1]];
+  return best ? [(best[0] + best[1]) / 2, cy] : [cx, cy];
+};
+// A copy of a list with one item moved from one place to another (the cleaning order).
+const moveItem = (list, from, to) => {
+  const out = list.slice();
+  if (from < 0 || from >= out.length) return out;
+  const [it] = out.splice(from, 1);
+  out.splice(Math.max(0, Math.min(out.length, to)), 0, it);
+  return out;
+};
+// Names compared as the integration compares them: accents and case ignored, ends trimmed.
+const foldName = (s) => String(s ?? "").normalize("NFKD").replace(/[\u0300-\u036f]/g, "").trim().toLowerCase();
+// "<name> copy", or "<name> copy 2", 3... when that is taken on the map, cut to max characters
+// with the suffix kept.
+const uniqueCopyName = (name, taken, max = 40) => {
+  const used = new Set([...(taken || [])].map(foldName)), base = String(name ?? "").trim();
+  for (let n = 1; ; n++) {
+    const suffix = n === 1 ? " copy" : ` copy ${n}`, cand = base.slice(0, max - suffix.length).trimEnd() + suffix;
+    if (!used.has(foldName(cand))) return cand;
+  }
+};
+// The robot's own pace from its past cleans, in m2 per minute: total area over total time of the
+// runs with an area and at least 5 minutes (shorter ones are mostly a start and a stop). The
+// map's own runs when it has a few (floors differ), else all of them. null with nothing to go on.
+const cleanPace = (runs, mapId) => {
+  const ok = (runs || []).filter((x) => Number(x.area) > 0 && Number(x.minutes) >= 5);
+  const own = ok.filter((x) => mapId != null && x.map_id === mapId), use = own.length >= 3 ? own : ok;
+  if (!use.length) return null;
+  const area = use.reduce((s, x) => s + Number(x.area), 0), min = use.reduce((s, x) => s + Number(x.minutes), 0);
+  return { perMin: area / min, runs: use.length };
+};
+// What a preset cleans: rooms [{id, passes}] with sizes {id: m2} -> the area with every pass
+// counted, how many rooms have no known size, and minutes at the robot's pace (null without one).
+const presetEstimate = (rooms, areas, runs, mapId) => {
+  let m2 = 0, unknown = 0;
+  for (const rm of rooms || []) { const a = Number((areas || {})[rm.id]); if (a > 0) m2 += a * (Number(rm.passes) || 1); else unknown++; }
+  const pace = cleanPace(runs, mapId);
+  return { m2, unknown, minutes: pace && m2 > 0 ? Math.max(1, Math.round(m2 / pace.perMin)) : null, runs: pace ? pace.runs : 0 };
+};
+// A preset's levels in a few words: each level once, in the order its rooms use them.
+const levelSummary = (rooms) => {
+  const uniq = (f) => [...new Set((rooms || []).map(f).filter((v) => v != null))];
+  const su = uniq((x) => FAN[x.suction - 1]), wa = uniq((x) => WATER[x.water]), pa = uniq((x) => (x.passes ? `${x.passes}x` : null));
+  return [su.join("/"), wa.length ? `water ${wa.join("/")}` : "", pa.join("/")].filter(Boolean).join(", ");
+};
+// Suction levels to offer: the four the robot uses, and Ultra (5) only where a preset already has it.
+const fanLevels = (presets) => ((presets || []).some((p) => (p.rooms || []).some((x) => Number(x.suction) === 5)) ? [1, 2, 3, 4, 5] : [1, 2, 3, 4]);
+
 const STYLE = `
 :host { display: block; height: 100%; background: var(--primary-background-color); color: var(--primary-text-color); }
 .bar { display: flex; align-items: center; gap: 8px; height: 56px; padding: 0 12px; background: var(--app-header-background-color, var(--primary-color)); color: var(--app-header-text-color, #fff); position: sticky; top: 0; z-index: 2; }
@@ -245,6 +318,39 @@ button[disabled], select[disabled], input[disabled] { opacity: .5; cursor: defau
 .lightbox { position: fixed; inset: 0; background: rgba(0,0,0,.72); display: flex; align-items: center; justify-content: center; z-index: 9; padding: 20px; }
 .lightbox img { max-width: 92vw; max-height: 78vh; border-radius: 10px; background: #1b1b1b; }
 .lightbox .lb-info { position: absolute; bottom: 16px; left: 0; right: 0; text-align: center; color: #fff; font-size: .86em; }
+.pnew { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; justify-content: flex-end; }
+.pnew select, .pk select { padding: 7px 8px; border-radius: 10px; border: 1px solid color-mix(in srgb, var(--primary-text-color) 20%, transparent);
+  background: var(--card-background-color); color: var(--primary-text-color); font: inherit; font-size: .88em; min-width: 0; }
+.prow { flex-wrap: wrap; }
+.prow .main { flex: 1 1 220px; }
+.prow .pacts { display: flex; align-items: center; gap: 2px; margin-left: auto; }
+.prow .pacts .btn { padding: 7px 12px; margin-right: 4px; }
+.pgrp { display: flex; align-items: center; gap: 8px; }
+.pstage { position: relative; }
+.pcanvas { width: 100%; height: auto; display: block; cursor: pointer; }
+.pk { display: grid; grid-template-columns: 26px 26px minmax(80px, 1fr) minmax(250px, 340px) 96px; gap: 6px 8px; align-items: center; padding: 6px 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--primary-text-color) 10%, transparent); font-size: .92em; }
+.pk:last-child { border-bottom: none; }
+.pk .grip { display: flex; align-items: center; justify-content: center; height: 32px; cursor: grab; touch-action: none; color: var(--secondary-text-color); }
+.pk .grip ha-icon { --mdc-icon-size: 20px; pointer-events: none; }
+.pk .num { width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: .8em; font-weight: 500;
+  background: var(--primary-color); color: var(--text-primary-color, #fff); }
+.pk .nm { font-weight: 500; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pk .nm small { font-weight: 400; color: var(--warning-color, #ff9800); }
+.pk .lv { display: grid; grid-template-columns: 1fr 1.3fr 1fr; gap: 6px; }
+.pk select { padding: 6px 4px; border-radius: 8px; width: 100%; }
+.pk .ord { display: flex; }
+.pk .ord .icon-btn { width: 32px; height: 32px; }
+.pk.all .nm { font-weight: 400; color: var(--secondary-text-color); }
+.pk.dragging { box-shadow: 0 2px 10px rgba(0,0,0,.35); border-radius: 10px; position: relative; z-index: 1;
+  background: color-mix(in srgb, var(--primary-color) 14%, var(--card-background-color, #fff)); }
+.wrap.narrow .pk { grid-template-columns: 26px 26px minmax(0, 1fr) 96px; }
+.wrap.narrow .pk .grip { grid-row: 1 / span 2; grid-column: 1; }
+.wrap.narrow .pk .num { grid-row: 1; grid-column: 2; }
+.wrap.narrow .pk .nm { grid-row: 1; grid-column: 3; }
+.wrap.narrow .pk .ord { grid-row: 1; grid-column: 4; }
+.wrap.narrow .pk .lv { grid-row: 2; grid-column: 2 / -1; }
+.wrap.narrow .prow .pacts { width: 100%; justify-content: flex-end; }
 `;
 
 class TapoRV30Panel extends HTMLElement {
@@ -254,6 +360,7 @@ class TapoRV30Panel extends HTMLElement {
     this._tab = "schedules";
     this._robot = null;
     this._editing = null;      // schedule being edited (object) or {} for new, or null
+    this._preEdit = null;      // preset being edited or made (the editor's working copy), or null
     this._records = null;
     this._recordsFor = null;
   }
@@ -376,6 +483,7 @@ class TapoRV30Panel extends HTMLElement {
     this._teardownDrive();
     this._entered = false;
     this._robot = id; this._editing = null; this._records = null; this._hist = null; this._recTok = null; this._planOpen = null; this._paneDirty = false;
+    this._pre = null; this._preKey = null; this._preTok = null; this._preEdit = null; this._preMaps = null; this._preHist = null;
     this._robotGen = (this._robotGen || 0) + 1;   // replies still in flight for the old robot are dropped
     const pane = this.shadowRoot.querySelector(".pane"); if (pane) pane.innerHTML = "";
   }
@@ -390,6 +498,7 @@ class TapoRV30Panel extends HTMLElement {
   // would throw away what the user is typing, so hold it until they are done.
   _formBusy() {
     if (this._tab === "schedules" && this._editing) return true;
+    if (this._tab === "presets" && this._preEdit) return true;     // the preset editor, likewise
     // A map row being renamed, copied or deleted (and its progress bar) is not redrawn under the user.
     if (this._tab === "settings" && this.shadowRoot.querySelector(".maprow input.rename, .maprow [data-act]")) return true;
     const a = this.shadowRoot && this.shadowRoot.activeElement;
@@ -410,13 +519,14 @@ class TapoRV30Panel extends HTMLElement {
 
   _renderRight(first) {
     const right = this.shadowRoot.querySelector(".right");
-    const tabs = [["schedules", "mdi:calendar-clock", "Schedules"], ["planner", "mdi:calendar-check", "Planner"], ["history", "mdi:history", "History"], ["rooms", "mdi:floor-plan", "Rooms"],
+    const tabs = [["schedules", "mdi:calendar-clock", "Schedules"], ["presets", "mdi:play-box-multiple", "Presets"], ["planner", "mdi:calendar-check", "Planner"], ["history", "mdi:history", "History"], ["rooms", "mdi:floor-plan", "Rooms"],
                   ["drive", "mdi:gamepad-variant", "Drive"], ["edit", "mdi:pencil-ruler", "Edit map"], ["backups", "mdi:content-save-outline", "Backups"], ["maintenance", "mdi:wrench", "Maintenance"], ["settings", "mdi:tune", "Settings"]];
     if (!right.querySelector(".tabs")) {
       right.innerHTML = `<div class="tabs">${tabs.map(([k, i, l]) => `<button data-tab="${k}"><ha-icon icon="${i}"></ha-icon>${l}</button>`).join("")}</div><div class="pane"></div>`;
       right.querySelectorAll(".tabs button").forEach((b) => b.onclick = () => {
-        this._teardownDrive(); this._tab = b.dataset.tab; this._editing = null; this._planOpen = null;
+        this._teardownDrive(); this._tab = b.dataset.tab; this._editing = null; this._planOpen = null; this._preEdit = null;
         if (this._tab === "history") this._records = null;   // fetched afresh each time the tab opens
+        if (this._tab === "presets") { this._preKey = null; this._preMaps = null; this._preHist = null; }   // likewise
         if (this._tab === "drive") right.querySelector(".pane").innerHTML = "";   // rebuilt with fresh listeners
         this._renderRight(true);
       });
@@ -429,13 +539,14 @@ class TapoRV30Panel extends HTMLElement {
     if (this._tab === "planner") this._ensurePlanSub(); else this._dropPlanSub();
     const sig = JSON.stringify([this._tab, this._robot, this._editing && this._editing.id,
       this._tab === "planner" ? [this._planRev, this._planOpen]
+        : this._tab === "presets" ? [this._preRev, this._signature()]   // _preRev: a preset list arrived
         : this._tab === "edit" ? "edit"   // the editor owns its canvas; don't re-render on map updates
         : this._tab === "backups" ? "backups"   // loads its own data once; don't re-render on map updates
         : this._signature()]);
     if (!first && sig === this._paneSig) return;
     if (!first && this._formBusy()) { this._paneDirty = true; return; }
     this._paneSig = sig; this._paneDirty = false;
-    ({ schedules: this._paneSchedules, history: this._paneHistory, rooms: this._paneRooms, drive: this._paneDrive,
+    ({ schedules: this._paneSchedules, presets: this._panePresets, history: this._paneHistory, rooms: this._paneRooms, drive: this._paneDrive,
        edit: this._paneEdit, backups: this._paneBackups, maintenance: this._paneMaintenance, settings: this._paneSettings, planner: this._panePlanner }[this._tab]).call(this, pane);
   }
 
@@ -614,6 +725,395 @@ class TapoRV30Panel extends HTMLElement {
       const ok = await this._call(DOMAIN, isNew ? "add_schedule" : "set_schedule", data, { entity_id: this._robot });
       if (ok) { this._editing = null; this._renderRight(true); }
     };
+  }
+
+  // ---- presets (the robot's own "customisation rules", as the Tapo app edits them) ------
+  // The list comes from the integration (preset/list): every map's presets with their rooms in
+  // cleaning order, their levels and the schedules that run them. It is read when the tab opens,
+  // after a change made here and when the robot's preset buttons change; never on every update.
+  _presetKey(r) { return JSON.stringify(r.presets.map((id) => { const s = this._st(id); return s ? [id, s.attributes] : [id]; })); }
+
+  async _presetFetch(key) {
+    const robot = this._robot, tok = this._preTok = {};
+    this._preKey = key;
+    let data = null, err = null;
+    try { data = await this._hass.callWS({ type: `${DOMAIN}/preset/list`, entity_id: robot }); }
+    catch (e) { err = (e && e.message) || "Could not read the presets"; }
+    if (this._preTok !== tok || this._robot !== robot) return;    // a newer request, or another robot
+    this._preTok = null;
+    this._pre = { for: robot, err, data: data && { maps: data.maps || [], presets: data.presets || [] } };
+    this._preRev = (this._preRev || 0) + 1;
+    if (this._tab === "presets") this._renderRight(false);
+  }
+
+  // The robot's past cleans (for the editor's time estimate), read once per visit to the tab.
+  _presetRuns() {
+    const robot = this._robot;
+    if (!this._preHist || this._preHist.for !== robot) {
+      this._preHist = { for: robot, runs: this._hass.callWS({ type: `${DOMAIN}/history/list`, entity_id: robot }).then((h) => (h && h.runs) || [], () => []) };
+    }
+    return this._preHist.runs;
+  }
+
+  // A saved map's picture, geometry and rooms (any map, not just the current one), with the
+  // picture loaded. Kept for the visit to the tab; a failed read is tried again next time.
+  _presetMap(mapId) {
+    const key = `${this._robot}|${mapId}`;
+    this._preMaps = this._preMaps || {};
+    if (!this._preMaps[key]) {
+      this._preMaps[key] = this._hass.callWS({ type: `${DOMAIN}/map/edit_get`, entity_id: this._robot, map_id: mapId, picture: true })
+        .then((res) => new Promise((done) => {
+          if (!res || !res.picture || !res.geometry) { done({ res: res || {}, img: null }); return; }
+          const img = new Image();
+          img.onload = () => done({ res, img }); img.onerror = () => done({ res, img: null });
+          img.src = res.picture;
+        }))
+        .catch((e) => { if (this._preMaps) delete this._preMaps[key]; throw e; });
+    }
+    return this._preMaps[key];
+  }
+
+  _panePresets(pane) {
+    const r = this._related(this._robot);
+    if (this._preEdit) return this._renderPresetEditor(pane, r);
+    const key = this._presetKey(r);
+    if (this._preKey !== key) this._presetFetch(key);
+    const pre = this._pre && this._pre.for === this._robot ? this._pre : null;
+    const shell = (body) => `<ha-card><div class="card"><h3><span>Presets</span></h3>${body}</div></ha-card>`;
+    if (!pre) { pane.innerHTML = shell(`<div class="empty">Loading presets...</div>`); return; }
+    if (!pre.data) { pane.innerHTML = shell(`<div class="err">${esc(pre.err)}</div>`); return; }
+    const { maps, presets } = pre.data, admin = this._isAdmin();
+    // The current map first, then the others in the robot's order; a preset on a map the list
+    // does not name still shows, under its map id.
+    const groups = [...maps].sort((a, b) => (b.current ? 1 : 0) - (a.current ? 1 : 0));
+    for (const p of presets) if (!groups.some((m) => m.id === p.map_id)) groups.push({ id: p.map_id, name: null });
+    const mapName = (m) => m.name || `Map ${m.id}`;
+    const days = (d) => ((d || []).length === 7 ? "Daily" : (d || []).join(" "));
+    const when = (s) => `${s.time}${(s.days || []).length ? " " + days(s.days) : ""}`;
+    const row = (p) => {
+      const i = presets.indexOf(p), rooms = p.rooms || [], sch = p.schedules || [];
+      // In order: an arrow between the rooms; otherwise the robot picks its own way round.
+      const names = rooms.map((x) => esc(x.name || `Room ${x.id}`)).join(p.clean_order ? " &rarr; " : ", ");
+      const levels = levelSummary(rooms);
+      const used = sch.length ? `<span title="${esc(sch.map(when).join(", "))}">${sch.length} schedule${sch.length === 1 ? "" : "s"}</span>` : "no schedules";
+      return `<div class="row prow" data-i="${i}">
+        <div class="main"><div class="t">${esc(p.name)}${p.clean_order ? ` <span class="src">in order</span>` : ""}</div>
+          <div class="s">${names || "No rooms"}</div>
+          <div class="s">${levels ? esc(levels) + " &middot; " : ""}${used}</div>
+          ${p.valid === false ? `<div class="warn"><ha-icon icon="mdi:alert-outline"></ha-icon>The robot marks this preset as broken (a room in it has gone). Edit it to fix it.</div>` : ""}</div>
+        <div class="pacts">
+          <button class="btn primary" data-act="run" aria-label="Run ${esc(p.name)}"><ha-icon icon="mdi:play"></ha-icon>Run</button>
+          <button class="icon-btn" data-act="edit" title="Edit" aria-label="Edit ${esc(p.name)}"><ha-icon icon="mdi:pencil"></ha-icon></button>
+          <button class="icon-btn" data-act="dup" title="Duplicate" aria-label="Duplicate ${esc(p.name)}"><ha-icon icon="mdi:content-copy"></ha-icon></button>
+          <button class="icon-btn" data-act="sched" title="Add a schedule that runs it" aria-label="Schedule ${esc(p.name)}"><ha-icon icon="mdi:calendar-plus"></ha-icon></button>
+          <button class="icon-btn" data-act="del" title="${admin ? "Delete" : "Only an administrator can delete presets"}" aria-label="Delete ${esc(p.name)}" ${admin ? "" : "disabled"}><ha-icon icon="mdi:delete"></ha-icon></button>
+        </div></div>`;
+    };
+    const body = groups.map((m) => {
+      const mine = presets.filter((p) => p.map_id === m.id);
+      return `<h5>${esc(mapName(m))}${m.current ? " (current map)" : ""}</h5>${mine.map(row).join("") || `<div class="s" style="padding:4px 0 8px">No presets on this map yet.</div>`}`;
+    }).join("");
+    const cur = maps.find((m) => m.current) || maps[0];
+    const picker = maps.length > 1 ? `<select class="pmap" aria-label="Map for the new preset">${groups.filter((m) => maps.includes(m)).map((m) => `<option value="${esc(m.id)}" ${m === cur ? "selected" : ""}>${esc(mapName(m))}</option>`).join("")}</select>` : "";
+    pane.innerHTML = `<ha-card><div class="card">
+      <h3><span>Presets</span><span class="pnew">${picker}<button class="btn primary" data-act="new" ${cur ? "" : "disabled"}><ha-icon icon="mdi:plus"></ha-icon>New preset</button></span></h3>
+      ${presets.length || maps.length ? body : `<div class="empty">No presets yet. A preset is a set of rooms with their own levels, run from here, the app, a schedule or its button.</div>`}
+    </div></ha-card>`;
+    const newBtn = pane.querySelector('[data-act="new"]');
+    newBtn.onclick = () => {
+      const sel = pane.querySelector(".pmap"), mapId = sel ? Number(sel.value) : cur.id;
+      this._presetOpen({ map_id: mapId, name: "", clean_order: true, rooms: [] }, "New preset");
+    };
+    pane.querySelectorAll(".prow").forEach((el) => {
+      const p = presets[Number(el.dataset.i)], act = (a) => el.querySelector(`[data-act="${a}"]`);
+      act("run").onclick = () => {
+        if (!confirm(`Start ${p.name} now? The robot will leave the dock.`)) return;
+        this._call(DOMAIN, "run_preset", { preset: p.id, map: p.map_id }, { entity_id: this._robot });
+      };
+      act("edit").onclick = () => this._presetOpen({ ...p, preset_id: p.id }, `Edit preset ${p.name}`);
+      act("dup").onclick = () => this._presetOpen({ ...p, preset_id: null,
+        name: uniqueCopyName(p.name, presets.filter((x) => x.map_id === p.map_id).map((x) => x.name)) }, `Duplicate ${p.name}`);
+      // A new schedule on the Schedules tab, set to run this preset.
+      act("sched").onclick = () => { this._tab = "schedules"; this._editing = { preset_id: p.id, map_id: p.map_id }; this._preEdit = null; this._renderRight(true); };
+      act("del").onclick = async () => {
+        const sch = p.schedules || [];
+        const also = sch.length ? ` Schedules that run it (${sch.map(when).join(", ")}) will be left pointing at nothing; delete or change them too.` : "";
+        if (!confirm(`Delete the preset ${p.name} from the robot?${also}`)) return;
+        if (await this._call(DOMAIN, "delete_preset", { preset: p.id, map: p.map_id, confirm: true }, { entity_id: this._robot })) { this._preKey = null; this._renderRight(true); }
+      };
+    });
+  }
+
+  // Opens the editor on a working copy: rooms in cleaning order with their levels, clamped to
+  // what the robot takes.
+  _presetOpen(p, title) {
+    const clamp = (v, lo, hi, dflt) => { const n = Number(v); return Number.isInteger(n) && n >= lo && n <= hi ? n : dflt; };
+    const rooms = (p.rooms || []).map((x) => ({ id: Number(x.id), suction: clamp(x.suction, 1, 5, 2), water: clamp(x.water, 0, 3, 2), passes: clamp(x.passes, 1, 3, 1) }));
+    const last = rooms[rooms.length - 1];
+    this._preEdit = { title, preset_id: p.preset_id ?? null, map_id: p.map_id, name: p.name || "", clean_order: p.clean_order !== false, rooms,
+      names: Object.fromEntries((p.rooms || []).map((x) => [Number(x.id), x.name])),
+      last: last ? { suction: last.suction, water: last.water, passes: last.passes } : { suction: 2, water: 2, passes: 1 } };
+    this._renderRight(true);
+  }
+
+  // Each room of a loaded map with what the editor needs: its outline in mm when the integration
+  // sends one, its size in m2, and where its badge goes on the picture. A room without an outline
+  // falls back on the room geometry (bbox, centre, cells in picture px), from the reply or, for
+  // the current map, from the camera, and is then picked and tinted by its colour on the picture.
+  _presetRooms(res) {
+    const g = res.geometry, cam = this._st(this._related(this._robot).camera);
+    const extra = res.room_geometry || (cam && cam.attributes.map_id === res.map_id ? cam.attributes.room_geometry : null) || [];
+    const cell = g ? (g.resolution_mm / 1000) ** 2 : 0;
+    return (res.rooms || []).filter((rm) => rm && rm.id != null).map((rm) => {
+      const id = Number(rm.id), x = extra.find((q) => q && Number(q.id) === id) || {};
+      const poly = Array.isArray(rm.vertexs) && rm.vertexs.length >= 3 ? rm.vertexs : null;
+      return { id, name: rm.name || x.name || `Room ${id}`, poly, bbox: poly ? null : x.bbox || null,
+        m2: poly ? polyArea(poly) / 1e6 : (Number(x.cells) || 0) * cell,
+        // Where the picture has the room's name (its geometry's centre), else a point inside its outline.
+        centre: x.centre || (poly && g ? mmToPx(...polyLabel(poly), g) : null) };
+    });
+  }
+
+  // Rooms without an outline: a label per picture pixel (room index + 1) from each room's own colour
+  // inside its box, so taps and tints follow the room's real shape.
+  _presetMask(view) {
+    const need = view.rooms.filter((rm) => !rm.poly && rm.bbox);
+    if (!need.length) return null;
+    const w = view.img.naturalWidth, h = view.img.naturalHeight, c = document.createElement("canvas");
+    c.width = w; c.height = h;
+    const ctx = c.getContext("2d"); ctx.drawImage(view.img, 0, 0);
+    let px; try { px = ctx.getImageData(0, 0, w, h).data; } catch (e) { return null; }
+    const label = new Int16Array(w * h);
+    for (const rm of need) {
+      const [x0, y0, x1, y1] = rm.bbox.map((v) => Math.round(v)), count = new Map();
+      // The room's colour: the commonest opaque colour in its box.
+      for (let y = Math.max(0, y0); y <= Math.min(h - 1, y1); y += 2) for (let x = Math.max(0, x0); x <= Math.min(w - 1, x1); x += 2) {
+        const i = (y * w + x) * 4; if (px[i + 3] < 250) continue;
+        const k = (px[i] << 16) | (px[i + 1] << 8) | px[i + 2]; count.set(k, (count.get(k) || 0) + 1);
+      }
+      let key = null, most = 0; for (const [k, n] of count) if (n > most) { key = k; most = n; }
+      if (key == null) continue;
+      const idx = view.rooms.indexOf(rm) + 1;
+      for (let y = Math.max(0, y0); y <= Math.min(h - 1, y1); y++) for (let x = Math.max(0, x0); x <= Math.min(w - 1, x1); x++) {
+        const i = (y * w + x) * 4;
+        if (px[i + 3] >= 250 && ((px[i] << 16) | (px[i + 1] << 8) | px[i + 2]) === key) label[y * w + x] = idx;
+      }
+    }
+    return label;
+  }
+
+  _renderPresetEditor(pane, r) {
+    const e = this._preEdit, robot = this._robot, data = (this._pre && this._pre.data) || { maps: [], presets: [] };
+    const map = data.maps.find((m) => m.id === e.map_id);
+    const fans = fanLevels([...data.presets, { rooms: e.rooms }]);
+    pane.innerHTML = `<ha-card><div class="card form">
+      <h3><span>${esc(e.title)}</span><span class="src">${map ? esc(map.name || `Map ${map.id}`) : `Map ${esc(e.map_id)}`}${map && !map.current ? " (not the current map)" : ""}</span></h3>
+      <div><label for="pname">Name</label><input class="rename pname" id="pname" maxlength="40" autocomplete="off" value="${esc(e.name)}"></div>
+      <div><label>Rooms: tap them on the map or below, in the order to clean them</label>
+        <div class="estage pstage"><canvas class="pcanvas" aria-label="Map: tap a room to add it or take it out"></canvas></div>
+        <div class="s pstatus" style="margin-top:6px">Loading the map...</div>
+        <div class="chips prooms" style="margin-top:8px"></div></div>
+      <div class="pgrp"><div style="flex:1"><div>Clean in this order</div><div class="s" style="font-size:.82em;color:var(--secondary-text-color)">Off: the robot picks its own way round.</div></div>
+        ${toggle(e.clean_order, "Clean in this order", 'data-order')}</div>
+      <div class="ppicked"></div>
+      <div class="note pest" style="margin:0"></div>
+      <div class="err" hidden></div>
+      <div class="actions"><button class="btn cancel">Cancel</button><button class="btn primary save"><ha-icon icon="mdi:content-save"></ha-icon>${e.preset_id != null ? "Save" : "Add to robot"}</button></div>
+    </div></ha-card>`;
+    const q = (sel) => pane.querySelector(sel), list = q(".ppicked"), canvas = q(".pcanvas");
+    // The loaded map: picture, geometry, rooms (with outline or colour label), sizes by room id.
+    const view = { img: null, geom: null, rooms: [], label: null, loaded: false, runs: null };
+    const byId = (id) => view.rooms.find((rm) => rm.id === id);
+    const nameOf = (id) => (byId(id) || {}).name || e.names[id] || `Room ${id}`;
+    const gone = (id) => view.loaded && !byId(id);
+    const picked = (id) => e.rooms.some((x) => x.id === id);
+
+    const opts = (k, v) => (k === "suction" ? fans.map((n) => `<option value="${n}" ${v === n ? "selected" : ""}>${FAN[n - 1]}</option>`)
+      : k === "water" ? WATER.map((w, n) => `<option value="${n}" ${v === n ? "selected" : ""}>Water ${w}</option>`)
+      : [1, 2, 3].map((n) => `<option value="${n}" ${v === n ? "selected" : ""}>${n} pass${n === 1 ? "" : "es"}</option>`)).join("");
+    const what = { suction: "Suction", water: "Water", passes: "Passes" };
+    // The "all rooms" choices show the level every room shares, else "Mixed".
+    const common = (k) => { const vs = new Set(e.rooms.map((x) => x[k])); return vs.size === 1 ? [...vs][0] : null; };
+    const allSel = (k) => `<select data-all="${k}" aria-label="${what[k]} for every room">${common(k) == null ? `<option value="" selected disabled>Mixed</option>` : ""}${opts(k, common(k))}</select>`;
+
+    const drawChips = () => {
+      const ids = [...view.rooms.map((rm) => rm.id), ...e.rooms.map((x) => x.id).filter((id) => !byId(id))];
+      q(".prooms").innerHTML = ids.map((id) => `<button class="chip ${picked(id) ? "on" : ""}" data-room="${id}" aria-pressed="${picked(id)}">${esc(nameOf(id))}${gone(id) ? " (gone)" : ""}</button>`).join("");
+    };
+    const drawList = () => {
+      // Keep keyboard focus on the same control of the same room across the redraw.
+      const a = this.shadowRoot.activeElement, row = a && list.contains(a) ? a.closest(".pk") : null;
+      const attr = a && ["k", "all", "mv"].find((k) => a.dataset[k] != null);
+      const focus = row && attr ? `.pk[data-id="${row.dataset.id}"] [data-${attr}="${a.dataset[attr]}"]` : null;
+      list.innerHTML = e.rooms.length ? `<div class="pk all" data-id="all"><span></span><span></span><span class="nm">All rooms</span><div class="lv">${allSel("suction")}${allSel("water")}${allSel("passes")}</div><span></span></div>` +
+        e.rooms.map((x, i) => {
+          const n = nameOf(x.id);
+          return `<div class="pk" data-id="${x.id}"><span class="grip" title="Drag to change the order"><ha-icon icon="mdi:drag"></ha-icon></span>
+            <span class="num">${i + 1}</span><span class="nm" title="${esc(n)}">${esc(n)}${gone(x.id) ? " <small>(gone)</small>" : ""}</span>
+            <div class="lv">${["suction", "water", "passes"].map((k) => `<select data-k="${k}" aria-label="${what[k]} for ${esc(n)}">${opts(k, x[k])}</select>`).join("")}</div>
+            <span class="ord"><button class="icon-btn" data-mv="-1" title="Move up" aria-label="Move ${esc(n)} up" ${i ? "" : "disabled"}><ha-icon icon="mdi:chevron-up"></ha-icon></button>
+              <button class="icon-btn" data-mv="1" title="Move down" aria-label="Move ${esc(n)} down" ${i < e.rooms.length - 1 ? "" : "disabled"}><ha-icon icon="mdi:chevron-down"></ha-icon></button>
+              <button class="icon-btn" data-rm title="Take out" aria-label="Take ${esc(n)} out"><ha-icon icon="mdi:close"></ha-icon></button></span></div>`;
+        }).join("") : `<div class="s" style="padding:4px 0">No rooms picked yet.</div>`;
+      if (focus) {
+        // A row moved to the top or bottom: its other move button takes the focus.
+        let el = list.querySelector(focus);
+        if (el && el.disabled && el.dataset.mv) el = el.parentElement.querySelector(`[data-mv="${-Number(el.dataset.mv)}"]`);
+        if (el && !el.disabled) el.focus();
+      }
+    };
+    const drawMap = () => {
+      if (!view.img) return;
+      const ctx = canvas.getContext("2d"), g = view.geom, w = canvas.width, h = canvas.height;
+      const cs = getComputedStyle(this), primary = cs.getPropertyValue("--primary-color").trim() || "#03a9f4";
+      ctx.clearRect(0, 0, w, h); ctx.drawImage(view.img, 0, 0);
+      // Rooms without an outline: tinted pixel by pixel from the colour label.
+      if (view.label && e.rooms.some((x) => { const rm = byId(x.id); return rm && !rm.poly; })) {
+        const on = new Set(e.rooms.map((x) => view.rooms.findIndex((rm) => rm.id === x.id) + 1).filter((n) => n > 0));
+        const layer = document.createElement("canvas"); layer.width = w; layer.height = h;
+        const lc = layer.getContext("2d");
+        lc.fillStyle = primary; lc.fillRect(0, 0, 1, 1);
+        const [pr, pg, pb] = lc.getImageData(0, 0, 1, 1).data;    // the theme colour as rgb
+        const tint = lc.createImageData(w, h), d = tint.data;
+        for (let i = 0; i < view.label.length; i++) if (on.has(view.label[i])) { d[i * 4] = pr; d[i * 4 + 1] = pg; d[i * 4 + 2] = pb; d[i * 4 + 3] = 110; }
+        lc.putImageData(tint, 0, 0); ctx.drawImage(layer, 0, 0);
+      }
+      for (const rm of view.rooms) {
+        if (!rm.poly) continue;
+        ctx.beginPath();
+        rm.poly.forEach((p, i) => { const [x, y] = mmToPx(p[0], p[1], g); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
+        ctx.closePath();
+        if (picked(rm.id)) { ctx.globalAlpha = .4; ctx.fillStyle = primary; ctx.fill(); ctx.globalAlpha = 1; ctx.strokeStyle = primary; ctx.lineWidth = 3; ctx.stroke(); }
+        else { ctx.strokeStyle = "rgba(255,255,255,.4)"; ctx.lineWidth = 1; ctx.setLineDash([4, 4]); ctx.stroke(); ctx.setLineDash([]); }
+      }
+      // Numbered badges in cleaning order, about 12 screen px across whatever the canvas scale,
+      // just above the room's name on the picture.
+      const k = canvas.width / (canvas.getBoundingClientRect().width || canvas.width), rad = 12 * k;
+      ctx.font = `600 ${Math.round(13 * k)}px system-ui, sans-serif`; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      e.rooms.forEach((x, i) => {
+        const rm = byId(x.id); if (!rm || !rm.centre) return;
+        const cx = rm.centre[0], cy = Math.max(rad + 2, rm.centre[1] - 12 - rad);
+        ctx.beginPath(); ctx.arc(cx, cy, rad, 0, 2 * Math.PI); ctx.fillStyle = primary; ctx.fill();
+        ctx.lineWidth = 2 * k; ctx.strokeStyle = "#fff"; ctx.stroke();
+        ctx.fillStyle = "#fff"; ctx.fillText(String(i + 1), cx, cy + k);
+      });
+      ctx.textAlign = "start"; ctx.textBaseline = "alphabetic";
+    };
+    const drawEst = () => {
+      const box = q(".pest");
+      if (!e.rooms.length || !view.loaded) { box.innerHTML = ""; return; }
+      const est = presetEstimate(e.rooms, Object.fromEntries(view.rooms.map((rm) => [rm.id, rm.m2])), view.runs, e.map_id);
+      if (!est.m2) { box.innerHTML = "Estimate: the size of these rooms is not known."; return; }
+      const m2 = est.m2 < 10 ? est.m2.toFixed(1) : String(Math.round(est.m2));
+      const mins = est.minutes == null ? "" : est.minutes >= 60 ? `${Math.floor(est.minutes / 60)} h ${est.minutes % 60} min` : `${est.minutes} min`;
+      box.innerHTML = `Estimate: about ${esc(m2)} m&sup2;${e.rooms.some((x) => x.passes > 1) ? " counting every pass" : ""}`
+        + (mins ? `, around ${esc(mins)} at this robot's usual pace (from ${est.runs} past clean${est.runs === 1 ? "" : "s"})` : "") + "."
+        + (est.unknown ? ` ${est.unknown} room${est.unknown === 1 ? " has" : "s have"} no known size and ${est.unknown === 1 ? "is" : "are"} not counted.` : "");
+    };
+    const redraw = () => { drawChips(); drawList(); drawMap(); drawEst(); };
+    const flip = (id) => {
+      const i = e.rooms.findIndex((x) => x.id === id);
+      if (i >= 0) e.rooms.splice(i, 1);
+      else e.rooms.push({ id, ...e.last });      // new rooms take the last levels used
+      redraw();
+    };
+
+    q(".pname").oninput = () => { e.name = q(".pname").value; };
+    q("[data-order]").onclick = () => {
+      e.clean_order = !e.clean_order;
+      const b = q("[data-order]"); b.classList.toggle("on", e.clean_order); b.setAttribute("aria-pressed", String(e.clean_order));
+    };
+    q(".prooms").onclick = (ev) => { const b = ev.target.closest("[data-room]"); if (b) flip(Number(b.dataset.room)); };
+    canvas.onclick = (ev) => {
+      if (!view.img) return;
+      const b = canvas.getBoundingClientRect(), x = ((ev.clientX - b.left) / b.width) * canvas.width, y = ((ev.clientY - b.top) / b.height) * canvas.height;
+      const [mx, my] = pxToMm(x, y, view.geom);
+      // The smallest outline under the tap wins (a room drawn inside another stays reachable).
+      let best = null, area = Infinity;
+      for (const rm of view.rooms) if (rm.poly && inPoly(mx, my, rm.poly)) { const a = polyArea(rm.poly); if (a < area) { best = rm; area = a; } }
+      if (!best && view.label) { const i = view.label[Math.floor(y) * canvas.width + Math.floor(x)]; if (i) best = view.rooms[i - 1]; }
+      if (best) flip(best.id);
+    };
+    list.onchange = (ev) => {
+      const s = ev.target;
+      if (s.dataset.all) { const k = s.dataset.all, v = Number(s.value); e.rooms.forEach((x) => { x[k] = v; }); e.last[k] = v; }
+      else if (s.dataset.k) {
+        const x = e.rooms.find((y) => String(y.id) === s.closest(".pk").dataset.id); if (!x) return;
+        x[s.dataset.k] = Number(s.value); e.last = { suction: x.suction, water: x.water, passes: x.passes };
+      }
+      drawList(); drawEst();
+    };
+    list.onclick = (ev) => {
+      const b = ev.target.closest("[data-mv], [data-rm]"); if (!b) return;
+      const i = e.rooms.findIndex((x) => String(x.id) === b.closest(".pk").dataset.id);
+      if (b.dataset.mv) { e.rooms = moveItem(e.rooms, i, i + Number(b.dataset.mv)); drawList(); drawMap(); }
+      else flip(e.rooms[i].id);
+    };
+    // Dragging a row by its grip: the row moves through the list as the pointer passes the middle
+    // of the next one, and the numbers and the map's badges follow. The list holds the pointer,
+    // so moving the row itself does not drop it.
+    let drag = null;
+    list.onpointerdown = (ev) => {
+      const g = ev.target.closest(".grip"); if (!g) return;
+      ev.preventDefault();
+      drag = g.closest(".pk"); drag.classList.add("dragging");
+      try { list.setPointerCapture(ev.pointerId); } catch (x) { /* the pointer is already gone */ }
+    };
+    list.onpointermove = (ev) => {
+      if (!drag) return;
+      const rows = [...list.querySelectorAll(".pk:not(.all)")].filter((x) => x !== drag);
+      const before = rows.find((x) => { const b = x.getBoundingClientRect(); return ev.clientY < b.top + b.height / 2; }) || null;
+      if (before === drag.nextElementSibling) return;
+      list.insertBefore(drag, before);
+      const ids = [...list.querySelectorAll(".pk:not(.all)")].map((x) => x.dataset.id);
+      e.rooms = ids.map((id) => e.rooms.find((x) => String(x.id) === id));
+      list.querySelectorAll(".pk:not(.all) .num").forEach((n, i) => { n.textContent = String(i + 1); });
+      drawMap();
+    };
+    list.onpointerup = list.onpointercancel = list.onlostpointercapture = () => { if (!drag) return; drag = null; drawList(); };
+
+    q(".cancel").onclick = () => { this._preEdit = null; this._renderRight(true); };
+    q(".save").onclick = async () => {
+      const err = q(".err"), save = q(".save"), name = q(".pname").value.trim();
+      const fail = (m) => { err.textContent = m; err.hidden = false; };
+      err.hidden = true;
+      if (!name) return fail("Give the preset a name.");
+      if (name.length > 40) return fail("A preset name can be up to 40 characters.");
+      if (data.presets.some((p) => p.map_id === e.map_id && p.id !== e.preset_id && foldName(p.name) === foldName(name))) return fail(`This map already has a preset called ${name}.`);
+      if (!e.rooms.length) return fail("Pick at least one room.");
+      const lost = e.rooms.filter((x) => gone(x.id));
+      if (lost.length) return fail(`Take out the rooms no longer on the map: ${lost.map((x) => nameOf(x.id)).join(", ")}.`);
+      const msg = { type: `${DOMAIN}/preset/save`, entity_id: robot, map_id: e.map_id, name, clean_order: e.clean_order,
+        rooms: e.rooms.map((x) => ({ id: x.id, suction: x.suction, water: x.water, passes: x.passes })) };
+      if (e.preset_id != null) msg.preset_id = e.preset_id;
+      save.disabled = true; save.classList.add("busy");
+      try { await this._hass.callWS(msg); }
+      catch (x) {
+        if (save.isConnected) { save.disabled = false; save.classList.remove("busy"); fail((x && x.message) || "The robot did not take the preset."); }
+        return;
+      }
+      if (this._robot !== robot || this._preEdit !== e) return;
+      this._preEdit = null; this._preKey = null; this._renderRight(true);
+    };
+
+    redraw();
+    // The map and the past cleans arrive on their own; a reply after the editor closed is dropped.
+    const live = () => this._preEdit === e && this._robot === robot && canvas.isConnected;
+    this._presetMap(e.map_id).then(({ res, img }) => {
+      if (!live()) return;
+      view.rooms = this._presetRooms(res); view.loaded = true;
+      if (img) {
+        view.img = img; view.geom = res.geometry;
+        canvas.width = img.naturalWidth; canvas.height = img.naturalHeight;
+        view.label = this._presetMask(view);
+        q(".pstatus").textContent = "";
+      } else { q(".pstage").hidden = true; q(".pstatus").textContent = "Could not draw this map; pick the rooms below."; }
+      redraw();
+    }, (x) => {
+      if (!live()) return;
+      q(".pstage").hidden = true; q(".pstatus").textContent = `Could not read the map (${(x && x.message) || x}); pick the rooms below.`;
+    });
+    this._presetRuns().then((runs) => { if (live()) { view.runs = runs; drawEst(); } });
   }
 
   // ---- history and stats --------------------------------------------------------------
@@ -885,12 +1385,10 @@ class TapoRV30Panel extends HTMLElement {
   }
 
   _editGeom() { return this._edit.geom; }
-  // Map cell (gx, gy) covers ox + gx * res to ox + (gx + 1) * res (the robot rounds mm down into
-  // cells), so ox, oy is a cell corner: the bottom left corner of the picture.
-  // Editing is done in mm; only drawing and pointer positions go through these, so a turned map
-  // (geom.rotation) saves exactly what an unturned one would.
-  _editMm2Px(x, y) { const g = this._edit.geom, s = g.scale_px_per_cell, r = g.resolution_mm, [ox, oy] = g.real_origin_mm, gh = g.grid_size[1]; return turnPx(((x - ox) / r) * s, (gh - (y - oy) / r) * s, g); }
-  _editPx2Mm(px, py) { const g = this._edit.geom, s = g.scale_px_per_cell, r = g.resolution_mm, [ox, oy] = g.real_origin_mm, gh = g.grid_size[1]; const [x, y] = unturnPx(px, py, g); return [Math.round(ox + (x / s) * r), Math.round(oy + (gh - y / s) * r)]; }
+  // Editing is done in mm; only drawing and pointer positions go through these (mmToPx, pxToMm),
+  // so a turned map (geom.rotation) saves exactly what an unturned one would.
+  _editMm2Px(x, y) { return mmToPx(x, y, this._edit.geom); }
+  _editPx2Mm(px, py) { return pxToMm(px, py, this._edit.geom); }
   _editPoint(e) {
     const c = this._editEl.canvas, b = c.getBoundingClientRect(), clamp = (v, max) => Math.max(0, Math.min(max, v));
     return [clamp((e.clientX - b.left) / b.width * c.width, c.width), clamp((e.clientY - b.top) / b.height * c.height, c.height)];
@@ -1034,11 +1532,11 @@ class TapoRV30Panel extends HTMLElement {
   }
 
   _editHit(x, y) {
-    const inside = (verts) => { let hit = false; const pts = verts.map((p) => this._editMm2Px(p[0], p[1])); for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) { const [xi, yi] = pts[i], [xj, yj] = pts[j]; if ((yi > y) !== (yj > y) && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) hit = !hit; } return hit; };
+    const inside = (verts) => inPoly(x, y, verts.map((p) => this._editMm2Px(p[0], p[1])));
     const near = (verts) => { const [x0, y0] = this._editMm2Px(verts[0][0], verts[0][1]), [x1, y1] = this._editMm2Px(verts[1][0], verts[1][1]); const L = Math.hypot(x1 - x0, y1 - y0) || 1; return Math.abs((y1 - y0) * x - (x1 - x0) * y + x1 * y0 - y1 * x0) / L < 8; };
     // The smallest item under the pointer wins, so a zone inside a furniture box stays selectable
     // (a wall counts as no area: it is hit only near its line).
-    const area = (verts) => { let s = 0; for (let i = 0, j = verts.length - 1; i < verts.length; j = i++) s += verts[j][0] * verts[i][1] - verts[i][0] * verts[j][1]; return Math.abs(s) / 2; };
+    const area = polyArea;
     let best = null, bestArea = Infinity;
     const take = (kind, i, a) => { if (a < bestArea) { best = { kind, i }; bestArea = a; } };
     for (const [i, f] of (this._edit.furniture || []).entries()) if (inside(f.vertexs)) take("furniture", i, area(f.vertexs));

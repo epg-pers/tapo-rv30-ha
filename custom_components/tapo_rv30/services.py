@@ -594,7 +594,7 @@ def async_setup_services(hass: HomeAssistant) -> None:
         ref = call.data.get("preset")
         if ref in (None, ""):
             raise ServiceValidationError(f"{call.service}: 'preset' (name or id) is required")
-        preset = coord.find_preset(ref)
+        preset = coord.find_preset(ref, await _preset_map(call, coord))
         if preset is None:
             names = [p["name"] for p in coord.presets]
             raise ServiceValidationError(
@@ -622,11 +622,18 @@ def async_setup_services(hass: HomeAssistant) -> None:
                         "carpet_strategy": old.get("carpet_strategy", carpet.get(rid))})
         return out
 
-    def _preset_for(call: ServiceCall, coord: TapoCoordinator) -> dict:
+    async def _preset_map(call: ServiceCall, coord: TapoCoordinator) -> int | None:
+        """The map a preset call names (map: name or id), else None for any map."""
+        ref = call.data.get("map")
+        if ref in (None, ""):
+            return None
+        return _match_map(call, await _read(hass, call, coord.map_names), ref, exact=True)
+
+    async def _preset_for(call: ServiceCall, coord: TapoCoordinator) -> dict:
         ref = call.data.get("preset")
         if ref in (None, ""):
             raise ServiceValidationError(f"{call.service}: 'preset' (name or id) is required")
-        preset = coord.find_preset(ref)
+        preset = coord.find_preset(ref, await _preset_map(call, coord))
         if preset is None:
             raise ServiceValidationError(
                 f"{call.service}: no unique preset matching '{ref}'. Available: {[p['name'] for p in coord.presets]}")
@@ -658,7 +665,7 @@ def async_setup_services(hass: HomeAssistant) -> None:
     async def handle_update_preset(call: ServiceCall) -> ServiceResponse:
         from .mapdata import b64name, preset_body
         coord = _one(hass, call)
-        preset = _preset_for(call, coord)
+        preset = await _preset_for(call, coord)
         map_id, rule_id = preset["map_id"], preset["id"]
         try:
             detail = await hass.async_add_executor_job(coord.client.get_preset_detail, map_id, rule_id)
@@ -685,7 +692,7 @@ def async_setup_services(hass: HomeAssistant) -> None:
         coord = _one(hass, call)
         if not call.data.get("confirm"):
             raise ServiceValidationError(f"{call.service}: this deletes the preset; set confirm: true")
-        preset = _preset_for(call, coord)
+        preset = await _preset_for(call, coord)
         try:
             code = await hass.async_add_executor_job(coord.client.delete_preset, preset["map_id"], preset["id"])
         except Exception as exc:

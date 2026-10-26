@@ -314,6 +314,10 @@ run_preset:
       example: Daytime Vacuum
       selector:
         text: {}
+    map:
+      example: Downstairs
+      selector:
+        text: {}
 set_map:
   target:
     entity:
@@ -648,6 +652,10 @@ update_preset:
       example: Kitchen and hall
       selector:
         text: {}
+    map:
+      example: Downstairs
+      selector:
+        text: {}
     name:
       example: Kitchen and hall (deep)
       selector:
@@ -692,6 +700,10 @@ delete_preset:
     preset:
       required: true
       example: Kitchen and hall
+      selector:
+        text: {}
+    map:
+      example: Downstairs
       selector:
         text: {}
     confirm:

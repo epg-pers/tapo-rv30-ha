@@ -1205,18 +1205,20 @@ class TapoCoordinator(DataUpdateCoordinator):
                 return {}
         return self._room_name_cache[map_id]
 
-    def find_preset(self, ref) -> dict | None:
-        """Preset by id, or by name (accent-insensitive, exact then partial)."""
+    def find_preset(self, ref, map_id: int | None = None) -> dict | None:
+        """Preset by id, or by name (accent-insensitive, exact then partial); only on map_id when
+        given (the robot keeps presets per map, so an id or name can be on more than one)."""
+        presets = [p for p in self.presets if map_id is None or p["map_id"] == map_id]
         try:
             rid = int(ref)
-            for p in self.presets:
+            for p in presets:
                 if p["id"] == rid:
                     return p
         except (TypeError, ValueError, OverflowError):
             pass
         wanted = fold(str(ref).strip())
-        exact = [p for p in self.presets if fold(p["name"]) == wanted]
-        partial = [p for p in self.presets if wanted and wanted in fold(p["name"])]
+        exact = [p for p in presets if fold(p["name"]) == wanted]
+        partial = [p for p in presets if wanted and wanted in fold(p["name"])]
         hits = exact or partial
         return hits[0] if len(hits) == 1 else None
 

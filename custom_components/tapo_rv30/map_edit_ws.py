@@ -1,8 +1,8 @@
 """Websocket commands for the sidebar page's map editor.
 
 tapo_rv30/map/edit_get    {entity_id, map_id?, picture?} -> the editable layers of a map (world mm),
-                          and with picture: true its drawing and geometry (any saved map, not just
-                          the current one)
+                          and with picture: true its drawing, geometry and where each room is on
+                          it (any saved map, not just the current one)
 tapo_rv30/map/edit_apply  {entity_id, map_id, areas?, furniture?, rooms?, order?} -> write them
 
 Only the editable layers are touched (no-go zones, virtual walls, carpets, furniture, room
@@ -72,7 +72,7 @@ async def ws_edit_get(hass: HomeAssistant, connection: websocket_api.ActiveConne
         elif t == "room":
             rooms.append({"id": a.get("id"), "name": b64name(a.get("name", "")),
                           "vertexs": a.get("vertexs")})
-    picture = geometry = None
+    picture = geometry = room_geometry = None
     if msg.get("picture"):
         # Drawn here rather than taken from the camera, which only shows the current map: the
         # same renderer and the map's own rotation, so the picture and geometry always agree.
@@ -86,10 +86,10 @@ async def ws_edit_get(hass: HomeAssistant, connection: websocket_api.ActiveConne
                 turn = next((rotation_of(m.get("rotate_angle")) for m in map_list if m.get("map_id") == map_id), 0)
             except Exception:
                 turn = coord.rotation_for(map_id)
-            img, _, geom = render_map(data, turn)
-            return "data:image/png;base64," + base64.b64encode(_png(img)).decode(), geom
+            img, rooms_geom, geom = render_map(data, turn)
+            return "data:image/png;base64," + base64.b64encode(_png(img)).decode(), geom, rooms_geom
         try:
-            picture, geometry = await hass.async_add_executor_job(_draw)
+            picture, geometry, room_geometry = await hass.async_add_executor_job(_draw)
         except Exception as exc:
             connection.send_error(msg["id"], "render_failed", str(exc))
             return
@@ -98,6 +98,8 @@ async def ws_edit_get(hass: HomeAssistant, connection: websocket_api.ActiveConne
         "current": map_id == coord.map_id,
         "picture": picture,
         "geometry": geometry,
+        # Rooms are cells in the grid, not outlines: where each is on the picture (bbox, centre, cells).
+        "room_geometry": room_geometry,
         "areas": areas,
         "furniture": data.get("furniture_list", []),
         "furniture_types": {str(k): v for k, v in FURNITURE_TYPES.items()},
