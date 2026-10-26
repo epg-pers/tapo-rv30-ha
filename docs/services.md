@@ -11,12 +11,12 @@ robot in it is refused with a clear message. With one vacuum set up the target i
 | `clean_zone` | Clean rectangles given in map mm, same frame as the `position_mm` attribute. |
 | `set_room_settings` | Per-room suction / water / passes stored on the robot. Rejected by RV30 Max Plus firmware 1.3.3 (see [protocol.md](protocol.md)); use `clean_rooms` with levels, or `create_preset` to keep per-room levels. |
 | `run_schedule` | Replay a saved schedule's rooms and settings now, by its id (like `S1`). The vacuum has no "run schedule by id" call, so the schedule's suction, water and passes become the robot's default levels and the clean is started; if the start fails, the previous levels are put back. |
-| `run_preset` | Start a preset saved in the Tapo app, by name or id. |
+| `run_preset` | Start a preset (made in the Tapo app or on the Presets tab), by name or id. Optional `map` (name or id): the robot keeps presets per map, so the same id or name can be on two maps; without `map` such a preset is refused rather than guessed. |
 | `create_preset` | Make a preset on the robot: `name`, `rooms` (in cleaning order), optional `map`, `suction`, `water`, `passes`, `clean_order`. Levels not given are the robot's current ones. It shows in the Tapo app and runs with `run_preset`. Returns its id. |
-| `update_preset` | Change a preset by name or id: new `name`, `rooms` (same map), `suction`, `water`, `passes` or `clean_order`. Anything not given is kept. |
-| `delete_preset` | Delete a preset by name or id (`confirm: true`). Schedules that ran it are left pointing at nothing, so change or remove them too. |
+| `update_preset` | Change a preset by name or id (optional `map` as for `run_preset`): new `name`, `rooms` (same map), `suction`, `water`, `passes` or `clean_order`. Anything not given is kept. For each room's own levels, use the Presets tab. |
+| `delete_preset` | Delete a preset by name or id (optional `map` as for `run_preset`, `confirm: true`). Schedules that ran it are left pointing at nothing, so change or remove them too. |
 | `set_map` | Switch the active map (multi-floor). |
-| `add_schedule` | Create a schedule on the robot: time, days, rooms (or `room_ids`) / preset / whole house, levels. Returns the id. Refused when the start time is inside the robot's Do Not Disturb window (the robot would never run it); `ignore_dnd: true` saves it anyway. |
+| `add_schedule` | Create a schedule on the robot: time, days, rooms (or `room_ids`) / preset (with `map` when two maps have that preset) / whole house, levels. Returns the id. Refused when the start time is inside the robot's Do Not Disturb window (the robot would never run it); `ignore_dnd: true` saves it anyway. |
 | `set_schedule` | Change a schedule (enable / disable, time, days, rooms or `room_ids`, levels). Same Do Not Disturb check when the time changes or the schedule is enabled. |
 | `remove_schedule` | Delete one schedule or all. |
 | `set_map_rotation` | Turn a map's display clockwise (`rotation`: 0, 90, 180 or 270; `map`: id or full name, default the current map). Stored on the robot, so the Tapo app shows it the same way. Display only. |

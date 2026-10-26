@@ -20,8 +20,12 @@ tool, on [the card and dashboards](card.md).*
 Everything the app does for day-to-day cleaning is here too. These are the things it has no way
 to do at all:
 
-- **Copy a map**, or restore a backup as a **new map** beside the original, so you can edit and
-  try things on a copy and keep the map you rely on untouched (the app only restores over a map)
+- **Copy a map**, or restore a backup as a **new map** beside the original, presets included,
+  so you can edit and try things on a copy and keep the map you rely on untouched (the app only
+  restores over a map)
+- **Plan presets properly**: see how long a preset will take and how much floor it covers before
+  you run it, duplicate one as a starting point, and get warned before deleting one a schedule
+  still uses
 - **Keep your own map backups**: local copies of your cloud backups that survive TP-Link losing
   them, or the app deleting them along with a map, and restores served from your own network
 - **Put a lost map back together**: restore it onto any map the robot has, and Home Assistant
