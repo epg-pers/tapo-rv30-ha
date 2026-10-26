@@ -96,6 +96,9 @@
     "copy_map": {
       "service": "mdi:content-copy"
     },
+    "backup_map": {
+      "service": "mdi:cloud-download-outline"
+    },
     "delete_map": {
       "service": "mdi:map-marker-remove-outline"
     },

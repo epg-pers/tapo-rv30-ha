@@ -23,7 +23,7 @@ SERVICES = ("clean_rooms", "set_room_settings", "clean_zone", "run_schedule", "s
             "add_schedule", "set_schedule", "remove_schedule", "remove_matter_fabric", "get_matter_setup_code",
             "rename_map", "set_map_rotation", "set_map_lock",
             "fetch_cloud_map_backups", "save_map_setup", "apply_map_setup", "restore_map_backup", "copy_map", "delete_map",
-            "create_preset", "update_preset", "delete_preset", "remote_drive")
+            "backup_map", "create_preset", "update_preset", "delete_preset", "remote_drive")
 
 
 # Methods the integration itself calls while the robot is working.
@@ -241,7 +241,8 @@ async def _read(hass: HomeAssistant, call: ServiceCall, fn, *args):
 # are allowed; a script runs as whoever started it, as with Home Assistant's own admin services.
 ADMIN_SERVICES = frozenset({"send_raw", "restore_map_backup", "apply_map_setup", "save_map_setup",
                             "fetch_cloud_map_backups", "delete_preset", "remove_schedule",
-                            "remove_matter_fabric", "rename_map", "copy_map", "delete_map", "set_map_lock"})
+                            "remove_matter_fabric", "rename_map", "copy_map", "delete_map", "set_map_lock",
+                            "backup_map"})
 
 
 def _admin_only(hass: HomeAssistant, handler):
@@ -929,6 +930,9 @@ def async_setup_services(hass: HomeAssistant) -> None:
     async def handle_copy_map(call: ServiceCall) -> ServiceResponse:
         return await _with_progress(call, "copy", _copy_map)
 
+    async def handle_backup_map(call: ServiceCall) -> ServiceResponse:
+        return await _with_progress(call, "backup", _backup_map)
+
     async def _restore_map_backup(call: ServiceCall) -> ServiceResponse:
         """Restore a map backup to the robot. By default HA serves the backup it already holds
         on a short-lived LAN URL and the robot fetches and applies it - a fully local restore,
@@ -1352,12 +1356,6 @@ def async_setup_services(hass: HomeAssistant) -> None:
     async def _copy_map(call: ServiceCall) -> ServiceResponse:
         """Copy a map to a new map: back it up to the TP-Link cloud, download that backup and
         restore it under a fresh map id with the given name. The original is not written to."""
-        import time
-        import uuid
-
-        from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
-
-        from .cloud import CloudError, fetch_backups
         coord = _one(hass, call)
         if coord.entry is None:
             raise ServiceValidationError(f"{call.service}: no config entry")
@@ -1365,6 +1363,38 @@ def async_setup_services(hass: HomeAssistant) -> None:
         ref = call.data.get("map")
         src = _match_map(call, names, ref, exact=True) if ref not in (None, "") else coord.map_id
         name = _new_map_name(call, names, call.data.get("name"))
+        newest = await _backup_fetch(call, coord, names, src, "copy", 40)
+        # 3. Restore it as a new map.
+        result = await _restore(call, coord, names, src, None, newest["file"], name, job="copy", span=(50, 100))
+        result["copied_from"] = {"map_id": src, "map_name": names[src], "backup": newest["file"]}
+        return result
+
+    async def _backup_map(call: ServiceCall) -> ServiceResponse:
+        """Back a map up now and keep the backup in Home Assistant: the robot writes it to the
+        TP-Link cloud (the only place it sends one), and it is downloaded straight away."""
+        coord = _one(hass, call)
+        if coord.entry is None:
+            raise ServiceValidationError(f"{call.service}: no config entry")
+        names = await _read(hass, call, coord.map_names)
+        ref = call.data.get("map")
+        src = _match_map(call, names, ref, exact=True) if ref not in (None, "") else coord.map_id
+        newest = await _backup_fetch(call, coord, names, src, "backup", 85)
+        return {"applied": True, "map_id": src, "map_name": names.get(src), "file": newest["file"],
+                "timestamp": newest.get("timestamp"),
+                "next_steps": f"Backed up \"{names.get(src)}\" and kept a copy in Home Assistant "
+                              "(the Backups tab, config/tapo_rv30/map_backups)."}
+
+    async def _backup_fetch(call: ServiceCall, coord: TapoCoordinator, names: dict[int, str], src: int,
+                            job: str, upto: float) -> dict:
+        """A fresh backup of map src: mapBackup (the robot uploads it to the TP-Link cloud), then
+        download it into this robot's backups folder. Progress goes to job, 0..upto percent.
+        Returns the downloaded backup's entry (file, timestamp, ...)."""
+        import time
+        import uuid
+
+        from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
+
+        from .cloud import CloudError, fetch_backups
         if coord.map_busy:
             raise ServiceValidationError(f"{call.service}: {coord.device_name} must be docked and idle")
         if coord.map_lock.locked():
@@ -1376,7 +1406,7 @@ def async_setup_services(hass: HomeAssistant) -> None:
                                              "few minutes")
             _, map_list = await _read(hass, call, coord.client.get_map_info)
             if not any(m.get("map_id") == src and m.get("is_saved") is not False for m in map_list):
-                raise ServiceValidationError(f"{call.service}: only a saved map can be copied")
+                raise ServiceValidationError(f"{call.service}: only a saved map can be backed up or copied")
             # 1. A fresh backup of the source map, to the cloud (the only place the robot puts one).
             try:
                 baseline = await hass.async_add_executor_job(coord.client.get_map_br_process)
@@ -1385,14 +1415,14 @@ def async_setup_services(hass: HomeAssistant) -> None:
             code = await _read(hass, call, coord.client.backup_map, src)
             if code != 0:
                 raise HomeAssistantError(f"{call.service}: the robot refused to back up '{names[src]}' (error {code})")
-            coord.map_job("copy", "Backing the map up to your TP-Link cloud", 0)
+            coord.map_job(job, "Backing the map up to your TP-Link cloud", 0)
             process = await _wait_br(coord, 1, baseline, src, tries=60, progress=lambda pc: coord.map_job(
-                "copy", "Backing the map up to your TP-Link cloud", 40 * pc / 100))
+                job, "Backing the map up to your TP-Link cloud", upto * pc / 100))
         if _opt_int(process.get("status")) != 3:
             raise HomeAssistantError(f"{call.service}: the robot did not finish backing up '{names[src]}'"
                                      + (" (it reported a failure)" if _opt_int(process.get("status")) == 13 else ""))
         # 2. Download it.
-        coord.map_job("copy", "Downloading the backup", 42)
+        coord.map_job(job, "Downloading the backup", upto + 2)
         terminal = str(uuid.uuid5(uuid.NAMESPACE_URL, f"{DOMAIN}:{coord.entry.entry_id}"))
         try:
             got = await hass.async_add_executor_job(
@@ -1401,19 +1431,19 @@ def async_setup_services(hass: HomeAssistant) -> None:
         except CloudError as exc:
             raise HomeAssistantError(f"{call.service}: {exc}") from exc
         if got.get("status") == "code_sent":
-            raise ServiceValidationError(f"{call.service}: TP-Link emailed a verification code; run copy_map "
-                                         "again with verification_code set to it")
+            # The robot has already made the backup: only the download waits for the code.
+            msg = ("TP-Link emailed a verification code. The backup is in your TP-Link cloud: run "
+                   "fetch_cloud_map_backups with verification_code set to that code to download it"
+                   + ("" if call.service == "backup_map" else f", then run {call.service} again"))
+            coord.map_job(job, "Waiting for a verification code", 100, done=True, error=msg)
+            raise HomeAssistantError(f"{call.service}: {msg}")
         # Only the backup just made (cloud timestamps are seconds; a few minutes' slack for clocks).
         mine = [b for b in got.get("backups", []) if b.get("map_id") == src and b.get("file") and not b.get("error")
                 and (_opt_int(b.get("timestamp")) or 0) >= started - 300]
         if not mine:
             raise HomeAssistantError(f"{call.service}: the cloud does not have the new backup of '{names[src]}' "
                                      "yet; try again in a minute")
-        newest = max(mine, key=lambda b: b.get("timestamp") or 0)
-        # 3. Restore it as a new map.
-        result = await _restore(call, coord, names, src, None, newest["file"], name, job="copy", span=(50, 100))
-        result["copied_from"] = {"map_id": src, "map_name": names[src], "backup": newest["file"]}
-        return result
+        return max(mine, key=lambda b: b.get("timestamp") or 0)
 
     async def handle_delete_map(call: ServiceCall) -> ServiceResponse:
         """Delete a map from the robot, as the Tapo app does. Never the current map (switch first)
@@ -1467,6 +1497,8 @@ def async_setup_services(hass: HomeAssistant) -> None:
     hass.services.async_register(DOMAIN, "restore_map_backup", _admin_only(hass, handle_restore_map_backup),
                                  supports_response=SupportsResponse.OPTIONAL)
     hass.services.async_register(DOMAIN, "copy_map", _admin_only(hass, handle_copy_map),
+                                 supports_response=SupportsResponse.OPTIONAL)
+    hass.services.async_register(DOMAIN, "backup_map", _admin_only(hass, handle_backup_map),
                                  supports_response=SupportsResponse.OPTIONAL)
     hass.services.async_register(DOMAIN, "delete_map", _admin_only(hass, handle_delete_map),
                                  supports_response=SupportsResponse.OPTIONAL)

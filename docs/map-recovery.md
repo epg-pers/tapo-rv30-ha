@@ -212,6 +212,17 @@ so you keep a copy even if TP-Link's is ever lost - and so `restore_map_backup` 
 serve. The first run may e-mail you a two-step code; run it again with `verification_code` set to
 it, and Home Assistant becomes a trusted device.
 
+To make a fresh backup and keep it in one go, use **Back up now** on the Backups tab, the cloud
+button on a map's row in the Settings tab, or `tapo_rv30.backup_map`: the robot backs the map up
+(to the cloud, the only place it sends one) and Home Assistant downloads it straight away. Any
+saved map can be backed up, not just the current one.
+
+Why not fully local? Restoring is: Home Assistant serves the file and the robot fetches it. Backing
+up is not, by the robot's design: `mapBackup` takes only a map id, and the firmware packs the map
+and uploads it straight to TP-Link with its own cloud credentials. There is no call that hands the
+file back over the local network, and a backup cannot be built from what the local API shows,
+because it also carries the robot's own navigation data, which the local API never exposes.
+
 Keep in mind: **deleting a map in the app deletes its cloud backup too**, so fetch your backups
 ahead of time. `mapRecovery` needs a map on the robot to carry the restore; when the map itself is
 gone, any other map carries it and the backup comes back under its own id (see "Lost every map"

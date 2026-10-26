@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.38.0
+
+### Added
+
+- **Back up now.** A fresh backup of any saved map, kept in Home Assistant, in one press: the cloud button on each map in the Settings tab, or **Back up now** with a map picker on the Backups tab, with a progress bar. Also as `tapo_rv30.backup_map` (admin only). The robot only sends backups to the TP-Link cloud, so Home Assistant downloads it straight away into `config/tapo_rv30/map_backups`, where it stays even if TP-Link loses it or the app deletes it.
+- **Copy schedules from the Settings tab.** Copying a map there now offers "Also copy its schedules", switched off so the two maps do not both clean.
+
 ## v0.37.1
 
 ### Fixed

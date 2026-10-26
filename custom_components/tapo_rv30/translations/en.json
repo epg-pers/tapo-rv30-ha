@@ -592,6 +592,20 @@
         }
       }
     },
+    "backup_map": {
+      "name": "Back up map",
+      "description": "Back a map up now and keep the backup in Home Assistant. The robot only sends backups to the TP-Link cloud, so it is downloaded straight away into config/tapo_rv30/map_backups, where it stays even if TP-Link loses it. Needs the account's cloud login; the robot must be docked and idle. Admin only.",
+      "fields": {
+        "map": {
+          "name": "Map",
+          "description": "The map to back up: its name or id. Defaults to the current map."
+        },
+        "verification_code": {
+          "name": "Verification code",
+          "description": "The code TP-Link emailed you, when the cloud login asks for one."
+        }
+      }
+    },
     "delete_map": {
       "name": "Delete map",
       "description": "Delete a map from the robot, as the Tapo app does; its presets and schedules go with it. Not the current map (switch first) and not the last saved one. Docked and idle. Admin only.",

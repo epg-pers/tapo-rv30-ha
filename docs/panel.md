@@ -116,7 +116,10 @@ are view-only for now. Behind the scenes this is the robot's own editing API (`s
 
 Every map backup Home Assistant holds, as a grid of thumbnails. Tap one to see it full size, or
 press **Restore** to put it back on the robot (docked and idle): either over its map, or as a new
-map with a name you give it. **Fetch from cloud** downloads
+map with a name you give it. **Back up now** makes a fresh backup of the map you pick (any saved
+map, not just the current one) and keeps it in Home Assistant: the robot only sends backups to
+your TP-Link cloud, so Home Assistant downloads it straight away, with a progress bar while it
+runs. **Fetch from cloud** downloads
 your latest TP-Link backups into `config/tapo_rv30/map_backups/<robot>` without leaving the page. Each
 backup is pictured from the robot's own snapshot or the saved map drawn like the live map, and
 its `.bkmap` is decoded to show the explored floor area, dock and room count. See
@@ -138,12 +141,14 @@ display rotation is stored on the robot, so the Tapo app shows it the same way) 
 button for administrators (the same as
 renaming in the Tapo app; the robot must be idle). Everything in the integration follows a map by its id, so
 only automations that pass the old name as `map:` need updating. **Copy** makes a new map from
-it with a name you give (rooms, names, no-go zones and furniture), so you can edit or try things
-on the copy and leave the original alone; see [copying a map](map-recovery.md#restore-as-a-new-map-or-copy-a-map). The bin
+it with a name you give (rooms, names, no-go zones, furniture and presets, and if you tick the box
+its schedules, switched off), so you can edit or try things
+on the copy and leave the original alone; see [copying a map](map-recovery.md#restore-as-a-new-map-or-copy-a-map). The cloud button backs that map up
+now and keeps the backup in Home Assistant (as **Back up now** on the Backups tab). The bin
 button deletes a map that is not the current one, after a second press in the row. The eye
 button previews a map full size. The padlock locks or unlocks a map, as in the Tapo app: a
 locked map is kept as it is instead of being updated by later cleans (its room names, no-go zones
-and furniture can still be edited). Copy and restore show a progress bar while they run.
+and furniture can still be edited). Backup, copy and restore show a progress bar while they run.
 
 ![Maps in the Settings tab](panel-maps.png){ width="760" }
 

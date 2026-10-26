@@ -208,6 +208,8 @@ canvas.chart { width: 100%; height: 140px; display: block; }
 .maprow .mapacts { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; justify-content: flex-end; width: 100%; margin-top: 6px; }
 .emaps { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 8px; }
 .emaps select { flex: 1; min-width: 140px; }
+.bkhead { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; justify-content: flex-end; }
+.bkhead select { padding: 7px 8px; border-radius: 8px; border: 1px solid color-mix(in srgb, var(--primary-text-color) 20%, transparent); background: var(--card-background-color); color: var(--primary-text-color); max-width: 180px; }
 .etool.on { background: var(--primary-color); color: var(--text-primary-color, #fff); }
 .efurn { padding: 7px 10px; border-radius: 10px; border: 1px solid var(--divider-color); background: var(--card-background-color); color: var(--primary-text-color); }
 .ehint { font-size: .8em; color: var(--secondary-text-color); margin-bottom: 8px; }
@@ -1906,16 +1908,37 @@ class TapoRV30Panel extends HTMLElement {
 
   // ---- backups -------------------------------------------------------------------------
   _paneBackups(pane) {
+    const cam = this._st(this._related(this._robot).camera);
+    const saved = ((cam && cam.attributes.maps) || []).filter((m) => m.saved !== false);
     pane.innerHTML = `<ha-card><div class="card">
-      <h3><span>Map backups</span>
-        <button class="btn bkfetch"><ha-icon icon="mdi:cloud-download"></ha-icon>Fetch from cloud</button></h3>
-      <div class="s">Backups held under <code>config/tapo_rv30/map_backups</code>. Tap a map to see it full size, or restore it to the robot (docked and idle). Fetching downloads your latest TP-Link cloud backups so you keep your own copies.</div>
+      <h3><span>Map backups</span><span class="bkhead">${saved.length ? `<select class="bkmap" aria-label="Map to back up">${saved.map((m) => `<option value="${esc(m.id)}" ${m.current ? "selected" : ""}>${esc(m.name || `Map ${m.id}`)}</option>`).join("")}</select>
+        <button class="btn primary bknow"><ha-icon icon="mdi:cloud-download-outline"></ha-icon>Back up now</button>` : ""}
+        <button class="btn bkfetch"><ha-icon icon="mdi:cloud-sync-outline"></ha-icon>Fetch from cloud</button></span></h3>
+      <div class="s">Backups held under <code>config/tapo_rv30/map_backups</code>. Tap a map to see it full size, or restore it to the robot (docked and idle). <b>Back up now</b> makes a fresh backup of the map you pick and keeps it here (the robot only sends backups to your TP-Link cloud, so it is downloaded straight away). <b>Fetch from cloud</b> downloads the backups already there.</div>
       <div class="s bkstatus" style="margin-top:8px"></div>
       <div class="bkgrid" style="margin-top:12px"><div class="empty">Loading backups...</div></div>
     </div></ha-card>`;
     const grid = pane.querySelector(".bkgrid"), status = pane.querySelector(".bkstatus");
     pane.querySelector(".bkfetch").onclick = () => this._backupFetch(status, grid);
-    if (!this._isAdmin()) { pane.querySelector(".bkfetch").disabled = true; status.textContent = "Only an administrator can fetch or restore backups."; }
+    const now = pane.querySelector(".bknow"), pick = pane.querySelector(".bkmap");
+    if (now && this._mapJobBusy) { now.disabled = true; now.title = "A backup or copy is running"; }
+    if (now) now.onclick = () => {
+      const m = saved.find((x) => String(x.id) === pick.value) || {};
+      now.disabled = pick.disabled = true;
+      this._backupNow(pick.value, m.name || `Map ${pick.value}`, status, (message) => {
+        if (!grid.isConnected) {            // moved to another tab meanwhile: tell them anyway
+          this.dispatchEvent(new CustomEvent("hass-notification", { detail: { message }, bubbles: true, composed: true }));
+          return;
+        }
+        now.disabled = pick.disabled = false;
+        status.textContent = message;
+        this._backupLoad(grid, status);
+      });
+    };
+    if (!this._isAdmin()) {
+      pane.querySelectorAll(".bkfetch, .bknow, .bkmap").forEach((el) => { el.disabled = true; });
+      status.textContent = "Only an administrator can back up, fetch or restore backups.";
+    }
     this._backupLoad(grid, status);
   }
 
@@ -2028,6 +2051,30 @@ class TapoRV30Panel extends HTMLElement {
     };
   }
 
+  // Back a map up now (backup_map) with a progress bar in host; done(message) when it ends either way.
+  async _backupNow(id, name, host, done) {
+    this._mapJobBusy = true;
+    this.shadowRoot.querySelectorAll("[data-backup], [data-copy], .bknow").forEach((x) => { x.disabled = true; });
+    const row = host.classList && host.classList.contains("maprow") ? host : null;
+    if (row) row.innerHTML = `<div class="main" data-act="busy"><div class="t">${esc(name)}</div><div class="s bknote">Backing up "${esc(name)}". The robot sends it to your TP-Link cloud and Home Assistant downloads it; keep the robot docked.</div></div>`;
+    const note = row ? row.querySelector(".bknote") : host;
+    if (!row) note.textContent = `Backing up "${name}". The robot sends it to your TP-Link cloud and Home Assistant downloads it; keep the robot docked.`;
+    const bar = this._jobBar(row ? note.parentElement : host, "backup", "Starting the backup");
+    let message;
+    try {
+      const res = await this._hass.callService(DOMAIN, "backup_map", { map: String(id) }, { entity_id: this._robot }, false, true);
+      const r = (res && res.response) ? res.response : res || {};
+      message = r.next_steps || `Backed up "${name}".`;
+    } catch (e) {
+      message = "Backup failed: " + ((e && (e.message || (e.body && e.body.message))) || "the robot rejected that");
+    }
+    bar.stop(); bar.el.remove();
+    this._mapJobBusy = false;
+    const busy = row && row.querySelector("[data-act=busy]");
+    if (busy) busy.removeAttribute("data-act");
+    done(message);
+  }
+
   async _backupFetch(status, grid) {
     status.textContent = "Fetching cloud backups (this can take a moment)...";
     try {
@@ -2129,6 +2176,7 @@ class TapoRV30Panel extends HTMLElement {
       <button class="icon-btn" data-turn="${esc(m.id)}" data-to="${((m.rotation || 0) + 270) % 360}" title="Turn anticlockwise"><ha-icon icon="mdi:rotate-left"></ha-icon></button>
       <button class="icon-btn" data-turn="${esc(m.id)}" data-to="${((m.rotation || 0) + 90) % 360}" title="Turn clockwise"><ha-icon icon="mdi:rotate-right"></ha-icon></button>
       <button class="btn" data-rename="${esc(m.id)}" data-name="${esc(m.name || "")}" ${admin ? "" : `disabled title="Only an administrator can rename maps"`}><ha-icon icon="mdi:rename-outline"></ha-icon>Rename</button>
+      <button class="icon-btn" data-backup="${esc(m.id)}" data-name="${esc(m.name || `Map ${m.id}`)}" ${admin ? `title="Back up now (kept in Home Assistant)"` : `disabled title="Only an administrator can back up maps"`}><ha-icon icon="mdi:cloud-download-outline"></ha-icon></button>
       <button class="btn" data-copy="${esc(m.id)}" data-name="${esc(m.name || "")}" ${!admin ? `disabled title="Only an administrator can copy maps"` : maps.length >= 3 ? `disabled title="The robot holds at most 3 maps; delete one first"` : ""}><ha-icon icon="mdi:content-copy"></ha-icon>Copy</button>
       <button class="icon-btn" data-delete="${esc(m.id)}" data-name="${esc(m.name || "")}" ${!admin ? `disabled title="Only an administrator can delete maps"` : m.current ? `disabled title="This is the current map; switch to another map to delete it"` : maps.length < 2 ? `disabled title="The robot needs at least one map"` : `title="Delete this map"`}><ha-icon icon="mdi:delete-outline"></ha-icon></button></div></div>`).join("");
     pane.innerHTML = `${maps.length ? `<ha-card><div class="card"><h3><span>Maps</span></h3>${mapRows}</div></ha-card>` : ""}
@@ -2188,30 +2236,49 @@ class TapoRV30Panel extends HTMLElement {
       input.onkeydown = (e) => { if (e.key === "Enter") submit(); else if (e.key === "Escape") done(); };
       input.focus(); input.select();
     });
+    // One backup or copy at a time (the robot does one map job at a time): the others wait.
+    if (this._mapJobBusy) pane.querySelectorAll("[data-backup], [data-copy]").forEach((b) => { b.disabled = true; b.title = "A backup or copy is running"; });
+    // Backed up now: the robot sends it to the TP-Link cloud and it is downloaded into Home Assistant.
+    pane.querySelectorAll("[data-backup]").forEach((b) => b.onclick = () => this._backupNow(b.dataset.backup, b.dataset.name, b.closest(".row"),
+      (message) => {
+        this.dispatchEvent(new CustomEvent("hass-notification", { detail: { message }, bubbles: true, composed: true }));
+        // Redrawn only on this tab, and not over a rename or copy the user has open meanwhile.
+        if (this._tab === "settings") { if (this._formBusy()) this._paneDirty = true; else this._paneSettings(pane); }
+      }));
     // Copied to a new map beside it, to edit without touching the original; switch to it with the
     // map selector and back the same way.
     pane.querySelectorAll("[data-copy]").forEach((b) => b.onclick = () => {
       const row = b.closest(".row"), id = b.dataset.copy, old = b.dataset.name;
       row.innerHTML = `<div class="main"><input class="rename" maxlength="32" aria-label="Name for the copy" value="${esc(`${old} copy`.slice(0, 32))}">
-        <div class="s copynote">A new map with the same rooms, names, no-go zones and furniture. Takes a minute or two: the map is backed up to your TP-Link cloud and restored beside the original, which stays as it is. Docked and idle only.</div></div>
+        <label class="s"><input type="checkbox" class="copysched"> Also copy its schedules (switched off, so the two maps do not both clean)</label>
+        <div class="s copynote">A new map with the same rooms, names, no-go zones, furniture and presets. Takes a minute or two: the map is backed up to your TP-Link cloud and restored beside the original, which stays as it is. Docked and idle only.</div></div>
         <button class="btn primary" data-act="save">Copy</button><button class="btn" data-act="cancel">Cancel</button>`;
       const input = row.querySelector("input"), save = row.querySelector("[data-act=save]"), cancel = row.querySelector("[data-act=cancel]");
       const done = () => { input.blur(); this._paneSettings(pane); };
       const submit = async () => {
         const name = input.value.trim();
         if (!name) return input.focus();
-        save.disabled = cancel.disabled = input.disabled = true;
+        const sched = row.querySelector(".copysched");
+        save.disabled = cancel.disabled = input.disabled = sched.disabled = true;
+        this._mapJobBusy = true;
+        pane.querySelectorAll("[data-backup], [data-copy]").forEach((x) => { x.disabled = true; });
         const note = row.querySelector(".copynote");
         note.textContent = `Copying to "${name}". This takes a minute or two; keep the robot docked.`;
         const bar = this._jobBar(note.parentElement, "copy", "Starting the copy");
         try {
-          const res = await this._hass.callService(DOMAIN, "copy_map", { map: id, name }, { entity_id: this._robot }, false, true);
+          const data = { map: id, name };
+          if (sched.checked) data.copy_schedules = true;
+          const res = await this._hass.callService(DOMAIN, "copy_map", data, { entity_id: this._robot }, false, true);
           bar.stop();
           const r = (res && res.response) ? res.response : res || {};
           const message = [r.next_steps, r.note].filter(Boolean).join(" ") || `Copied to "${name}".`;
           this.dispatchEvent(new CustomEvent("hass-notification", { detail: { message }, bubbles: true, composed: true }));
-          return done();
+          this._mapJobBusy = false;
+          input.blur();
+          if (this._tab === "settings") { if (this._formBusy()) this._paneDirty = true; else this._paneSettings(pane); }
+          return;
         } catch (e) {
+          this._mapJobBusy = false;
           bar.stop();
           const message = (e && (e.message || (e.body && e.body.message))) || "The robot rejected that";
           this.dispatchEvent(new CustomEvent("hass-notification", { detail: { message }, bubbles: true, composed: true }));
@@ -2219,7 +2286,7 @@ class TapoRV30Panel extends HTMLElement {
         if (!row.isConnected) return;
         bar.el.remove();
         row.querySelector(".copynote").textContent = "";
-        save.disabled = cancel.disabled = input.disabled = false; input.focus();
+        save.disabled = cancel.disabled = input.disabled = sched.disabled = false; input.focus();
       };
       save.onclick = submit;
       cancel.onclick = done;
