@@ -72,11 +72,11 @@ async def ws_edit_get(hass: HomeAssistant, connection: websocket_api.ActiveConne
         elif t == "room":
             rooms.append({"id": a.get("id"), "name": b64name(a.get("name", "")),
                           "vertexs": a.get("vertexs")})
-    picture = geometry = room_geometry = None
+    picture = geometry = room_geometry = room_mask = None
     if msg.get("picture"):
         # Drawn here rather than taken from the camera, which only shows the current map: the
         # same renderer and the map's own rotation, so the picture and geometry always agree.
-        from .maprender import _png, render_map
+        from .maprender import _png, render_map, room_mask_png
 
         def _draw():
             # The angle from the robot itself: a turn just made may not have reached the cache.
@@ -87,9 +87,10 @@ async def ws_edit_get(hass: HomeAssistant, connection: websocket_api.ActiveConne
             except Exception:
                 turn = coord.rotation_for(map_id)
             img, rooms_geom, geom = render_map(data, turn)
-            return "data:image/png;base64," + base64.b64encode(_png(img)).decode(), geom, rooms_geom
+            mask = "data:image/png;base64," + base64.b64encode(room_mask_png(data, turn)).decode()
+            return "data:image/png;base64," + base64.b64encode(_png(img)).decode(), geom, rooms_geom, mask
         try:
-            picture, geometry, room_geometry = await hass.async_add_executor_job(_draw)
+            picture, geometry, room_geometry, room_mask = await hass.async_add_executor_job(_draw)
         except Exception as exc:
             connection.send_error(msg["id"], "render_failed", str(exc))
             return
@@ -100,6 +101,9 @@ async def ws_edit_get(hass: HomeAssistant, connection: websocket_api.ActiveConne
         "geometry": geometry,
         # Rooms are cells in the grid, not outlines: where each is on the picture (bbox, centre, cells).
         "room_geometry": room_geometry,
+        # The room-id grid, turned like the picture, 1 px per cell (scale_px_per_cell in geometry):
+        # pixel value = room id, 0 wall, 255 floor, 127 unknown. Exact hit-testing for taps.
+        "room_mask": room_mask,
         "areas": areas,
         "furniture": data.get("furniture_list", []),
         "furniture_types": {str(k): v for k, v in FURNITURE_TYPES.items()},

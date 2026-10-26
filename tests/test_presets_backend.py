@@ -221,3 +221,16 @@ def test_carried_text():
     assert mapcopy.carried_text({"presets": 2, "schedules": 1}) == ", plus 2 presets and 1 schedule (switched off)"
     assert mapcopy.carried_text({"presets": 1, "schedules": 0}) == ", plus 1 preset"
     assert mapcopy.carried_text(None) == ""
+
+
+def test_find_preset_needs_the_map_when_two_maps_share_an_id():
+    import types
+
+    from custom_components.tapo_rv30.coordinator import TapoCoordinator
+    c = types.SimpleNamespace(presets=[{"id": 3, "map_id": 1, "name": "Mop"}, {"id": 3, "map_id": 2, "name": "Up"},
+                                       {"id": 4, "map_id": 1, "name": "Vac"}])
+    find = TapoCoordinator.find_preset
+    assert find(c, 3) is None                                 # which one? say so rather than guess
+    assert find(c, 3, 2)["name"] == "Up" and find(c, "3", 1)["name"] == "Mop"
+    assert find(c, 4)["name"] == "Vac" and find(c, "vac")["name"] == "Vac"
+    assert find(c, "Up", 1) is None

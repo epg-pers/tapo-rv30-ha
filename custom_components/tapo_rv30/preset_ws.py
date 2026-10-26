@@ -77,7 +77,8 @@ async def ws_preset_list(hass: HomeAssistant, connection: websocket_api.ActiveCo
         connection.send_error(msg["id"], "read_failed", f"could not read the presets: {exc}")
         return
     connection.send_result(msg["id"], {
-        "maps": [{"id": m["id"], "name": m.get("name"), "current": m["id"] == coord.map_id} for m in coord.maps],
+        "maps": [{"id": m["id"], "name": m.get("name"), "current": m["id"] == coord.map_id,
+                  "saved": m.get("saved", True) is not False} for m in coord.maps],
         "presets": presetedit.view(rules, details, names, coord.schedules),
     })
 

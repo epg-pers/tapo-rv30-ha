@@ -1211,9 +1211,9 @@ class TapoCoordinator(DataUpdateCoordinator):
         presets = [p for p in self.presets if map_id is None or p["map_id"] == map_id]
         try:
             rid = int(ref)
-            for p in presets:
-                if p["id"] == rid:
-                    return p
+            hits = [p for p in presets if p["id"] == rid]
+            if hits:
+                return hits[0] if len(hits) == 1 else None     # on two maps: say which
         except (TypeError, ValueError, OverflowError):
             pass
         wanted = fold(str(ref).strip())

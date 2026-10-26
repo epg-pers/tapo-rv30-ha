@@ -374,9 +374,10 @@ def async_setup_services(hass: HomeAssistant) -> None:
         if "rooms" in call.data or "room_ids" in call.data or "preset" in call.data:
             attr.pop("room_list", None); attr.pop("custom_rule_id", None)
             if call.data.get("preset") not in (None, ""):
-                preset = coord.find_preset(call.data["preset"])
+                preset = coord.find_preset(call.data["preset"], await _preset_map(call, coord))
                 if preset is None:
-                    raise ServiceValidationError(f"{call.service}: no preset matching {call.data['preset']!r}")
+                    raise ServiceValidationError(f"{call.service}: no unique preset matching {call.data['preset']!r}"
+                                                 "; name its map with map: if more than one map has it")
                 attr.update({"clean_mode": 5, "custom_rule_id": preset["id"], "map_id": preset.get("map_id") or coord.map_id})
             elif call.data.get("rooms") or call.data.get("room_ids"):
                 room_ids, map_id = await _resolve(hass, call, coord)
@@ -685,7 +686,7 @@ def async_setup_services(hass: HomeAssistant) -> None:
         order = call.data.get("clean_order", detail.get("clean_order", True))
         await _write_preset(call, coord, preset_body(name, map_id, rooms, order, rule_id=rule_id))
         await coord.async_settings_changed()
-        now = coord.find_preset(rule_id)
+        now = coord.find_preset(rule_id, map_id)
         return {"preset_id": rule_id, "name": now and now["name"], "rooms": now and now["room_settings"]}
 
     async def handle_delete_preset(call: ServiceCall) -> ServiceResponse:
