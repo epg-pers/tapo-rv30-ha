@@ -73,3 +73,23 @@ def test_retention_labels():
 def test_missing_folder_is_empty(tmp_path):
     h = ch.CleanHistory(str(tmp_path / "nothing"))
     assert h.entries() == [] and h.prune(0, 0, 10) == 0 and not h.delete(5)
+
+
+def test_forgotten_runs_are_only_kept_again_on_purpose(tmp_path):
+    h = ch.CleanHistory(str(tmp_path))
+    assert h.add(1000, {}, _record()) and h.delete(1000)
+    h2 = ch.CleanHistory(str(tmp_path))           # read back from disk
+    assert not h2.add(1000, {}, _record()) and not h2.has(1000)
+    assert h2.add(1000, {}, _record(), auto=False) and h2.has(1000)
+    assert h2.delete(1000) and not h2.add(1000, {}, _record())
+
+
+def test_forgotten_marks_are_capped_and_survive_damage(tmp_path):
+    h = ch.CleanHistory(str(tmp_path))
+    for t in range(1, ch._MAX_FORGOTTEN + 3):
+        h.add(t, {}, _record())
+        h.delete(t)
+    assert len(h._load_forgotten()) == ch._MAX_FORGOTTEN and 1 not in h._load_forgotten()
+    (tmp_path / "forgotten.json").write_text("[1e400]")
+    h3 = ch.CleanHistory(str(tmp_path))
+    assert h3.add(5, {}, _record()) and h3.has(5)

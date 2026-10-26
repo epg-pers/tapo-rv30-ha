@@ -625,14 +625,15 @@ class TapoCoordinator(DataUpdateCoordinator):
             self._history = cleanhistory.CleanHistory(folder)
         return self._history
 
-    async def _keep_run(self, rec: dict, detail: dict) -> None:
-        """Keep a finished run's map, from the record already read (no extra robot call)."""
+    async def _keep_run(self, rec: dict, detail: dict, auto: bool = True) -> None:
+        """Keep a finished run's map, from the record already read (no extra robot call).
+        Kept automatically (`auto`), a run forgotten on the History tab is left forgotten."""
         hist = self.history()
         if hist is None or cleanhistory.retention_days(self.history_retention) == 0 or not _ts(rec):
             return
         meta = {**decode_clean_record(rec), "map_name": b64name(detail.get("map_name", "")) or None}
         try:
-            if await self.hass.async_add_executor_job(hist.add, _ts(rec), meta, detail):
+            if await self.hass.async_add_executor_job(hist.add, _ts(rec), meta, detail, auto):
                 await self._prune_history(force=True)
         except Exception as exc:
             _LOGGER.warning("Could not keep the map of the clean at %s: %s", _ts(rec), exc)
@@ -705,7 +706,7 @@ class TapoCoordinator(DataUpdateCoordinator):
                                                 "map is read from the robot once it is docked")
             detail = await self.hass.async_add_executor_job(
                 self.client.get_clean_record_detail, rec.get("record_index", 0))
-            await self._keep_run(rec, detail)
+            await self._keep_run(rec, detail, auto=False)
         map_id = detail.get("map_id")
         rotation = self.rotation_for(map_id)
         png = await self.hass.async_add_executor_job(lambda: _png(render_record(detail, rotation)))

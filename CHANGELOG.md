@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.38.4
+
+### Fixed
+
+- **A forgotten clean map came back.** Forgetting the newest run on the History tab was undone by the next Home Assistant restart or map switch, which kept it again (straight away if that run was on another floor). Forgotten runs now stay forgotten; opening one on purpose with Map still keeps it.
+
 ## v0.38.3
 
 ### Fixed

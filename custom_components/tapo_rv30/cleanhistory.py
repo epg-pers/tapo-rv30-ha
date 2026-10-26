@@ -29,6 +29,10 @@ _MAP_FIELDS = ("width", "height", "pix_len", "map_data", "resolution", "real_ori
 _META_FIELDS = ("started", "minutes", "area", "map_id", "map_name", "start_type", "rule_name",
                 "error", "emptied_bin")
 _INDEX = "index.json"
+# Runs forgotten on the History tab, so keeping the newest run automatically (after a restart
+# or a map turn redraws it) does not bring them back. Opening one on purpose keeps it again.
+_FORGOTTEN = "forgotten.json"
+_MAX_FORGOTTEN = 200
 
 
 class HistoryError(Exception):
@@ -57,6 +61,7 @@ class CleanHistory:
         self.folder = folder
         self._lock = threading.Lock()
         self._index: dict[str, dict] | None = None
+        self._forgotten: set[int] | None = None
 
     # ---- index ---------------------------------------------------------------------------
     def _path(self, started: int) -> str:
@@ -112,17 +117,38 @@ class CleanHistory:
             json.dump(self._index or {}, fh, separators=(",", ":"))
         os.replace(tmp, path)
 
+    def _load_forgotten(self) -> set[int]:
+        if self._forgotten is None:
+            try:
+                with open(os.path.join(self.folder, _FORGOTTEN), encoding="utf-8") as fh:
+                    self._forgotten = {int(t) for t in json.load(fh)}
+            except (OSError, ValueError, TypeError, OverflowError):
+                self._forgotten = set()
+        return self._forgotten
+
+    def _save_forgotten(self) -> None:
+        os.makedirs(self.folder, exist_ok=True)
+        path = os.path.join(self.folder, _FORGOTTEN)
+        tmp = f"{path}.tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(sorted(self._forgotten or ()), fh)
+        os.replace(tmp, path)
+
     # ---- runs ----------------------------------------------------------------------------
     def has(self, started: int) -> bool:
         with self._lock:
             return str(int(started)) in self._load()
 
-    def add(self, started: int, meta: dict, detail: dict) -> bool:
-        """Keep one run. False when it was already kept (nothing is rewritten)."""
+    def add(self, started: int, meta: dict, detail: dict, auto: bool = True) -> bool:
+        """Keep one run. False when it was already kept (nothing is rewritten), or when `auto`
+        and it was forgotten. Kept on purpose (not `auto`), a forgotten run is kept again."""
         key = str(int(started))
         with self._lock:
             index = self._load()
             if key in index:
+                return False
+            forgotten = self._load_forgotten()
+            if auto and int(started) in forgotten:
                 return False
             meta = {k: meta.get(k) for k in _META_FIELDS}
             meta["started"] = int(started)
@@ -136,6 +162,9 @@ class CleanHistory:
             os.replace(tmp, path)
             index[key] = {**meta, "bytes": len(blob)}
             self._save()
+            if int(started) in forgotten:
+                forgotten.discard(int(started))
+                self._save_forgotten()
             return True
 
     def get(self, started: int) -> dict | None:
@@ -155,6 +184,12 @@ class CleanHistory:
             index = self._load()
             if key not in index:
                 return False
+            forgotten = self._load_forgotten()
+            forgotten.add(int(started))
+            # Only the newest runs are kept automatically, so old marks can go.
+            for t in sorted(forgotten)[:-_MAX_FORGOTTEN]:
+                forgotten.discard(t)
+            self._save_forgotten()
             with contextlib.suppress(FileNotFoundError):
                 os.remove(self._path(started))
             del index[key]
