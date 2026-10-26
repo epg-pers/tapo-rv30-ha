@@ -113,6 +113,41 @@ def _names(map_list) -> dict[int, str]:
     return out
 
 
+def carry(client, map_id: int, setup: dict) -> dict:
+    """Put a copied map's presets (and its schedules, switched off, if they came along) onto
+    the new map (blocking). Presets keep their names, rooms, order and per-room settings; one
+    whose name the map already has is left alone, so a retry adds only what is missing.
+    Schedules are pointed at the new presets' ids. Returns counts and what was skipped."""
+    from . import mapsnapshot
+    data = client.get_map_data(map_id)
+
+    def presets_now() -> list:
+        return [{**client.get_preset_detail(map_id, r["rule_id"]), "rule_id": r["rule_id"], "map_id": map_id}
+                for r in client.get_presets() if r.get("map_id") == map_id and r.get("rule_id") is not None]
+
+    plan = mapsnapshot.plan(setup, map_id, data.get("area_list", []), data.get("furniture_list", []),
+                            presets_now(), client.get_schedules())
+    out = {"presets": 0, "schedules": 0, "skipped": list(plan["skipped"])}
+    for body in plan["presets"]:
+        try:
+            if client.add_preset(body) == 0:
+                out["presets"] += 1
+            else:
+                out["skipped"].append(f"preset {mapsnapshot._b64(body.get('rule_name'))!r}: refused")
+        except Exception as exc:
+            out["skipped"].append(f"preset {mapsnapshot._b64(body.get('rule_name'))!r}: {exc}")
+    if plan["schedules"]:
+        ready, why = mapsnapshot.resolve_schedules(plan["schedules"], presets_now(), map_id)
+        out["skipped"] += why
+        for rule in ready:
+            try:
+                client.add_schedule(rule)
+                out["schedules"] += 1
+            except Exception as exc:
+                out["skipped"].append(f"schedule at {rule.get('s_min')} min: {exc}")
+    return out
+
+
 ONE_OFF_TRIES = 3       # goes at saving the restored map / switching back before giving up on them
 
 
@@ -188,6 +223,16 @@ def tidy(client, pend: dict) -> dict:
             done["tail"] = True
         except Exception as exc:
             out["errors"].append(f"room names and furniture of map {landed}: {exc}")
+            retry = True
+    # The source map's presets (and schedules, if asked), while the new map is still current.
+    if out["saved"] and pend.get("carry") and not done.get("carry"):
+        try:
+            got = carry(client, landed, pend["carry"])
+            out["carried"] = got
+            out["errors"] += [f"map {landed}: {s}" for s in got["skipped"]]
+            done["carry"] = True
+        except Exception as exc:
+            out["errors"].append(f"presets of map {landed}: {exc}")
             retry = True
     if pend.get("copy") and out["saved"] and not done.get("switched"):
         if current != landed:

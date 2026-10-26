@@ -56,8 +56,10 @@ Same domain, so your config entry and entities carry over; see
 - **Discovery**: the robot is found on the network and its entry follows IP changes
 - Device triggers and blueprints for the automation editor; the vacuum wears its own
   state-coloured robot picture instead of a generic icon
-- **Presets from Home Assistant**: create, edit and delete the robot's presets with per-room
-  suction, water and passes, the same way the Tapo app does; each also gets a button
+- **Preset editor** on the sidebar page: everything the Tapo app's editor has (rooms picked on
+  the map, cleaning order, each room's own suction, water and passes) plus an estimated time
+  and area, duplicate, run, schedule and a warning before deleting one a schedule uses; also as
+  actions, and each preset gets a button
 - **Robot notices** (dust bag full, area unreachable, water tank empty and the rest) as events
   and a device trigger
 - Per-run suction / water / passes, native `vacuum.clean_area` with Home Assistant areas,
@@ -70,8 +72,12 @@ Same domain, so your config entry and entities carry over; see
 Everything the app does for day-to-day cleaning is here too. These are the things it has no way
 to do at all:
 
-- **Copy a map**, or restore a backup as a **new map** beside the original, so you can edit and
-  try things on a copy and keep the map you rely on untouched (the app only restores over a map)
+- **Copy a map**, or restore a backup as a **new map** beside the original, presets included,
+  so you can edit and try things on a copy and keep the map you rely on untouched (the app only
+  restores over a map)
+- **Plan presets properly**: see how long a preset will take and how much floor it covers before
+  you run it, duplicate one as a starting point, and get warned before deleting one a schedule
+  still uses
 - **Keep your own map backups**: local copies of your cloud backups that survive TP-Link losing
   them, or the app deleting them along with a map, and restores served from your own network
 - **Put a lost map back together**: restore it onto any map the robot has, and Home Assistant

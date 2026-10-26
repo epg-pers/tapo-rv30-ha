@@ -29,6 +29,27 @@ Do Not Disturb times are editable on the Settings tab.
 
 ![Schedule editor warning about Do Not Disturb](panel-dnd.png){ width="640" }
 
+### Presets
+
+The robot's presets, map by map, with everything the Tapo app's preset editor has: a name, the
+rooms (tap them on the map or in the list), their **cleaning order** (drag them, or use the
+arrows; the map shows the order as numbers) with the "clean in this order" switch, and **each
+room's own** suction, water and passes (or set them all at once). Presets on any saved map can be
+edited, not just the current one.
+
+On top of the app:
+
+- **Estimated time and area** for the preset, from the rooms' size and how fast your robot has
+  cleaned in its past runs.
+- **Duplicate** a preset as the start of a new one.
+- **Schedule** opens the schedule editor with the preset already picked.
+- **Run** starts it now (asks first).
+- **Delete** warns you when schedules run the preset, since the robot would leave them pointing at
+  nothing.
+
+Saving writes to the robot the same way the app does, and the map's setup snapshot is updated
+straight away, so a later restore brings the preset back.
+
 ### Planner
 
 Keeps each room within a target such as "every 2 days" and cleans the due rooms when

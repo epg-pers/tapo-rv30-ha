@@ -542,17 +542,21 @@
         },
         "new_name": {
           "name": "New map name",
-          "description": "Restore the backup as a new map with this name, next to the map it came from (a copy), instead of over it. The robot holds at most 3 maps."
+          "description": "Restore the backup as a new map with this name, next to the map it came from (a copy), instead of over it. It takes that map's presets with it. The robot holds at most 3 maps."
         },
         "confirm": {
           "name": "Confirm",
           "description": "Must be on: this replaces the map on the robot (or, with a new name, adds one)."
+        },
+        "copy_schedules": {
+          "name": "Copy schedules",
+          "description": "With new_name: also copy the schedules that ran on the backup's map, switched off."
         }
       }
     },
     "copy_map": {
       "name": "Copy map",
-      "description": "Copy a map to a new map with its own name: rooms, room names, no-go zones and furniture. The original is left as it is. Uses a fresh TP-Link cloud backup of the map, so it needs the account's cloud login; the robot must be docked and idle.",
+      "description": "Copy a map to a new map with its own name: rooms, room names, no-go zones, furniture and its presets. The original is left as it is. Uses a fresh TP-Link cloud backup of the map, so it needs the account's cloud login; the robot must be docked and idle.",
       "fields": {
         "map": {
           "name": "Map",
@@ -569,6 +573,10 @@
         "verification_code": {
           "name": "Verification code",
           "description": "The code TP-Link emailed you, when the cloud login asks for one."
+        },
+        "copy_schedules": {
+          "name": "Copy schedules",
+          "description": "Also copy the schedules that run on the map, switched off (two maps with the same schedule would clean twice)."
         }
       }
     },

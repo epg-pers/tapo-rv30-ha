@@ -999,6 +999,7 @@ def async_setup_services(hass: HomeAssistant) -> None:
             raise ServiceValidationError(f"{call.service}: a map write is running; try again shortly")
         folders = setup_apply.backup_folders(hass, coord)
         label = names.get(backup_id) or snap_name
+        src_id = backup_id      # the map the backup is of (a copy gives it a fresh id below)
 
         def _pick() -> str | None:
             # This robot's own backups first, then the shared folder older versions used.
@@ -1122,13 +1123,16 @@ def async_setup_services(hass: HomeAssistant) -> None:
                     baseline = await hass.async_add_executor_job(coord.client.get_map_br_process)
                 except Exception as exc:
                     raise HomeAssistantError(f"{call.service}: could not read the robot's restore progress: {exc}") from exc
+                # A new map takes the source map's presets (and its schedules, switched off, if asked).
+                carry = (await _carry_from(coord, src_id, any(m.get("map_id") == src_id for m in map_list),
+                                           bool(call.data.get("copy_schedules"))) if new_name else None)
                 if carrier:
                     # The robot writes the backup's room names, colours and furniture onto the carrier:
                     # keep the carrier's own, recorded before the robot is asked so that a Home
                     # Assistant restart or a slow restore still puts them back (on a later poll).
                     before = mapcopy.layers(await _read(hass, call, coord.client.get_map_data, map_id))
                     coord.expect_restore(backup_id, new_name or label, map_id, before,
-                                         mapcopy.tail_subset(tail), copy=bool(new_name))
+                                         mapcopy.tail_subset(tail), copy=bool(new_name), carry=carry)
                 pend = coord.pending_restore if carrier else None
                 lo, hi = span
                 applying = "Restoring the map on the robot"
@@ -1235,7 +1239,11 @@ def async_setup_services(hass: HomeAssistant) -> None:
                           + f" putting \"{carrier_name}\" back as it was) and lets you know when it is done.")
         elif status == 3 and new_name:
             if saved:
-                next_steps = (f"Restored as a new map, \"{new_name}\", with the backup's room names and furniture."
+                got = (tidy or {}).get("carried") or {}
+                took = [f"{got[k]} {k if got[k] != 1 else k[:-1]}" for k in ("presets", "schedules") if got.get(k)]
+                next_steps = (f"Restored as a new map, \"{new_name}\", with the backup's room names and furniture"
+                              + (f" and {' and '.join(took)}" + (" (switched off)" if got.get("schedules") else "")
+                                 if took else "") + "."
                               + (f" \"{carrier_name}\" was put back as it was" if put_back else "")
                               + (" and is the current map again." if put_back and tidy and tidy["switched"]
                                  else "." if put_back else ""))
@@ -1260,8 +1268,27 @@ def async_setup_services(hass: HomeAssistant) -> None:
                 "backup_map_name": new_name or label, "carrier": carrier, "as_new": bool(new_name),
                 "restored_map_saved": saved if status == 3 else None,
                 "carrier_repaired": tidy["carrier"] if put_back else None,
+                "carried": tidy.get("carried") if tidy else None,
                 "source": src, "md5": md5, "url": url, "error_code": code, "process": process,
                 "applied": status == 3, "finishing": finishing, "note": note, "next_steps": next_steps}
+
+    async def _carry_from(coord: TapoCoordinator, src_id: int, on_robot: bool, with_schedules: bool) -> dict | None:
+        """What a new map made from map src_id takes with it (mapsnapshot.carry_setup): read from the
+        robot while it has that map, else from the map's saved setup. None when there is neither."""
+        from . import mapsnapshot
+        try:
+            if on_robot:
+                _, presets, schedules = await hass.async_add_executor_job(setup_apply.robot_state, coord.client, src_id)
+            else:
+                snap = await hass.async_add_executor_job(
+                    setup_apply.find_snapshot, setup_apply.snapshot_folders(hass, coord), src_id, None)
+                if snap is None:
+                    return None
+                presets, schedules = snap.get("presets"), snap.get("schedules")
+        except Exception as exc:     # the copy itself can still go ahead without them
+            _LOGGER.warning("%s: could not read the presets of map %s to copy them: %s", coord.device_name, src_id, exc)
+            return None
+        return mapsnapshot.carry_setup(presets, schedules, src_id, with_schedules)
 
     async def _wait_br(coord: TapoCoordinator, kind: int, baseline: dict, src: int | None = None,
                        tries: int = 90, progress=None) -> dict:

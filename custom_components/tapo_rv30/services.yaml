@@ -251,6 +251,10 @@ restore_map_backup:
       example: Downstairs copy
       selector:
         text: {}
+    copy_schedules:
+      default: false
+      selector:
+        boolean: {}
     confirm:
       required: true
       default: false
@@ -279,6 +283,10 @@ copy_map:
       example: "123456"
       selector:
         text: {}
+    copy_schedules:
+      default: false
+      selector:
+        boolean: {}
 delete_map:
   target:
     entity:

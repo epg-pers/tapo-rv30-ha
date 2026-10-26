@@ -788,13 +788,14 @@ class TapoCoordinator(DataUpdateCoordinator):
     RESTORE_ABANDON_S = 86400
 
     def expect_restore(self, map_id: int, name: str | None, carrier: int, before: dict | None = None,
-                       tail: dict | None = None, copy: bool = False) -> None:
+                       tail: dict | None = None, copy: bool = False, carry: dict | None = None) -> None:
         """A backup is being restored onto a carrier map and comes back as a new, unsaved map.
         before is the carrier's rooms and furniture, which the robot overwrites with the
         backup's: put back (with the restored map saved and given the backup's names) as soon
         as the map shows up, by the service or, if it stopped watching, by a later poll; if the
         map never shows up, the carrier is still put back. A lost map is then finished once
-        saved. Kept across restarts."""
+        saved. carry: the presets (and schedules) a copy takes with it (mapsnapshot.carry_setup).
+        Kept across restarts."""
         old = self.pending_restore
         if old and old.get("tidied", True) and not old.get("copy") and old.get("map_id") != map_id:
             _LOGGER.warning("%s: the restored map %s was never saved in the app, so its setup was not put "
@@ -802,6 +803,8 @@ class TapoCoordinator(DataUpdateCoordinator):
         self.pending_restore = {"map_id": map_id, "name": name, "carrier": carrier, "before": before,
                                 "tail": tail, "copy": copy, "tidied": before is None, "started": time.time(),
                                 "done": {}}
+        if carry and (carry.get("presets") or carry.get("schedules")):
+            self.pending_restore["carry"] = carry
         self._save_restore()
 
     MAP_JOB_EVENT = f"{DOMAIN}_map_job"
@@ -1316,6 +1319,11 @@ class TapoCoordinator(DataUpdateCoordinator):
             self.data["bool_settings"] = self.bool_settings
             self.data["presets"] = self.presets
         self.async_update_listeners()
+        # A preset or schedule just changed: the map's setup snapshot follows now, not next cycle.
+        try:
+            await self._auto_snapshot()
+        except Exception as exc:
+            _LOGGER.debug("Map snapshot after a settings change failed: %s", exc)
 
     def _schedule_map_names(self) -> dict[int, dict[int, str]]:
         """Room names of the other maps schedules point at (blocking, cached per map)."""

@@ -211,6 +211,22 @@ def plan(snap: dict, target_map_id: int, area_list: list, furniture: list,
     return out
 
 
+def carry_setup(presets: list, schedules: list, src_map_id: int, with_schedules: bool = False) -> dict:
+    """The part of a map's setup a copy (or a restore as a new map) takes with it: its presets,
+    and only if asked, the schedules that run on it, switched off (two maps with the same
+    schedule would clean twice). Whole-house schedules belong to no map and stay where they
+    are. presets: raw preset details; schedules: raw rules. A pseudo-snapshot for plan()."""
+    keep = ("rule_id", "rule_name", "mode", "map_id", "clean_order", "area_list")
+    out = {"presets": [{k: p[k] for k in keep if k in p} for p in presets or []
+                       if p and p.get("map_id") == src_map_id],
+           "schedules": []}
+    if with_schedules:
+        for s in schedules or []:
+            if (s.get("clean_attr") or {}).get("map_id") == src_map_id:
+                out["schedules"].append({**json.loads(json.dumps(s)), "enable": False})
+    return out
+
+
 def resolve_schedules(planned: list, presets_now: list, target_map_id: int) -> tuple[list, list]:
     """Point each planned schedule at the preset's id on the robot now (ids change when a
     preset is recreated). Returns (rules ready to add, reasons for any skipped)."""

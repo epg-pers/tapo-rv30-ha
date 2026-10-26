@@ -88,8 +88,11 @@ Things to know:
   `fetch_cloud_map_backups`), because the robot only writes a backup to the cloud.
 - The map that was current before stays current afterwards; switch to the copy with the map
   selector (or `set_map`) when you want to use it.
-- Per-room cleaning settings (suction, water, passes) live in presets on this firmware, so the
-  copy has the backup's room names but not the original's presets.
+- The copy takes the original map's **presets** with it: same names, rooms, cleaning order and
+  per-room suction, water and passes. They are read from the robot, or for a backup of a map the
+  robot no longer has, from that map's saved setup. With `copy_schedules: true` the schedules that
+  run on the original map come along too, **switched off** (two maps with the same schedule would
+  clean twice); turn on the ones you want. Whole-house schedules stay as they are.
 
 How it works: a backup carries its map id inside it, and the robot restores a backup under that
 id. Home Assistant changes the id in a copy of the backup file (the original file is left alone),
@@ -223,4 +226,5 @@ above).
 | No-go zones, virtual walls, carpets, furniture | re-map, edit, delete, restore | `restore_map_backup` and `apply_map_setup` (exact positions) |
 | Presets and schedules | map loss | `apply_map_setup` (recreated, schedules re-pointed) |
 | Room boundaries | re-map | `restore_map_backup`; approximate via `apply_map_setup` |
-| Per-room suction/water/passes | - | preset-only on 1.3.3 firmware (`create_preset`) |
+| Per-room suction/water/passes | - | preset-only on 1.3.3 firmware (the Presets tab, `create_preset`) |
+| Presets on a copied map | - | copied with the map (`copy_map`, or `restore_map_backup` with `new_name`) |
