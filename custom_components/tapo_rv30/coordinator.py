@@ -104,6 +104,8 @@ def _records(raw) -> list[dict]:
 class TapoCoordinator(DataUpdateCoordinator):
     """Polls the vacuum for status, keeps the map image and settings current."""
 
+    _path_map_id: int | None = None     # the map the trail was recorded on (see shown_path)
+
     def __init__(self, hass: HomeAssistant, client: TapoVacuumClient, entry: ConfigEntry | None = None) -> None:
         interval = FAST_INTERVAL
         if entry is not None:
@@ -182,6 +184,7 @@ class TapoCoordinator(DataUpdateCoordinator):
         self._last_tidy: dict | None = None        # {map_id, out}: the last restore tidy-up and what it did
         self.path_points: list[tuple[int, int]] = []   # mm, current or last run
         self._path_id: int | None = None
+        self._path_map_id: int | None = None       # the map path_points was drawn on
         self._last_ok: float | None = None         # monotonic time of the last good poll
         self._first_fail: float | None = None
         self._issue_open = True     # unknown after a reload: the first good poll clears any old repair
@@ -460,7 +463,7 @@ class TapoCoordinator(DataUpdateCoordinator):
         data["presets"] = self.presets
         data["current_room"] = self.current_room
         data["position_mm"] = self.vac_pos
-        data["path_points"] = len(self.path_points)
+        data["path_points"] = len(self.shown_path())
         data["charging"] = data.get("status_code") == 5
         dev = self.settings.get("device") or {}
         data["rssi"] = dev.get("rssi")
@@ -1370,7 +1373,8 @@ class TapoCoordinator(DataUpdateCoordinator):
         if self._map_base is not None:
             # Docked, nothing moves: drawing and encoding the same frame every poll is wasted CPU.
             vac = map_data.get("real_vac_coor")
-            key = (id(self._map_base), tuple(vac or ()), len(self.path_points))
+            path = self.shown_path()
+            key = (id(self._map_base), tuple(vac or ()), len(path))
             if key == self._frame_key and self.map_image_bytes is not None:
                 return
             self._frame_key = key
@@ -1379,8 +1383,8 @@ class TapoCoordinator(DataUpdateCoordinator):
             # In the frame of the map the base image was drawn from: the robot's grid size and
             # origin change from one read to the next, and this poll's would put the dot elsewhere.
             to_px = _px_transform(self._live_map or map_data, self.map_rotation)
-            if len(self.path_points) > 1:
-                draw.line([to_px(x, y) for x, y in self.path_points], fill=(0, 140, 220, 200), width=2, joint="curve")
+            if len(path) > 1:
+                draw.line([to_px(x, y) for x, y in path], fill=(0, 140, 220, 200), width=2, joint="curve")
             if vac and len(vac) >= 2:
                 _dot(draw, *map(int, to_px(vac[0], vac[1])), (0, 180, 255))
             self.map_image_bytes = _png(img, fast=True)
@@ -1392,15 +1396,27 @@ class TapoCoordinator(DataUpdateCoordinator):
         active = code in CLEANING_CODES or code in PAUSED_CODES or code == 4
         if path_id is None or not active:
             return
+        # Tagged with the map the position data came from. A run started from the app or a schedule
+        # can be on a map not read yet, so a new run reads the map on the next poll, and the trail
+        # is tagged again then.
         if path_id != self._path_id:
             self._path_id = path_id
             self.path_points = []
+            self._path_map_id = self.map_id
+            self._map_read_at = None
         try:
             r = self.client.get_path(path_id, 0)
             if r.get("pos_array") and r.get("pos_len"):
                 self.path_points = decode_path(r["pos_array"], int(r["pos_len"]))
+                self._path_map_id = self.map_id
         except Exception as exc:
             _LOGGER.debug("Path fetch failed: %s", exc)
+
+    def shown_path(self) -> list[tuple[int, int]]:
+        """The last run's trail, only while its own map is the current one. Kept rather than
+        cleared on a map switch: map edits and copies switch away and back, and the trail is
+        still right when they do."""
+        return self.path_points if self._path_map_id == self.map_id else []
 
     async def async_request_map_refresh(self) -> None:
         """Re-render the map on the next poll (after set_map)."""

@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.38.3
+
+### Fixed
+
+- **The map showed another floor's cleaning path.** After a clean, switching to another map while docked drew the last run's path from the old floor across the new map (in the card, the sidebar page and the map entities) until the next clean there. The path now only shows on the map it was recorded on, and comes back when you switch back.
+
 ## v0.38.2
 
 ### Fixed

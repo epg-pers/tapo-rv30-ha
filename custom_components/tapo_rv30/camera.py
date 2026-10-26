@@ -73,7 +73,7 @@ class TapoMapCamera(CoordinatorEntity[TapoCoordinator], Camera):
             "map_id": self.coordinator.map_id,
             "map_name": self.coordinator.map_name,
             "maps": self.coordinator.maps,
-            "path_points": len(self.coordinator.path_points),
+            "path_points": len(self.coordinator.shown_path()),
             "rooms": [r["name"] for r in self.coordinator.room_geometry],
             "room_geometry": [{**r, **fresh.get(r.get("id"), {})} for r in self.coordinator.room_geometry],
             "rooms_last_cleaned": self.coordinator.room_freshness(),
