@@ -6,6 +6,7 @@ import base64
 import io
 import math
 
+import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
 from .const import (
@@ -15,12 +16,15 @@ from .const import (
     FORBID_OUTLINE,
     FURNITURE_OUTLINE,
     FURNITURE_TYPES,
+    MAP_BACKGROUND,
+    MAP_CLEAN_MAX_CELLS,
     ROOM_PALETTE,
-    UNKNOWN_COLOR,
+    SPACE_COLOR,
     VIRTUAL_WALL_COLOR,
     WALL_COLOR,
     ZONE_OUTLINE,
 )
+from .mapclean import NULL, clean_grid, grid_values, room_colours
 from .mapdata import b64name, decode_path, lz4_block_decompress, mm_to_grid, validate_map
 
 MAP_SCALE = 4   # px per vacuum grid cell -> ~700x700 output image
@@ -203,6 +207,39 @@ def _turn(img: Image.Image, rotation: int) -> Image.Image:
     return img.transpose(_TRANSPOSE[rotation]) if rotation in _TRANSPOSE else img
 
 
+def _blend(rgba: tuple[int, int, int, int]) -> tuple[int, int, int, int]:
+    *rgb, alpha = rgba
+    return (*(round((c * alpha + bg * (255 - alpha)) / 255) for c, bg in zip(rgb, MAP_BACKGROUND)), 255)
+
+
+def _cell_picture(map_data: dict, pixels: bytes, rotation: int) -> Image.Image:
+    """The cells as the Tapo app draws them: its clean-up of the grid, then one flat colour per
+    cell (rooms in their colours, plain floor, walls), unknown left transparent. Turned like the
+    map and scaled to MAP_SCALE px per cell. A very large grid is drawn without the clean-up."""
+    width, height = map_data["width"], map_data["height"]
+    wall, floor, rooms = grid_values(map_data)
+    raw = np.frombuffer(bytes(pixels), np.uint8).reshape(height, width).astype(np.int16)
+    if raw.size <= MAP_CLEAN_MAX_CELLS:
+        grid = clean_grid(raw, wall, floor, rooms)
+    else:
+        known = (raw == wall) | (raw == floor) | ((raw >= rooms[0]) & (raw <= rooms[1]))
+        grid = np.where(known, raw, NULL).astype(np.int16)
+    preset = {}
+    for a in map_data.get("area_list") or []:
+        if isinstance(a, dict) and a.get("type") == "room" and isinstance(a.get("id"), int):
+            preset[a["id"]] = a.get("color")
+    # The app sorts wall and floor out before rooms, so those values are never a room.
+    colours = room_colours(np.where((grid == wall) | (grid == floor), NULL, grid), rooms, preset)
+    lut = np.zeros((257, 4), np.uint8)   # by value + 1, so unknown (NULL) is transparent
+    for rid, colour in colours.items():
+        lut[rid + 1] = _blend(ROOM_PALETTE[colour - 1])
+    lut[floor + 1] = _blend(FLOOR_COLOR if colours else SPACE_COLOR)
+    lut[wall + 1] = _blend(WALL_COLOR)
+    small = Image.fromarray(lut[grid + 1], "RGBA")
+    small = _turn(small.transpose(Image.Transpose.FLIP_TOP_BOTTOM), rotation)
+    return small.resize((small.width * MAP_SCALE, small.height * MAP_SCALE), Image.Resampling.NEAREST)
+
+
 def _px_transform(map_data: dict, rotation: int = 0):
     """Return mm -> image px function for this map (Y grows upwards in the grid,
     downwards in the image), in the picture turned clockwise by rotation. The robot puts a
@@ -241,24 +278,10 @@ def render_map(map_data: dict, rotation: int = 0) -> tuple[Image.Image, list[dic
 
     areas = map_data.get("area_list", [])
     rooms = [a for a in areas if a.get("type") == "room"]
-    sorted_ids = sorted(r["id"] for r in rooms)
-    room_colors = {rid: ROOM_PALETTE[i % len(ROOM_PALETTE)] for i, rid in enumerate(sorted_ids)}
 
-    lut: list[tuple[int, int, int]] = [UNKNOWN_COLOR] * 256
-    lut[0] = WALL_COLOR
-    lut[127] = UNKNOWN_COLOR
-    lut[255] = FLOOR_COLOR
-    for rid, color in room_colors.items():
-        if 0 <= rid <= 255:
-            lut[rid] = color
-
-    # Paint the grid at 1 px per cell, then scale: far faster than per-cell rectangles.
-    # Unknown area is transparent so the map sits on light and dark themes alike.
-    small = Image.new("RGBA", (width, height))
-    small.putdata([(*lut[p], 255) if (p < 256 and p != 127) else (0, 0, 0, 0) for p in pixels])
+    # The picture is the app's cleaned grid; room geometry below stays on the robot's own grid.
     rotation = rotation_of(rotation)
-    small = _turn(small.transpose(Image.Transpose.FLIP_TOP_BOTTOM), rotation)
-    img = small.resize((small.width * MAP_SCALE, small.height * MAP_SCALE), Image.Resampling.NEAREST)
+    img = _cell_picture(map_data, pixels, rotation)
 
     to_px = _px_transform(map_data, rotation)
 
@@ -294,7 +317,7 @@ def render_map(map_data: dict, rotation: int = 0) -> tuple[Image.Image, list[dic
     # Room geometry (bbox / centroid in image px) and labels.
     font = _font()
     geometry: list[dict] = []
-    cells: dict[int, list[tuple[int, int]]] = {rid: [] for rid in room_colors}
+    cells: dict[int, list[tuple[int, int]]] = {r["id"]: [] for r in rooms}
     for row in range(height):
         base = row * width
         for col in range(width):
@@ -350,25 +373,14 @@ def render_map(map_data: dict, rotation: int = 0) -> tuple[Image.Image, list[dic
     return img, geometry, map_geometry
 
 
-CLEANED_COLOR = (88, 170, 255)
-RECORD_FLOOR = (205, 205, 210)
-
-
 def render_record(rec: dict, rotation: int = 0) -> Image.Image:
-    """A finished run from getCleanRecordExtraInfo: cells the robot cleaned (255)
-    in blue over the rooms it skipped in grey, with the path it drove, where it
-    started (green) and where it stopped (red). Same grid format as the live map."""
+    """A finished run from getCleanRecordExtraInfo, drawn like the live map (the app's
+    clean-up and colours; cells the robot cleaned are plain floor there), with the path it
+    drove, where it started (green) and where it stopped (red)."""
     validate_map(rec)
-    width, height, pix_len = rec["width"], rec["height"], rec["pix_len"]
-    pixels = lz4_block_decompress(base64.b64decode(rec["map_data"]), pix_len)
-    lut: list[tuple[int, int, int]] = [RECORD_FLOOR] * 256
-    lut[0] = WALL_COLOR
-    lut[255] = CLEANED_COLOR
-    small = Image.new("RGBA", (width, height))
-    small.putdata([(*lut[p], 255) if (p < 256 and p != 127) else (0, 0, 0, 0) for p in pixels])
+    pixels = lz4_block_decompress(base64.b64decode(rec["map_data"]), rec["pix_len"])
     rotation = rotation_of(rotation)
-    small = _turn(small.transpose(Image.Transpose.FLIP_TOP_BOTTOM), rotation)
-    img = small.resize((small.width * MAP_SCALE, small.height * MAP_SCALE), Image.Resampling.NEAREST)
+    img = _cell_picture(rec, pixels, rotation)
     draw = ImageDraw.Draw(img)
     to_px = _px_transform(rec, rotation)
     for a in rec.get("area_list", []):

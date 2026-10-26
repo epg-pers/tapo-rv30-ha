@@ -18,7 +18,8 @@ the robot is docked part way through one, otherwise empty).
 The map is what [the card](card.md) draws on; its modes and the status panel are described
 there.
 
-- `camera.<name>_map` and `image.<name>_map_image`: the live map as a transparent PNG with
+- `camera.<name>_map` and `image.<name>_map_image`: the live map as a transparent PNG, drawn
+  the way the Tapo app draws it (its tidy-up of the robot's grid and its room colours), with
   rooms, no-go zones, virtual walls, carpets, saved zones, furniture glyphs, the dock, the
   robot and its cleaning path. Attributes on the camera: `map_id`, `map_name`, `maps`,
   `rooms`, `room_geometry`, `map_geometry` (grid, mm to px transform, saved zones, furniture),
@@ -27,9 +28,12 @@ there.
   Each entry of `maps` is one map on the robot: `id`, `name`, `current`, `saved`, `rotation`
   (degrees, clockwise) and, on robots that support locking, `locked` and `auto_locked` (locked by
   the robot itself).
-- `image.<name>_last_clean_map`: the newest clean record rendered from the robot's own copy:
-  cleaned cells, skipped rooms, path, start, end and dock. Attributes: area, minutes, start
-  type, map name.
+- `image.<name>_last_clean_map`: the newest clean record rendered from the robot's own copy,
+  drawn as the Tapo app draws a run (the same tidy-up and colours as the live map), with the
+  path, start, end and dock. Like the app, it does not shade cleaned cells apart: they show as
+  plain floor, and the tidy-up can give some of them to the next room, so follow the path for
+  where the robot went (room coverage in `rooms_last_cleaned` uses the robot's own grid).
+  Attributes: area, minutes, start type, map name.
 
 The vacuum's attributes include `rooms`, `position_mm`, `current_room`, `consumables` and the
 capability flags `goto_point` and `remote_control`.

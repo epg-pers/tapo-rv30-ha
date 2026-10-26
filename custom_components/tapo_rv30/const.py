@@ -128,19 +128,22 @@ CONSUMABLE_LABELS = {
     "charge_contact_time": "Charge Contacts",
 }
 
-# Pastel room colours (R, G, B) — one per room slot
+# Map cell colours as the Tapo app draws them (R, G, B, A), blended onto MAP_BACKGROUND.
+# A room uses its colour number (1-5) from the map, or the one the app would pick.
 ROOM_PALETTE = [
-    (255, 179, 186),  # pastel red
-    (186, 225, 255),  # pastel blue
-    (186, 255, 201),  # pastel green
-    (255, 255, 186),  # pastel yellow
-    (220, 186, 255),  # pastel purple
-    (255, 220, 186),  # pastel orange
-    (186, 255, 255),  # pastel cyan
+    (0x82, 0xCD, 0xFA, 0xE6),   # 1 blue
+    (0xA6, 0xA9, 0xEF, 0xE6),   # 2 violet
+    (0x6E, 0xDB, 0xA4, 0xE6),   # 3 green
+    (0xF0, 0x9F, 0xAA, 0xE6),   # 4 pink
+    (0xF0, 0xBB, 0x6B, 0xE6),   # 5 amber
 ]
-WALL_COLOR    = (60,  60,  60)
-UNKNOWN_COLOR = (210, 210, 210)
-FLOOR_COLOR   = (240, 240, 240)
+WALL_COLOR     = (0x9C, 0x9F, 0xA1, 0xFF)
+FLOOR_COLOR    = (0xB7, 0xE4, 0xFF, 0xB3)   # floor outside the rooms
+SPACE_COLOR    = (0x82, 0xCD, 0xFA, 0xB3)   # floor of a map with no rooms
+MAP_BACKGROUND = (255, 255, 255)            # unknown cells stay transparent
+# Above this many cells (800 x 800, 40 m square at 5 cm) the robot's grid is drawn as it is,
+# without the app's clean-up, which takes about 2 s on the noisiest grid of that size.
+MAP_CLEAN_MAX_CELLS = 640_000
 
 # Map overlay colours (R, G, B[, A])
 FORBID_COLOR       = (230, 60, 60, 90)    # no-go zone fill

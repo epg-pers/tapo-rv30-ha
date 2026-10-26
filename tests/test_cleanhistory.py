@@ -22,8 +22,24 @@ def test_slim_keeps_what_drawing_needs_and_draws_the_same():
     rec = _record()
     small = ch.slim(rec)
     assert "room_list" not in small and "furniture_list" not in small
-    assert [a["type"] for a in small["area_list"]] == ["forbid"]
+    assert [a["type"] for a in small["area_list"]] == ["room", "room", "forbid"]
     assert render_record(small).tobytes() == render_record(rec).tobytes()
+
+
+def test_slim_keeps_room_colours_and_cell_values():
+    rec = _record()
+    rec["area_list"][0]["color"] = 4
+    rec["area_list"][1]["color"] = 2
+    rec["area_list"][0]["suction"] = 3                      # a room setting: not kept
+    # Rooms as values 1-2 and walls as 0 are the defaults; say so, and widen the room range.
+    rec["bit_list"] = {"barrier": 0, "clean": 255, "none": 127, "auto_area": [0, 50]}
+    small = ch.slim(rec)
+    assert small["bit_list"] == rec["bit_list"]
+    assert small["area_list"][:2] == [{"type": "room", "id": 1, "color": 4}, {"type": "room", "id": 2, "color": 2}]
+    assert render_record(small).tobytes() == render_record(rec).tobytes()
+    # The colours matter: without them the run draws differently.
+    plain = dict(small, area_list=[{"type": "room", "id": a["id"]} for a in small["area_list"][:2]])
+    assert render_record(plain).tobytes() != render_record(rec).tobytes()
 
 
 def test_add_get_list_and_no_rewrite(tmp_path):

@@ -66,8 +66,8 @@ It starts off and in preview mode. Everything about it is on [the planner](plann
 Lifetime totals, cleans per day for the last 30 days, minutes per week for the last 8
 weeks, and the recent runs with how they were started.
 
-**Clean map history.** Press **Map** on a run to see where the robot went on it: cleaned
-cells, the path, start, end and dock. **Download** saves it as a PNG; **Forget** deletes a kept
+**Clean map history.** Press **Map** on a run to see where the robot went on it: the map as
+the Tapo app draws the run, the path, start, end and dock. **Download** saves it as a PNG; **Forget** deletes a kept
 one. Each run's map is kept in Home Assistant when the integration reads the run (it already
 does, to draw the Last Clean Map and work out room freshness), so keeping it costs the robot
 nothing. Kept maps can be opened while the robot is cleaning or offline, and stay after the
@@ -107,7 +107,8 @@ the robot to it. The turn buttons rotate the map being edited, keeping any unsav
 **Wall** or **Furniture**), draw on the map, and the change is held locally with **Undo** until
 you press **Save to robot**; **Discard** throws the lot away. Select an item to move or delete
 it. The robot must be docked and idle to save. Carpets and room names are drawn for context but
-are view-only for now. Behind the scenes this is the robot's own editing API (`setAreaInfo` /
+are view-only for now. Taps find rooms on the robot's own room grid, while the picture is the
+app's tidied map, so right at a room's edge a tap can pick the room next door. Behind the scenes this is the robot's own editing API (`setAreaInfo` /
 `setFurnitureInfo`), the same one the Tapo app uses.
 
 ![The Edit map tab](panel-edit.png){ width="760" }

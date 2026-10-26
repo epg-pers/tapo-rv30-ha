@@ -23,8 +23,8 @@ DEFAULT_LIMIT = 200
 MIN_LIMIT, MAX_LIMIT = 10, 1000
 
 # What render_record reads; the rest of a record (room settings, cleaning attributes and so on)
-# is not kept. Only no-go zones are drawn, so only they are kept from the area list.
-_MAP_FIELDS = ("width", "height", "pix_len", "map_data", "resolution", "real_origin_coor",
+# is not kept. From the area list it needs the no-go zones it draws and each room's colour.
+_MAP_FIELDS = ("width", "height", "pix_len", "map_data", "bit_list", "resolution", "real_origin_coor",
                "pos_array", "pos_len", "real_charge_coor", "map_id", "map_name")
 _META_FIELDS = ("started", "minutes", "area", "map_id", "map_name", "start_type", "rule_name",
                 "error", "emptied_bin")
@@ -42,9 +42,10 @@ class HistoryError(Exception):
 def slim(detail: dict) -> dict:
     """The part of a getCleanRecordExtraInfo reply that drawing the run needs."""
     out = {k: detail[k] for k in _MAP_FIELDS if k in detail}
-    out["area_list"] = [{"type": a.get("type"), "vertexs": a.get("vertexs")}
+    out["area_list"] = [{"type": "forbid", "vertexs": a.get("vertexs")} if a.get("type") == "forbid"
+                        else {"type": "room", "id": a.get("id"), "color": a.get("color")}
                         for a in detail.get("area_list") or []
-                        if isinstance(a, dict) and a.get("type") == "forbid"]
+                        if isinstance(a, dict) and a.get("type") in ("forbid", "room")]
     return out
 
 

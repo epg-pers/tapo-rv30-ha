@@ -114,7 +114,8 @@ The app posts the schedule rule as-is. Verified on an RV30 Max Plus:
   8-byte header, then big-endian int16 (x, y) pairs in mm.
 - `getCleanRecordExtraInfo {"record_index": N}` returns a finished run with its own map grid
   (cells the robot cleaned are 255, skipped rooms keep their ids), overlays, furniture and the
-  path (`pos_array`, `pos_len`). This is what the Last Clean Map image renders.
+  path (`pos_array`, `pos_len`). This is what the Last Clean Map image renders, through the
+  same clean-up and colours as the live map, as the Tapo app does.
 
 ## Maps: backup, restore and setup
 

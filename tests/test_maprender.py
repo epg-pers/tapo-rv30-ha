@@ -2,7 +2,8 @@ import base64
 
 from PIL import Image
 
-from custom_components.tapo_rv30.maprender import MAP_SCALE, render_map
+from custom_components.tapo_rv30.const import FLOOR_COLOR, ROOM_PALETTE, SPACE_COLOR, WALL_COLOR
+from custom_components.tapo_rv30.maprender import MAP_SCALE, _blend, render_map
 
 
 def b64(s):
@@ -64,8 +65,8 @@ def test_render_map_geometry_and_image():
     assert y0 < y1 and y0 == (8 - 1 - 3) * MAP_SCALE + MAP_SCALE // 2 and y1 == (8 - 1 - 1) * MAP_SCALE + MAP_SCALE // 2
     # dock marker position is reported for cards
     assert geom["dock_px"] == [2 * MAP_SCALE + MAP_SCALE // 2, (8 - 1 - 2) * MAP_SCALE + MAP_SCALE // 2]
-    # the wall row (gy=0) is at the bottom of the image and dark
-    assert img.getpixel((MAP_SCALE * 9 + 1, img.height - 1))[:3] == (60, 60, 60)
+    # the wall row (gy=0) is at the bottom of the image, in the app's wall colour
+    assert img.getpixel((MAP_SCALE * 9 + 1, img.height - 1)) == WALL_COLOR
 
 
 def test_render_map_without_overlays():
@@ -99,8 +100,65 @@ def test_furniture_in_geometry():
     assert len(geom["furniture"][0]["px"]) == 4
 
 
-def test_render_record_marks_cleaned_cells_and_path():
-    from custom_components.tapo_rv30.maprender import CLEANED_COLOR, RECORD_FLOOR, render_record
+def _bare(md=None):
+    """The test map with only its rooms: no overlays drawn over the cells."""
+    md = md or _map()
+    md["area_list"] = [a for a in md["area_list"] if a["type"] == "room"]
+    md.pop("furniture_list"); md.pop("charge_coor")
+    return md
+
+
+def _cell(img, gx, gy, height=8):
+    """The colour drawn for grid cell (gx, gy) of an unrotated picture."""
+    return img.getpixel((gx * MAP_SCALE + 1, (height - 1 - gy) * MAP_SCALE + 1))
+
+
+def test_render_map_draws_the_apps_cleaned_grid_in_its_colours():
+    img, rooms, _ = render_map(_bare())
+    # Rooms touch, so they get different colours, 1 and 2 by id; the clean-up hands the floor
+    # round them to the rooms and drops cells next to the grid edge.
+    assert _cell(img, 2, 2) == _blend(ROOM_PALETTE[0]) == _cell(img, 1, 6)
+    assert _cell(img, 6, 5) == _blend(ROOM_PALETTE[1]) == _cell(img, 5, 7)
+    assert _cell(img, 0, 7)[3] == 0 and _cell(img, 9, 6)[3] == 0
+    # Room geometry is still the robot's own grid.
+    assert {r["id"]: r["cells"] for r in rooms} == {1: 12, 2: 12}
+
+
+def test_render_map_keeps_a_rooms_own_colour():
+    md = _bare()
+    md["area_list"][0]["color"] = 2
+    img, _, _ = render_map(md)
+    assert _cell(img, 2, 2) == _blend(ROOM_PALETTE[1])
+    assert _cell(img, 6, 5) == _blend(ROOM_PALETTE[0])     # its neighbour avoids colour 2
+
+
+def test_render_map_without_rooms_uses_the_space_colour():
+    md = _bare()
+    raw = bytearray(base64.b64decode(md["map_data"])[-md["pix_len"]:])
+    md["map_data"] = base64.b64encode(_lz4_literal(bytes(255 if v in (1, 2) else v for v in raw))).decode()
+    img, _, _ = render_map(md)
+    assert _cell(img, 4, 3) == _blend(SPACE_COLOR)
+
+
+def test_render_map_skips_the_clean_up_on_a_huge_grid(monkeypatch):
+    from custom_components.tapo_rv30 import maprender
+    monkeypatch.setattr(maprender, "MAP_CLEAN_MAX_CELLS", 79)    # the test map has 80 cells
+    img, _, _ = render_map(_bare())
+    # The robot's own cells: floor stays floor next to the rooms and at the grid edge.
+    assert _cell(img, 1, 6) == _cell(img, 0, 7) == _blend(FLOOR_COLOR)
+    assert _cell(img, 2, 2) == _blend(ROOM_PALETTE[0]) and _cell(img, 9, 0) == WALL_COLOR
+
+
+def test_render_map_turns_the_cleaned_grid():
+    img, _, _ = render_map(_bare(), 90)
+    assert img.size == (8 * MAP_SCALE, 10 * MAP_SCALE)
+    # turned clockwise, the wall row along the bottom becomes the left column
+    assert img.getpixel((1, 5 * MAP_SCALE)) == WALL_COLOR
+    assert img.getpixel((6 * MAP_SCALE + 1, 8 * MAP_SCALE + 1)) == _blend(ROOM_PALETTE[1])   # cell (8, 6)
+
+
+def test_render_record_draws_the_cleaned_grid_and_path():
+    from custom_components.tapo_rv30.maprender import render_record
     rec = _map()
     # a record: room 1 cells cleaned (255), room 2 left as room id, plus a short path
     width = rec["width"]
@@ -114,10 +172,10 @@ def test_render_record_marks_cleaned_cells_and_path():
     rec["real_charge_coor"] = [300, 0, 0]       # clear of the cells sampled below
     img = render_record(rec)
     assert img.size == (width * MAP_SCALE, rec["height"] * MAP_SCALE)
-    # room 1 (cols 1-4, rows 1-3 in grid coords) is now painted as cleaned; room 2 as plain floor
-    cleaned = img.getpixel((2 * MAP_SCALE + 1, (rec["height"] - 1 - 2) * MAP_SCALE + 1))[:3]
-    skipped = img.getpixel((6 * MAP_SCALE + 1, (rec["height"] - 1 - 5) * MAP_SCALE + 1))[:3]
-    assert cleaned == CLEANED_COLOR and skipped == RECORD_FLOOR
+    # Drawn like the live map: room 1's cleaned cells are plain floor (room 2 grows over some),
+    # room 2 is the only room, so colour 1.
+    assert _cell(img, 0, 2) == _blend(FLOOR_COLOR)
+    assert _cell(img, 6, 5) == _blend(ROOM_PALETTE[0])
 
 
 def test_furniture_glyphs_every_type_renders():

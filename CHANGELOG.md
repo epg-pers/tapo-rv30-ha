@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.39.0
+
+### Changed
+
+- **Maps look like the Tapo app.** The live map and run maps now go through the same clean-up the app does before drawing (specks and holes filled, walls rebuilt as an even grey outline, stepped walls straightened) and use the app's room colours: a room's own colour, otherwise touching rooms get different colours. The output matches the app's own code cell for cell. Very large grids (over 800 x 800 cells) skip the clean-up and are drawn from the robot's grid in the same colours.
+- Run maps, like the app's, no longer shade cleaned cells apart from the rest; the path shows where the robot went.
+- Runs kept in History before this version were saved without room colours, so they may be coloured differently from the app.
+- Room coverage, the map editor and tapping rooms still use the robot's own grid, so their edges can differ slightly from the drawn picture.
+- Needs numpy (already part of most Home Assistant installs).
+
 ## v0.38.6
 
 ### Fixed
