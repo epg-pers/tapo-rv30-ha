@@ -5,9 +5,10 @@ import collections
 import time
 import types
 
+from test_maprender import _map
+
 from custom_components.tapo_rv30 import cleanhistory
 from custom_components.tapo_rv30 import coordinator as C
-from tests.test_maprender import _map
 
 TS = int(time.time()) - 3600
 
