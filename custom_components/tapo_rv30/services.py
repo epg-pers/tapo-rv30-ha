@@ -855,8 +855,20 @@ def async_setup_services(hass: HomeAssistant) -> None:
     def _robot_state(coord: TapoCoordinator, map_id: int) -> tuple[dict, list, list]:
         return setup_apply.robot_state(coord.client, map_id)
 
-    def _find_snapshot(coord: TapoCoordinator, map_id: int | None, ref) -> dict | None:
-        return setup_apply.find_snapshot(setup_apply.snapshot_folders(hass, coord), map_id, ref)
+    def _find_snapshot(coord: TapoCoordinator, map_id: int | None, ref, exclude=None, prefer=()) -> dict | None:
+        return setup_apply.find_snapshot(setup_apply.snapshot_folders(hass, coord), map_id, ref, exclude, prefer)
+
+    def _backed_up_ids(coord: TapoCoordinator) -> set[int]:
+        """Map ids with a cloud_<id>_<ts>.bin backup held here. Blocking."""
+        import os
+        ids: set[int] = set()
+        for folder in setup_apply.backup_folders(hass, coord):
+            try:
+                ids.update(int(m.group(1)) for f in os.listdir(folder)
+                           if (m := re.match(r"^cloud_(\d+)_\d+\.bin$", f)))
+            except OSError:
+                continue
+        return ids
 
     async def handle_save_map_setup(call: ServiceCall) -> ServiceResponse:
         import json
@@ -915,7 +927,8 @@ def async_setup_services(hass: HomeAssistant) -> None:
             raise ServiceValidationError(f"{call.service}: {coord.device_name} must be docked and idle")
         map_id, names = await _setup_map_id(call, coord)
         src = call.data.get("source_map")
-        snap = await hass.async_add_executor_job(_find_snapshot, coord, map_id, src)
+        # By name, another map's setup: the target's own is only the last resort.
+        snap = await hass.async_add_executor_job(_find_snapshot, coord, map_id, src, map_id)
         if snap is None:
             where = f"matching source_map '{src}'" if src else f"for map {map_id}"
             raise ServiceValidationError(f"{call.service}: no saved setup {where}; run save_map_setup first")
@@ -987,7 +1000,9 @@ def async_setup_services(hass: HomeAssistant) -> None:
             elif want.isdigit():
                 backup_id = int(want)
             else:
-                snap = await hass.async_add_executor_job(_find_snapshot, coord, None, ref)
+                # A lost map: not one the robot still has, and one with a backup if possible.
+                backed = await hass.async_add_executor_job(_backed_up_ids, coord)
+                snap = await hass.async_add_executor_job(_find_snapshot, coord, None, ref, set(names), backed)
                 if snap:
                     backup_id, snap_name = snap.get("map_id"), snap.get("map_name")
         if backup_id is None and fname:

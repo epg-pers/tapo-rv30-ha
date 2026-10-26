@@ -83,14 +83,27 @@ def backup_folders(hass, coord) -> list[str]:
     return [backups_folder(hass, coord)] + ([hass.config.path(DOMAIN, "map_backups")] if _legacy(hass) else [])
 
 
-def find_snapshot(folders, map_id: int | None, ref=None) -> dict | None:
+def _saved_when(d: dict) -> float | None:
+    """A setup's saved_at as a timestamp, or None when it is missing or not an ISO date."""
+    from datetime import datetime
+    try:
+        return datetime.fromisoformat(d["saved_at"]).timestamp()
+    except (KeyError, TypeError, ValueError, OverflowError, OSError):
+        return None
+
+
+def find_snapshot(folders, map_id: int | None, ref=None, exclude=None, prefer=()) -> dict | None:
     """The saved snapshot for map_id, or (ref given) the one whose saved id or name matches,
-    looking in each folder in turn. Blocking."""
+    looking in each folder in turn. An exact id wins (the first folder first); by name, across
+    every folder, the newest saved setup does, as setups of deleted maps are kept and a
+    re-mapped floor often keeps its old name. exclude (a map id or several: the target map,
+    or maps the robot still has) is only taken by name when nothing else matches; prefer
+    (map ids) ranks those first. Blocking."""
     from .mapdata import fold
     if isinstance(folders, str):
         folders = [folders]
-    for folder in folders:
-        if ref in (None, ""):
+    if ref in (None, ""):
+        for folder in folders:
             p = os.path.join(folder, f"{map_id}.json")
             if os.path.exists(p):
                 try:
@@ -98,17 +111,31 @@ def find_snapshot(folders, map_id: int | None, ref=None) -> dict | None:
                         return json.load(fh)
                 except (OSError, ValueError) as exc:   # damaged: try the next folder
                     _LOGGER.warning("Map setup %s is unreadable (%s); looking for another copy", p, exc)
-            continue
-        want = fold(str(ref).strip())
+        return None
+    skip = {str(exclude)} if isinstance(exclude, (int, str)) else {str(x) for x in exclude or ()}
+    best = {str(x) for x in prefer}
+    want = fold(str(ref).strip())
+    named = []
+    for n, folder in enumerate(folders):
         for p in sorted(glob.glob(os.path.join(folder, "*.json"))):
             try:
                 with open(p) as fh:
                     d = json.load(fh)
             except (OSError, ValueError):
                 continue
-            if str(d.get("map_id")) == want or fold(d.get("map_name") or "") == want:
+            if not isinstance(d, dict):
+                continue
+            if str(d.get("map_id")) == want:
                 return d
-    return None
+            if fold(str(d.get("map_name") or "")) == want:
+                named.append((n, d))
+
+    def _rank(item: tuple) -> tuple:
+        n, d = item
+        mid, when = d.get("map_id"), _saved_when(d)
+        return (str(mid) not in skip, str(mid) in best, when is not None, when or 0.0,
+                mid if isinstance(mid, int) else -1, -n)
+    return max(named, key=_rank)[1] if named else None
 
 
 def robot_state(client, map_id: int) -> tuple[dict, list, list]:

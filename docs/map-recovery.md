@@ -166,6 +166,9 @@ target:
   entity_id: vacuum.jarvis
 ```
 
+By name, the newest saved setup with that name wins, and the target map's own setup is used only
+if no other map's matches; give the id to pick a particular one.
+
 On a re-mapped floor the rooms are segmented afresh with new ids, so room names and presets only
 transfer where the room ids still line up; anything that cannot be placed is listed under
 `skipped`. Zones, walls, carpets and furniture are in real-world coordinates and drop back into
@@ -189,7 +192,8 @@ This is the recovery that has been done for real on an RV30 Max Plus, step by st
    ```
    The service uses the throwaway map as the carrier. The robot brings the backup back under the
    lost map's **original id**, so presets, schedules and history that referred to it line up
-   again. The response says where it landed and what to do next.
+   again. The response says where it landed and what to do next. By name, maps the robot still
+   has are skipped, and of the rest one with a downloaded backup comes first, then the newest.
 4. **Saving it.** The restored map arrives *unsaved*. When Home Assistant knows its name (from its
    saved setup) it saves it under that name itself and puts its room names, zones, furniture,
    presets and schedules back, then lets you know. Otherwise save it in the Tapo app with its old

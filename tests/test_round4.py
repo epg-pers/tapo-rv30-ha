@@ -60,3 +60,67 @@ def test_damaged_setup_falls_back_to_another_copy(tmp_path):
     assert setup_apply.find_snapshot([str(own), str(shared)], 5)["map_name"] == "Home"
     assert not (shared / "5.json.tmp").exists()
     assert json.loads((shared / "5.json").read_text())["map_id"] == 5
+
+
+def _setup(folder, map_id, name, saved_at=None):
+    snap = {"map_id": map_id, "map_name": name}
+    if saved_at:
+        snap["saved_at"] = saved_at
+    setup_apply.write_json(str(folder / f"{map_id}.json"), snap)
+
+
+def test_setup_by_name_takes_the_newest_other_map(tmp_path):
+    # Downstairs re-mapped twice: two old setups and the newest map's own (nearly empty) one.
+    _setup(tmp_path, 1001, "Downstairs", "2025-01-10T09:00:00")
+    _setup(tmp_path, 1002, "Downstairs", "2025-05-20T09:00:00")
+    _setup(tmp_path, 1003, "Downstairs", "2025-09-01T09:00:00")
+    _setup(tmp_path, 1004, "Upstairs", "2025-12-01T09:00:00")
+    find = setup_apply.find_snapshot
+    assert find([str(tmp_path)], 1003, "downstairs", exclude=1003)["map_id"] == 1002
+    assert find([str(tmp_path)], None, "Downstairs")["map_id"] == 1003
+    # An exact id still wins, even the target's own.
+    assert find([str(tmp_path)], 1003, "1001", exclude=1003)["map_id"] == 1001
+    assert find([str(tmp_path)], 1003, "1003", exclude=1003)["map_id"] == 1003
+    # Only the target's own setup has the name: that is still better than nothing.
+    assert find([str(tmp_path)], 1004, "Upstairs", exclude=1004)["map_id"] == 1004
+
+
+def test_setup_by_name_without_saved_at_takes_the_higher_id(tmp_path):
+    _setup(tmp_path, 1001, "Loft")
+    _setup(tmp_path, 1002, "Loft")
+    assert setup_apply.find_snapshot([str(tmp_path)], None, "Loft")["map_id"] == 1002
+
+
+def test_setup_by_name_single_remap(tmp_path):
+    # The documented case: one old map, and the re-mapped floor's own file saved since.
+    _setup(tmp_path, 1001, "Downstairs", "2025-01-10T09:00:00")
+    _setup(tmp_path, 1005, "Downstairs", "2025-09-01T09:00:00")
+    assert setup_apply.find_snapshot([str(tmp_path)], 1005, "Downstairs", exclude=1005)["map_id"] == 1001
+    (tmp_path / "1005.json").unlink()      # or the new map was never saved
+    assert setup_apply.find_snapshot([str(tmp_path)], 1005, "Downstairs", exclude=1005)["map_id"] == 1001
+
+
+def test_setup_by_name_looks_in_every_folder(tmp_path):
+    # The target's own setup in the robot's folder, the old map's in the shared one.
+    own, shared = tmp_path / "own", tmp_path / "shared"
+    own.mkdir(); shared.mkdir()
+    _setup(shared, 1001, "Downstairs", "2024-03-01T09:00:00")
+    _setup(own, 1005, "Downstairs", "2025-09-01T09:00:00")
+    _setup(own, 1006, "Upstairs", "2025-09-01T09:00:00")
+    folders = [str(own), str(shared)]
+    assert setup_apply.find_snapshot(folders, 1005, "Downstairs", exclude=1005)["map_id"] == 1001
+    # The robot's maps can be left out as a collection; the backed-up one is preferred.
+    _setup(shared, 1002, "Downstairs", "2024-01-01T09:00:00")
+    assert setup_apply.find_snapshot(folders, None, "Downstairs", exclude={1005, 1006})["map_id"] == 1001
+    assert setup_apply.find_snapshot(folders, None, "Downstairs", exclude=[1005], prefer={1002})["map_id"] == 1002
+    # An exact id in the robot's folder beats a same-id copy in the shared one.
+    _setup(shared, 1006, "Upstairs (old)", "2026-01-01T09:00:00")
+    assert setup_apply.find_snapshot(folders, None, "1006")["map_name"] == "Upstairs"
+
+
+def test_setup_by_name_ignores_odd_saved_at(tmp_path):
+    _setup(tmp_path, 1001, "Loft", "2025-01-10T09:00:00")
+    for mid, when in ((1002, "not a date"), (1003, 20991231), (1004, ["2099-01-01"])):
+        setup_apply.write_json(str(tmp_path / f"{mid}.json"), {"map_id": mid, "map_name": "Loft", "saved_at": when})
+    (tmp_path / "1009.json").write_text('["Loft"]')           # not a setup at all
+    assert setup_apply.find_snapshot([str(tmp_path)], None, "Loft")["map_id"] == 1001

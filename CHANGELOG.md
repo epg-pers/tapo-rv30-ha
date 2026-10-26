@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.38.5
+
+### Fixed
+
+- **Applying a saved setup by name could pick a stale one.** With a floor re-mapped more than once under the same name, `apply_map_setup` with `source_map: <name>` used the oldest map's setup (old zones, presets and schedules). It now takes the newest saved setup with that name from any folder, and the target map's own only if nothing else matches. `restore_map_backup` by name skips maps the robot still has and prefers one with a downloaded backup.
+
 ## v0.38.4
 
 ### Fixed
