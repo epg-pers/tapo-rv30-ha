@@ -1925,14 +1925,15 @@ class TapoRV30Panel extends HTMLElement {
     if (now) now.onclick = () => {
       const m = saved.find((x) => String(x.id) === pick.value) || {};
       now.disabled = pick.disabled = true;
+      // The buttons and the list are put right by _mapJobDone, on whichever pane is showing then.
       this._backupNow(pick.value, m.name || `Map ${pick.value}`, status, (message) => {
-        if (!grid.isConnected) {            // moved to another tab meanwhile: tell them anyway
+        // Moved to another tab meanwhile, or a restore is showing its progress in the status line:
+        // tell them without wiping it.
+        if (!grid.isConnected || status.querySelector(".jobbar")) {
           this.dispatchEvent(new CustomEvent("hass-notification", { detail: { message }, bubbles: true, composed: true }));
           return;
         }
-        now.disabled = pick.disabled = false;
         status.textContent = message;
-        this._backupLoad(grid, status);
       });
     };
     if (!this._isAdmin()) {
@@ -2069,10 +2070,31 @@ class TapoRV30Panel extends HTMLElement {
       message = "Backup failed: " + ((e && (e.message || (e.body && e.body.message))) || "the robot rejected that");
     }
     bar.stop(); bar.el.remove();
-    this._mapJobBusy = false;
     const busy = row && row.querySelector("[data-act=busy]");
     if (busy) busy.removeAttribute("data-act");
     done(message);
+    this._mapJobDone();
+  }
+
+  // A backup or copy has ended (after the caller's own handling): the lock lifts on whichever tab
+  // is showing, not only on the pane that started it, which may be gone. Settings is drawn again
+  // (once the user is done, if a form there is open). Backups is put right in place, as a redraw
+  // would throw away an open restore box or a running restore's progress bar.
+  _mapJobDone() {
+    this._mapJobBusy = false;
+    const pane = this.shadowRoot.querySelector(".pane");
+    if (!pane) return;
+    if (this._tab === "settings") {
+      this._paneSig = null;
+      if (this._formBusy()) this._paneDirty = true; else this._renderRight(true);
+    } else if (this._tab === "backups") {
+      const now = pane.querySelector(".bknow"), pick = pane.querySelector(".bkmap");
+      if (now) now.removeAttribute("title");
+      if (this._isAdmin()) [now, pick].forEach((el) => { if (el) el.disabled = false; });
+      // A new backup joins the list, unless a restore is being chosen or run there.
+      const grid = pane.querySelector(".bkgrid"), status = pane.querySelector(".bkstatus");
+      if (grid && !pane.querySelector(".restore-opts, .jobbar")) this._backupLoad(grid, status);
+    }
   }
 
   async _backupFetch(status, grid) {
@@ -2239,12 +2261,9 @@ class TapoRV30Panel extends HTMLElement {
     // One backup or copy at a time (the robot does one map job at a time): the others wait.
     if (this._mapJobBusy) pane.querySelectorAll("[data-backup], [data-copy]").forEach((b) => { b.disabled = true; b.title = "A backup or copy is running"; });
     // Backed up now: the robot sends it to the TP-Link cloud and it is downloaded into Home Assistant.
+    // The pane is redrawn by _mapJobDone (not over a rename or copy the user has open meanwhile).
     pane.querySelectorAll("[data-backup]").forEach((b) => b.onclick = () => this._backupNow(b.dataset.backup, b.dataset.name, b.closest(".row"),
-      (message) => {
-        this.dispatchEvent(new CustomEvent("hass-notification", { detail: { message }, bubbles: true, composed: true }));
-        // Redrawn only on this tab, and not over a rename or copy the user has open meanwhile.
-        if (this._tab === "settings") { if (this._formBusy()) this._paneDirty = true; else this._paneSettings(pane); }
-      }));
+      (message) => this.dispatchEvent(new CustomEvent("hass-notification", { detail: { message }, bubbles: true, composed: true }))));
     // Copied to a new map beside it, to edit without touching the original; switch to it with the
     // map selector and back the same way.
     pane.querySelectorAll("[data-copy]").forEach((b) => b.onclick = () => {
@@ -2273,20 +2292,20 @@ class TapoRV30Panel extends HTMLElement {
           const r = (res && res.response) ? res.response : res || {};
           const message = [r.next_steps, r.note].filter(Boolean).join(" ") || `Copied to "${name}".`;
           this.dispatchEvent(new CustomEvent("hass-notification", { detail: { message }, bubbles: true, composed: true }));
-          this._mapJobBusy = false;
+          // The row says how it went until the pane is redrawn (it no longer counts as an open form).
           input.blur();
-          if (this._tab === "settings") { if (this._formBusy()) this._paneDirty = true; else this._paneSettings(pane); }
-          return;
+          row.innerHTML = `<div class="main"><div class="t">${esc(name)}</div><div class="s">${esc(message)}</div></div>`;
+          return this._mapJobDone();
         } catch (e) {
-          this._mapJobBusy = false;
           bar.stop();
           const message = (e && (e.message || (e.body && e.body.message))) || "The robot rejected that";
           this.dispatchEvent(new CustomEvent("hass-notification", { detail: { message }, bubbles: true, composed: true }));
         }
-        if (!row.isConnected) return;
+        if (!row.isConnected) return this._mapJobDone();
         bar.el.remove();
         row.querySelector(".copynote").textContent = "";
         save.disabled = cancel.disabled = input.disabled = sched.disabled = false; input.focus();
+        this._mapJobDone();          // the open name box holds the redraw (_formBusy), so the row stays to try again
       };
       save.onclick = submit;
       cancel.onclick = done;

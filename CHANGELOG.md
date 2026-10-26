@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.38.2
+
+### Fixed
+
+- **The sidebar page could look stuck after a backup or copy.** If you moved to another tab while a backup or copy ran, the backup and copy buttons stayed greyed out ("A backup or copy is running") and the new backup was missing from the Backups list until you changed tab again. Whichever tab is showing now catches up when the job ends, without closing a restore or rename you have open. A copy finished on the Settings tab no longer leaves its row stuck, and a backup that finishes while a restore is running no longer wipes the restore's progress.
+
 ## v0.38.1
 
 ### Fixed
