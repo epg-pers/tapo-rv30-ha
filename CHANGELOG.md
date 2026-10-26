@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.37.0
+
+### Added
+
+- **Preset editor** (Presets tab on the sidebar page). Everything the Tapo app's preset editor does: a name, rooms picked by tapping them on the map or from the list, their cleaning order (drag them or use the arrows; the map shows numbered badges) with the "clean in this order" switch, and each room's own suction, water and passes, with an "All rooms" row to set them at once. Presets on any saved map can be edited, not just the current one. On top of the app: an estimated area and time from the robot's own past cleans, Duplicate, Run, Schedule (opens the schedule editor with the preset picked) and a warning before deleting a preset that schedules still run.
+- **Copies take their presets.** `copy_map`, and `restore_map_backup` with `new_name`, now recreate the original map's presets on the new map (same names, rooms, order and per-room levels). With the new `copy_schedules: true` the schedules that run on the original map come along too, switched off so the two maps do not both clean. A copy of a map the robot no longer has takes them from its saved setup.
+- `run_preset`, `update_preset` and `delete_preset` take an optional `map`, and schedules made with a preset honour `map` too: the robot keeps presets per map, so the same id or name can exist on two maps. Without `map`, an id that is on two maps is now refused instead of silently taking the first.
+
+### Changed
+
+- A change to a preset or schedule updates the map's setup snapshot straight away (for the map the robot is on), instead of on the next slow poll.
+
 ## v0.36.5
 
 ### Fixed

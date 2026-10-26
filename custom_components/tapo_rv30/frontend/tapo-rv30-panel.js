@@ -339,17 +339,29 @@ button[disabled], select[disabled], input[disabled] { opacity: .5; cursor: defau
 .pk .nm small { font-weight: 400; color: var(--warning-color, #ff9800); }
 .pk .lv { display: grid; grid-template-columns: 1fr 1.3fr 1fr; gap: 6px; }
 .pk select { padding: 6px 4px; border-radius: 8px; width: 100%; }
+.pk select.unset { border-color: var(--warning-color, #ff9800); box-shadow: 0 0 0 1px var(--warning-color, #ff9800); }
 .pk .ord { display: flex; }
 .pk .ord .icon-btn { width: 32px; height: 32px; }
 .pk.all .nm { font-weight: 400; color: var(--secondary-text-color); }
 .pk.dragging { box-shadow: 0 2px 10px rgba(0,0,0,.35); border-radius: 10px; position: relative; z-index: 1;
   background: color-mix(in srgb, var(--primary-color) 14%, var(--card-background-color, #fff)); }
+/* Picked rooms on two lines in a narrow pane: the page's narrow layout, or a pane under 600 px wide
+   (Home Assistant only sets narrow at 870 px and below, and the one-line rows need about 510 px). */
+.pane { container-type: inline-size; }
 .wrap.narrow .pk { grid-template-columns: 26px 26px minmax(0, 1fr) 96px; }
 .wrap.narrow .pk .grip { grid-row: 1 / span 2; grid-column: 1; }
 .wrap.narrow .pk .num { grid-row: 1; grid-column: 2; }
 .wrap.narrow .pk .nm { grid-row: 1; grid-column: 3; }
 .wrap.narrow .pk .ord { grid-row: 1; grid-column: 4; }
 .wrap.narrow .pk .lv { grid-row: 2; grid-column: 2 / -1; }
+@container (max-width: 600px) {
+  .pk { grid-template-columns: 26px 26px minmax(0, 1fr) 96px; }
+  .pk .grip { grid-row: 1 / span 2; grid-column: 1; }
+  .pk .num { grid-row: 1; grid-column: 2; }
+  .pk .nm { grid-row: 1; grid-column: 3; }
+  .pk .ord { grid-row: 1; grid-column: 4; }
+  .pk .lv { grid-row: 2; grid-column: 2 / -1; }
+}
 .wrap.narrow .prow .pacts { width: 100%; justify-content: flex-end; }
 `;
 
@@ -539,7 +551,8 @@ class TapoRV30Panel extends HTMLElement {
     if (this._tab === "planner") this._ensurePlanSub(); else this._dropPlanSub();
     const sig = JSON.stringify([this._tab, this._robot, this._editing && this._editing.id,
       this._tab === "planner" ? [this._planRev, this._planOpen]
-        : this._tab === "presets" ? [this._preRev, this._signature()]   // _preRev: a preset list arrived
+        // Presets: a list arrived (_preRev) or the preset buttons changed; not every status change.
+        : this._tab === "presets" ? [this._preRev, this._presetKey(this._related(this._robot))]
         : this._tab === "edit" ? "edit"   // the editor owns its canvas; don't re-render on map updates
         : this._tab === "backups" ? "backups"   // loads its own data once; don't re-render on map updates
         : this._signature()]);
@@ -604,7 +617,20 @@ class TapoRV30Panel extends HTMLElement {
 
   _renderEditor(pane, r) {
     const s = this._editing, isNew = s.id == null;
-    const presets = this._presets(r), dnd = this._dnd(r);
+    const dnd = this._dnd(r);
+    // Presets by map and id (ids repeat across maps): from the Presets tab's list when it has been
+    // read for this robot, with their real names and maps; else from the preset buttons (ids only).
+    // The Presets tab's list, only while it is current (a preset made in the app since would be missing).
+    const listed = this._pre && this._pre.for === this._robot && this._pre.data && this._preKey === this._presetKey(r) ? this._pre.data : null;
+    const pkey = (mapId, id) => (mapId != null ? `${mapId}:${id}` : String(id));
+    const presets = listed ? listed.presets.map((p) => ({ key: pkey(p.map_id, p.id), id: p.id, map_id: p.map_id, name: p.name }))
+      : this._presets(r).map((p) => ({ key: String(p.id), id: p.id, map_id: null, name: p.name }));
+    // The schedule's preset: by its map and id where both are known, else the one preset with that id.
+    const presetKey = () => {
+      if (s.preset_id == null) return presets[0] ? presets[0].key : "";
+      const hits = presets.filter((p) => String(p.id) === String(s.preset_id) && (s.map_id == null || p.map_id == null || p.map_id === s.map_id));
+      return hits.length ? hits[0].key : pkey(s.map_id, s.preset_id);
+    };
     // Rooms by id from the map: an unnamed room, or one of two rooms with the same name, cannot be
     // picked by name. Without the map's rooms (not read yet) the vacuum's room names are all there is.
     const geom = ((this._st(r.camera) || { attributes: {} }).attributes.room_geometry || []).filter((g) => g && g.id != null);
@@ -619,7 +645,7 @@ class TapoRV30Panel extends HTMLElement {
     const state = {
       time: s.time || "09:00", days: new Set((s.days || []).map((d) => d.slice(0, 3))),
       mode: s.preset_id != null ? "preset" : (picked.length || (s.rooms || []).length ? "rooms" : "house"),
-      rooms: new Set(picked), preset: s.preset_id != null ? String(s.preset_id) : (presets[0] ? String(presets[0].id) : ""),
+      rooms: new Set(picked), preset: presetKey(),
       suction: s.suction || 0, water: s.water_level == null ? -1 : s.water_level, passes: s.clean_passes || 0, enabled: s.enabled !== false,
     };
     const dayChips = () => DAYS.map((d) => `<button class="chip ${state.days.has(d) ? "on" : ""}" data-day="${d}">${d}</button>`).join("") +
@@ -633,8 +659,15 @@ class TapoRV30Panel extends HTMLElement {
     const foreign = !isNew && s.map_id != null && curMap != null && s.map_id !== curMap;
     const ownName = own && own.name && maps.filter((m) => m.name === own.name).length === 1 ? own.name : null;
     // A schedule can point at a preset since deleted on the robot: show it as such, never as another one.
-    const presetIds = new Set(presets.map((p) => String(p.id)));
+    const presetIds = new Set(presets.map((p) => p.key));
     const deadPreset = state.preset !== "" && !presetIds.has(state.preset);
+    // Grouped by map when the presets span more than one (the same name can be on two floors).
+    const presetOpt = (p) => `<option value="${esc(p.key)}" ${p.key === state.preset ? "selected" : ""}>${esc(p.name)}</option>`;
+    const presetMaps = [...new Set(presets.map((p) => p.map_id))];
+    const presetOpts = () => (listed && presetMaps.length > 1
+      ? presetMaps.map((m) => { const mp = listed.maps.find((x) => x.id === m);
+        return `<optgroup label="${esc((mp && mp.name) || `Map ${m}`)}">${presets.filter((p) => p.map_id === m).map(presetOpt).join("")}</optgroup>`; }).join("")
+      : presets.map(presetOpt).join(""));
     // "Robot default" cannot be sent to an existing schedule (an edit sends only what changed, and
     // there is no value that clears a level), so it is offered only where it is already the value.
     const dflt = (cur, none) => (isNew || cur === none ? `<option value="${none}">Robot default</option>` : "");
@@ -650,7 +683,7 @@ class TapoRV30Panel extends HTMLElement {
         <button data-mode="preset" class="${state.mode === "preset" ? "on" : ""}" ${presets.length && !foreign ? "" : "disabled"}>Preset</button></div>
         ${foreign ? `<div class="note">This schedule is for the map ${own && own.name ? `"${esc(own.name)}"` : esc(s.map_id)}, not the one the robot is on. It keeps that map; switch the robot to it to change what it cleans.</div>` : ""}</div>
       <div class="rooms-box" ${state.mode === "rooms" && !foreign ? "" : "hidden"}><div class="chips rooms">${roomChips()}</div></div>
-      <div class="preset-box" ${state.mode === "preset" && !foreign ? "" : "hidden"}><select class="preset">${deadPreset ? `<option value="${esc(state.preset)}" selected>(deleted preset ${esc(state.preset)})</option>` : ""}${presets.map((p) => `<option value="${esc(p.id)}" ${String(p.id) === state.preset ? "selected" : ""}>${esc(p.name)}</option>`).join("")}</select></div>
+      <div class="preset-box" ${state.mode === "preset" && !foreign ? "" : "hidden"}><select class="preset">${deadPreset ? `<option value="${esc(state.preset)}" selected>(deleted preset ${esc(state.preset.split(":").pop())})</option>` : ""}${presetOpts()}</select></div>
       <div class="grid2">
         <div><label>Suction</label><select class="suction">${dflt(state.suction, 0)}${FAN.map((f, i) => `<option value="${i + 1}" ${state.suction === i + 1 ? "selected" : ""}>${f}</option>`).join("")}</select></div>
         <div><label>Water</label><select class="water">${dflt(state.water, -1)}${WATER.map((w, i) => `<option value="${i}" ${state.water === i ? "selected" : ""}>${w}</option>`).join("")}</select></div>
@@ -707,8 +740,15 @@ class TapoRV30Panel extends HTMLElement {
         || (state.mode === "preset" && changed("preset", preset)));
       if (targetChanged && state.mode === "preset" && !presetIds.has(preset)) { err.textContent = "Pick a preset."; err.hidden = false; return; }
       if (targetChanged) {
-        if (state.mode === "rooms") { data[byId ? "room_ids" : "rooms"] = [...state.rooms]; if (ownName) data.map = ownName; }
-        else if (state.mode === "preset") data.preset = preset;
+        // A new schedule's rooms are the current map's (its map_id is only a preset's, handed over
+        // from the Presets tab), so only an edit names the schedule's own map.
+        if (state.mode === "rooms") { data[byId ? "room_ids" : "rooms"] = [...state.rooms]; if (ownName && !isNew) data.map = ownName; }
+        else if (state.mode === "preset") {
+          // The preset's id, and its map where known: the same id can be a different preset on another map.
+          const pr = presets.find((p) => p.key === preset), mapId = pr && pr.map_id != null ? pr.map_id : s.map_id;
+          data.preset = pr ? pr.id : Number(preset.split(":").pop());
+          if (mapId != null) data.map = String(mapId);
+        }
         else data.rooms = [];
       }
       if (su && changed("suction", su)) data.suction = FAN[su - 1];
@@ -755,19 +795,24 @@ class TapoRV30Panel extends HTMLElement {
     return this._preHist.runs;
   }
 
-  // A saved map's picture, geometry and rooms (any map, not just the current one), with the
-  // picture loaded. Kept for the visit to the tab; a failed read is tried again next time.
+  // A saved map's picture, geometry, rooms and room-id grid (any map, not just the current one),
+  // with the pictures loaded. Kept for the visit to the tab; a failed read is tried again next time.
   _presetMap(mapId) {
     const key = `${this._robot}|${mapId}`;
     this._preMaps = this._preMaps || {};
     if (!this._preMaps[key]) {
+      const load = (src) => new Promise((done) => {
+        if (!src) { done(null); return; }
+        const img = new Image();
+        img.onload = () => done(img); img.onerror = () => done(null);
+        img.src = src;
+      });
       this._preMaps[key] = this._hass.callWS({ type: `${DOMAIN}/map/edit_get`, entity_id: this._robot, map_id: mapId, picture: true })
-        .then((res) => new Promise((done) => {
-          if (!res || !res.picture || !res.geometry) { done({ res: res || {}, img: null }); return; }
-          const img = new Image();
-          img.onload = () => done({ res, img }); img.onerror = () => done({ res, img: null });
-          img.src = res.picture;
-        }))
+        .then(async (res) => {
+          if (!res || !res.picture || !res.geometry) return { res: res || {}, img: null, mask: null };
+          const [img, mask] = await Promise.all([load(res.picture), load(res.room_mask)]);
+          return { res, img, mask };
+        })
         .catch((e) => { if (this._preMaps) delete this._preMaps[key]; throw e; });
     }
     return this._preMaps[key];
@@ -785,7 +830,8 @@ class TapoRV30Panel extends HTMLElement {
     const { maps, presets } = pre.data, admin = this._isAdmin();
     // The current map first, then the others in the robot's order; a preset on a map the list
     // does not name still shows, under its map id.
-    const groups = [...maps].sort((a, b) => (b.current ? 1 : 0) - (a.current ? 1 : 0));
+    // A map not saved yet (being made) shows only if it somehow has presets.
+    const groups = maps.filter((m) => m.saved !== false || presets.some((p) => p.map_id === m.id)).sort((a, b) => (b.current ? 1 : 0) - (a.current ? 1 : 0));
     for (const p of presets) if (!groups.some((m) => m.id === p.map_id)) groups.push({ id: p.map_id, name: null });
     const mapName = (m) => m.name || `Map ${m.id}`;
     const days = (d) => ((d || []).length === 7 ? "Daily" : (d || []).join(" "));
@@ -813,8 +859,9 @@ class TapoRV30Panel extends HTMLElement {
       const mine = presets.filter((p) => p.map_id === m.id);
       return `<h5>${esc(mapName(m))}${m.current ? " (current map)" : ""}</h5>${mine.map(row).join("") || `<div class="s" style="padding:4px 0 8px">No presets on this map yet.</div>`}`;
     }).join("");
-    const cur = maps.find((m) => m.current) || maps[0];
-    const picker = maps.length > 1 ? `<select class="pmap" aria-label="Map for the new preset">${groups.filter((m) => maps.includes(m)).map((m) => `<option value="${esc(m.id)}" ${m === cur ? "selected" : ""}>${esc(mapName(m))}</option>`).join("")}</select>` : "";
+    // New presets go on saved maps only (a map being made is not one yet).
+    const saved = maps.filter((m) => m.saved !== false), cur = saved.find((m) => m.current) || saved[0];
+    const picker = saved.length > 1 ? `<select class="pmap" aria-label="Map for the new preset">${groups.filter((m) => saved.includes(m)).map((m) => `<option value="${esc(m.id)}" ${m === cur ? "selected" : ""}>${esc(mapName(m))}</option>`).join("")}</select>` : "";
     pane.innerHTML = `<ha-card><div class="card">
       <h3><span>Presets</span><span class="pnew">${picker}<button class="btn primary" data-act="new" ${cur ? "" : "disabled"}><ha-icon icon="mdi:plus"></ha-icon>New preset</button></span></h3>
       ${presets.length || maps.length ? body : `<div class="empty">No presets yet. A preset is a set of rooms with their own levels, run from here, the app, a schedule or its button.</div>`}
@@ -844,62 +891,70 @@ class TapoRV30Panel extends HTMLElement {
     });
   }
 
-  // Opens the editor on a working copy: rooms in cleaning order with their levels, clamped to
-  // what the robot takes.
+  // Opens the editor on a working copy: rooms in cleaning order with their levels. A level the
+  // robot has not set on a room (no water tank, say) cannot be saved as unset, so it is filled in
+  // from the nearest room that has one, else the robot's current level, else the usual default,
+  // and marked (e.unset) until the user picks it, so nothing is invented unseen.
   _presetOpen(p, title) {
-    const clamp = (v, lo, hi, dflt) => { const n = Number(v); return Number.isInteger(n) && n >= lo && n <= hi ? n : dflt; };
-    const rooms = (p.rooms || []).map((x) => ({ id: Number(x.id), suction: clamp(x.suction, 1, 5, 2), water: clamp(x.water, 0, 3, 2), passes: clamp(x.passes, 1, 3, 1) }));
+    const range = { suction: [1, 5], water: [0, 3], passes: [1, 3] }, dflt = { suction: 2, water: 2, passes: 1 };
+    const ok = (k, v) => { const n = Number(v); return v != null && v !== "" && Number.isInteger(n) && n >= range[k][0] && n <= range[k][1] ? n : null; };
+    const vac = this._st(this._robot), va = (vac && vac.attributes) || {};
+    const robot = { suction: FAN.findIndex((f) => f.toLowerCase() === String(va.fan_speed || "").toLowerCase()) + 1 || null,
+      water: WATER.indexOf(String(va.water_level || "").toLowerCase()) >= 0 ? WATER.indexOf(String(va.water_level).toLowerCase()) : null, passes: ok("passes", va.clean_passes) };
+    const src = (p.rooms || []).map((x) => ({ id: Number(x.id), suction: ok("suction", x.suction), water: ok("water", x.water), passes: ok("passes", x.passes) }));
+    const unset = {};
+    const rooms = src.map((x, i) => {
+      const out = { ...x };
+      for (const k of ["suction", "water", "passes"]) {
+        if (out[k] != null) continue;
+        // The nearest room before it with that level set, else the nearest after it.
+        const near = [...src.slice(0, i).reverse(), ...src.slice(i + 1)].find((y) => y[k] != null);
+        const [v, from] = near ? [near[k], "the room next to it in this preset"] : robot[k] != null ? [robot[k], "the robot's current setting"] : [dflt[k], "the usual default"];
+        out[k] = v; (unset[x.id] ||= {})[k] = from;
+      }
+      return out;
+    });
     const last = rooms[rooms.length - 1];
-    this._preEdit = { title, preset_id: p.preset_id ?? null, map_id: p.map_id, name: p.name || "", clean_order: p.clean_order !== false, rooms,
+    this._preEdit = { title, preset_id: p.preset_id ?? null, map_id: p.map_id, name: p.name || "", clean_order: p.clean_order !== false, rooms, unset,
       names: Object.fromEntries((p.rooms || []).map((x) => [Number(x.id), x.name])),
-      last: last ? { suction: last.suction, water: last.water, passes: last.passes } : { suction: 2, water: 2, passes: 1 } };
+      last: last ? { suction: last.suction, water: last.water, passes: last.passes } : { ...dflt } };
     this._renderRight(true);
   }
 
   // Each room of a loaded map with what the editor needs: its outline in mm when the integration
-  // sends one, its size in m2, and where its badge goes on the picture. A room without an outline
-  // falls back on the room geometry (bbox, centre, cells in picture px), from the reply or, for
-  // the current map, from the camera, and is then picked and tinted by its colour on the picture.
+  // sends one, its size in m2, and where its badge goes on the picture. Rooms are normally cells in
+  // the grid with no outline: their size and centre come from the room geometry (bbox, centre,
+  // cells in picture px), from the reply or, for the current map, from the camera; taps and tints
+  // use the room-id grid (_presetMask).
   _presetRooms(res) {
     const g = res.geometry, cam = this._st(this._related(this._robot).camera);
     const extra = res.room_geometry || (cam && cam.attributes.map_id === res.map_id ? cam.attributes.room_geometry : null) || [];
-    const cell = g ? (g.resolution_mm / 1000) ** 2 : 0;
-    return (res.rooms || []).filter((rm) => rm && rm.id != null).map((rm) => {
+    const cell = g ? (g.resolution_mm / 1000) ** 2 : (cam && cam.attributes.map_geometry ? (cam.attributes.map_geometry.resolution_mm / 1000) ** 2 : 0);
+    // Without the map's own room list (its read failed), the camera's rooms for the current map.
+    const list = res.rooms || extra.map((x) => ({ id: x.id, name: x.name }));
+    return list.filter((rm) => rm && rm.id != null).map((rm) => {
       const id = Number(rm.id), x = extra.find((q) => q && Number(q.id) === id) || {};
       const poly = Array.isArray(rm.vertexs) && rm.vertexs.length >= 3 ? rm.vertexs : null;
-      return { id, name: rm.name || x.name || `Room ${id}`, poly, bbox: poly ? null : x.bbox || null,
+      return { id, name: rm.name || x.name || `Room ${id}`, poly,
         m2: poly ? polyArea(poly) / 1e6 : (Number(x.cells) || 0) * cell,
         // Where the picture has the room's name (its geometry's centre), else a point inside its outline.
         centre: x.centre || (poly && g ? mmToPx(...polyLabel(poly), g) : null) };
     });
   }
 
-  // Rooms without an outline: a label per picture pixel (room index + 1) from each room's own colour
-  // inside its box, so taps and tints follow the room's real shape.
-  _presetMask(view) {
-    const need = view.rooms.filter((rm) => !rm.poly && rm.bbox);
-    if (!need.length) return null;
-    const w = view.img.naturalWidth, h = view.img.naturalHeight, c = document.createElement("canvas");
+  // The room-id grid from the integration (1 px per map cell, turned like the picture; red =
+  // room id, 0 wall, 255 floor, 127 unknown) as { w, h, scale, idx }: idx holds the editor's
+  // room index + 1 per cell, 0 for anything that is not one of its rooms. null without a grid
+  // (an older integration): rooms are then picked from the list only.
+  _presetMask(maskImg, rooms, geom, picW) {
+    if (!maskImg || !maskImg.naturalWidth) return null;
+    const w = maskImg.naturalWidth, h = maskImg.naturalHeight, c = document.createElement("canvas");
     c.width = w; c.height = h;
-    const ctx = c.getContext("2d"); ctx.drawImage(view.img, 0, 0);
+    const ctx = c.getContext("2d"); ctx.drawImage(maskImg, 0, 0);
     let px; try { px = ctx.getImageData(0, 0, w, h).data; } catch (e) { return null; }
-    const label = new Int16Array(w * h);
-    for (const rm of need) {
-      const [x0, y0, x1, y1] = rm.bbox.map((v) => Math.round(v)), count = new Map();
-      // The room's colour: the commonest opaque colour in its box.
-      for (let y = Math.max(0, y0); y <= Math.min(h - 1, y1); y += 2) for (let x = Math.max(0, x0); x <= Math.min(w - 1, x1); x += 2) {
-        const i = (y * w + x) * 4; if (px[i + 3] < 250) continue;
-        const k = (px[i] << 16) | (px[i + 1] << 8) | px[i + 2]; count.set(k, (count.get(k) || 0) + 1);
-      }
-      let key = null, most = 0; for (const [k, n] of count) if (n > most) { key = k; most = n; }
-      if (key == null) continue;
-      const idx = view.rooms.indexOf(rm) + 1;
-      for (let y = Math.max(0, y0); y <= Math.min(h - 1, y1); y++) for (let x = Math.max(0, x0); x <= Math.min(w - 1, x1); x++) {
-        const i = (y * w + x) * 4;
-        if (px[i + 3] >= 250 && ((px[i] << 16) | (px[i + 1] << 8) | px[i + 2]) === key) label[y * w + x] = idx;
-      }
-    }
-    return label;
+    const at = new Map(rooms.map((rm, i) => [rm.id, i + 1])), idx = new Int16Array(w * h);
+    for (let i = 0; i < w * h; i++) { const v = px[i * 4]; if (v !== 0 && v !== 127 && v !== 255) idx[i] = at.get(v) || 0; }
+    return { w, h, idx, scale: (geom && geom.scale_px_per_cell) || picW / w };
   }
 
   _renderPresetEditor(pane, r) {
@@ -921,8 +976,8 @@ class TapoRV30Panel extends HTMLElement {
       <div class="actions"><button class="btn cancel">Cancel</button><button class="btn primary save"><ha-icon icon="mdi:content-save"></ha-icon>${e.preset_id != null ? "Save" : "Add to robot"}</button></div>
     </div></ha-card>`;
     const q = (sel) => pane.querySelector(sel), list = q(".ppicked"), canvas = q(".pcanvas");
-    // The loaded map: picture, geometry, rooms (with outline or colour label), sizes by room id.
-    const view = { img: null, geom: null, rooms: [], label: null, loaded: false, runs: null };
+    // The loaded map: picture, geometry, rooms (sizes, badge spots, outlines if any), room-id grid.
+    const view = { img: null, geom: null, rooms: [], mask: null, loaded: false, runs: null };
     const byId = (id) => view.rooms.find((rm) => rm.id === id);
     const nameOf = (id) => (byId(id) || {}).name || e.names[id] || `Room ${id}`;
     const gone = (id) => view.loaded && !byId(id);
@@ -950,11 +1005,14 @@ class TapoRV30Panel extends HTMLElement {
           const n = nameOf(x.id);
           return `<div class="pk" data-id="${x.id}"><span class="grip" title="Drag to change the order"><ha-icon icon="mdi:drag"></ha-icon></span>
             <span class="num">${i + 1}</span><span class="nm" title="${esc(n)}">${esc(n)}${gone(x.id) ? " <small>(gone)</small>" : ""}</span>
-            <div class="lv">${["suction", "water", "passes"].map((k) => `<select data-k="${k}" aria-label="${what[k]} for ${esc(n)}">${opts(k, x[k])}</select>`).join("")}</div>
+            <div class="lv">${["suction", "water", "passes"].map((k) => { const was = (e.unset[x.id] || {})[k];
+              return `<select data-k="${k}" class="${was ? "unset" : ""}" aria-label="${what[k]} for ${esc(n)}${was ? " (was unset)" : ""}" ${was ? `title="Not set on the robot: filled in from ${esc(was)}. Check it before saving."` : ""}>${opts(k, x[k])}</select>`; }).join("")}</div>
             <span class="ord"><button class="icon-btn" data-mv="-1" title="Move up" aria-label="Move ${esc(n)} up" ${i ? "" : "disabled"}><ha-icon icon="mdi:chevron-up"></ha-icon></button>
               <button class="icon-btn" data-mv="1" title="Move down" aria-label="Move ${esc(n)} down" ${i < e.rooms.length - 1 ? "" : "disabled"}><ha-icon icon="mdi:chevron-down"></ha-icon></button>
               <button class="icon-btn" data-rm title="Take out" aria-label="Take ${esc(n)} out"><ha-icon icon="mdi:close"></ha-icon></button></span></div>`;
-        }).join("") : `<div class="s" style="padding:4px 0">No rooms picked yet.</div>`;
+        }).join("") + (e.rooms.some((x) => Object.keys(e.unset[x.id] || {}).length)
+          ? `<div class="warn" style="margin-top:6px"><ha-icon icon="mdi:alert-outline"></ha-icon>Levels outlined in orange were not set on the robot; they have been filled in for you. Check them before saving.</div>` : "")
+        : `<div class="s" style="padding:4px 0">No rooms picked yet.</div>`;
       if (focus) {
         // A row moved to the top or bottom: its other move button takes the focus.
         let el = list.querySelector(focus);
@@ -967,16 +1025,18 @@ class TapoRV30Panel extends HTMLElement {
       const ctx = canvas.getContext("2d"), g = view.geom, w = canvas.width, h = canvas.height;
       const cs = getComputedStyle(this), primary = cs.getPropertyValue("--primary-color").trim() || "#03a9f4";
       ctx.clearRect(0, 0, w, h); ctx.drawImage(view.img, 0, 0);
-      // Rooms without an outline: tinted pixel by pixel from the colour label.
-      if (view.label && e.rooms.some((x) => { const rm = byId(x.id); return rm && !rm.poly; })) {
-        const on = new Set(e.rooms.map((x) => view.rooms.findIndex((rm) => rm.id === x.id) + 1).filter((n) => n > 0));
-        const layer = document.createElement("canvas"); layer.width = w; layer.height = h;
+      // Rooms without an outline: tinted cell by cell from the room-id grid, scaled up unsmoothed.
+      const mk = view.mask;
+      if (mk && e.rooms.some((x) => { const rm = byId(x.id); return rm && !rm.poly; })) {
+        const on = new Set(e.rooms.map((x) => view.rooms.findIndex((rm) => rm.id === x.id && !rm.poly) + 1).filter((n) => n > 0));
+        const layer = document.createElement("canvas"); layer.width = mk.w; layer.height = mk.h;
         const lc = layer.getContext("2d");
         lc.fillStyle = primary; lc.fillRect(0, 0, 1, 1);
         const [pr, pg, pb] = lc.getImageData(0, 0, 1, 1).data;    // the theme colour as rgb
-        const tint = lc.createImageData(w, h), d = tint.data;
-        for (let i = 0; i < view.label.length; i++) if (on.has(view.label[i])) { d[i * 4] = pr; d[i * 4 + 1] = pg; d[i * 4 + 2] = pb; d[i * 4 + 3] = 110; }
-        lc.putImageData(tint, 0, 0); ctx.drawImage(layer, 0, 0);
+        const tint = lc.createImageData(mk.w, mk.h), d = tint.data;
+        for (let i = 0; i < mk.idx.length; i++) if (on.has(mk.idx[i])) { d[i * 4] = pr; d[i * 4 + 1] = pg; d[i * 4 + 2] = pb; d[i * 4 + 3] = 110; }
+        lc.putImageData(tint, 0, 0);
+        ctx.imageSmoothingEnabled = false; ctx.drawImage(layer, 0, 0, mk.w * mk.scale, mk.h * mk.scale); ctx.imageSmoothingEnabled = true;
       }
       for (const rm of view.rooms) {
         if (!rm.poly) continue;
@@ -1013,7 +1073,7 @@ class TapoRV30Panel extends HTMLElement {
     const redraw = () => { drawChips(); drawList(); drawMap(); drawEst(); };
     const flip = (id) => {
       const i = e.rooms.findIndex((x) => x.id === id);
-      if (i >= 0) e.rooms.splice(i, 1);
+      if (i >= 0) { e.rooms.splice(i, 1); delete e.unset[id]; }
       else e.rooms.push({ id, ...e.last });      // new rooms take the last levels used
       redraw();
     };
@@ -1031,15 +1091,19 @@ class TapoRV30Panel extends HTMLElement {
       // The smallest outline under the tap wins (a room drawn inside another stays reachable).
       let best = null, area = Infinity;
       for (const rm of view.rooms) if (rm.poly && inPoly(mx, my, rm.poly)) { const a = polyArea(rm.poly); if (a < area) { best = rm; area = a; } }
-      if (!best && view.label) { const i = view.label[Math.floor(y) * canvas.width + Math.floor(x)]; if (i) best = view.rooms[i - 1]; }
+      // Else the room whose cell is under the tap (room names drawn on the picture included).
+      const mk = view.mask, gx = mk ? Math.floor(x / mk.scale) : -1, gy = mk ? Math.floor(y / mk.scale) : -1;
+      if (!best && mk && gx >= 0 && gy >= 0 && gx < mk.w && gy < mk.h) { const i = mk.idx[gy * mk.w + gx]; if (i) best = view.rooms[i - 1]; }
       if (best) flip(best.id);
     };
     list.onchange = (ev) => {
       const s = ev.target;
-      if (s.dataset.all) { const k = s.dataset.all, v = Number(s.value); e.rooms.forEach((x) => { x[k] = v; }); e.last[k] = v; }
+      // A level picked here is the user's own: its "was unset" mark goes.
+      if (s.dataset.all) { const k = s.dataset.all, v = Number(s.value); e.rooms.forEach((x) => { x[k] = v; if (e.unset[x.id]) delete e.unset[x.id][k]; }); e.last[k] = v; }
       else if (s.dataset.k) {
         const x = e.rooms.find((y) => String(y.id) === s.closest(".pk").dataset.id); if (!x) return;
         x[s.dataset.k] = Number(s.value); e.last = { suction: x.suction, water: x.water, passes: x.passes };
+        if (e.unset[x.id]) delete e.unset[x.id][s.dataset.k];
       }
       drawList(); drawEst();
     };
@@ -1062,7 +1126,8 @@ class TapoRV30Panel extends HTMLElement {
     list.onpointermove = (ev) => {
       if (!drag) return;
       const rows = [...list.querySelectorAll(".pk:not(.all)")].filter((x) => x !== drag);
-      const before = rows.find((x) => { const b = x.getBoundingClientRect(); return ev.clientY < b.top + b.height / 2; }) || null;
+      // Rows stay above the "was unset" note, when there is one.
+      const before = rows.find((x) => { const b = x.getBoundingClientRect(); return ev.clientY < b.top + b.height / 2; }) || list.querySelector(":scope > .warn");
       if (before === drag.nextElementSibling) return;
       list.insertBefore(drag, before);
       const ids = [...list.querySelectorAll(".pk:not(.all)")].map((x) => x.dataset.id);
@@ -1099,19 +1164,25 @@ class TapoRV30Panel extends HTMLElement {
     redraw();
     // The map and the past cleans arrive on their own; a reply after the editor closed is dropped.
     const live = () => this._preEdit === e && this._robot === robot && canvas.isConnected;
-    this._presetMap(e.map_id).then(({ res, img }) => {
+    this._presetMap(e.map_id).then(({ res, img, mask }) => {
       if (!live()) return;
       view.rooms = this._presetRooms(res); view.loaded = true;
       if (img) {
         view.img = img; view.geom = res.geometry;
         canvas.width = img.naturalWidth; canvas.height = img.naturalHeight;
-        view.label = this._presetMask(view);
-        q(".pstatus").textContent = "";
+        view.mask = this._presetMask(mask, view.rooms, res.geometry, img.naturalWidth);
+        q(".pstatus").textContent = view.mask || view.rooms.every((rm) => rm.poly) ? ""
+          : "Pick the rooms below: this version of the integration does not say where each room is on the picture.";
       } else { q(".pstage").hidden = true; q(".pstatus").textContent = "Could not draw this map; pick the rooms below."; }
       redraw();
     }, (x) => {
       if (!live()) return;
       q(".pstage").hidden = true; q(".pstatus").textContent = `Could not read the map (${(x && x.message) || x}); pick the rooms below.`;
+      // The current map's rooms are still known from the camera: offer them as chips.
+      const cam = this._st(this._related(robot).camera);
+      if (cam && cam.attributes.map_id === e.map_id && (cam.attributes.room_geometry || []).length) {
+        view.rooms = this._presetRooms({ map_id: e.map_id, rooms: null }); view.loaded = true; redraw();
+      }
     });
     this._presetRuns().then((runs) => { if (live()) { view.runs = runs; drawEst(); } });
   }

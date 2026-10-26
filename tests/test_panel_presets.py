@@ -156,88 +156,135 @@ def _has_playwright() -> bool:
         return False
 
 
-def _picture() -> str:
-    # A 40 x 40 px map (10 x 10 cells of 50 mm, 4 px each): room 1 the left half, room 2 the right.
-    img = Image.new("RGBA", (40, 40), (255, 179, 186, 255))
-    img.paste((186, 225, 255, 255), (20, 0, 40, 40))
+def _png(img: Image.Image) -> str:
     buf = io.BytesIO()
     img.save(buf, "PNG")
     return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
 
 
+def _maps() -> tuple[str, str]:
+    """A 10 x 10 cell map (50 mm cells, 4 px each, so a 40 x 40 px picture) and its room-id grid,
+    as the integration sends them. Room 2 is the top right quarter; room 1 is an L around it (the
+    left half and the bottom right), so room 1's box holds all of room 2. Both rooms are painted
+    the same colour (the palette repeats) and room 1's name sits on it in white: picking must go
+    by the grid, never by colour. The bottom left cell is plain floor (255)."""
+    pic = Image.new("RGBA", (40, 40), (255, 179, 186, 255))
+    pic.paste((255, 255, 255, 255), (4, 18, 16, 22))          # room 1's name, drawn on the picture
+    mask = Image.new("L", (10, 10), 1)
+    mask.paste(2, (5, 0, 10, 5))
+    mask.putpixel((0, 9), 255)
+    return _png(pic), _png(mask)
+
+
 SMOKE = r"""
 const { chromium } = require("playwright"), fs = require("fs");
-const [panelPath, picture, admin] = process.argv.slice(1);
+const [panelPath, picture, mask, admin] = process.argv.slice(1);
 (async () => {
   const browser = await chromium.launch(), page = await browser.newPage({ viewport: { width: 1100, height: 1400 } });
   const errors = []; page.on("pageerror", (e) => errors.push(e.message));
-  await page.setContent(`<!doctype html><body></body>`);
-  await page.evaluate(([picture, admin]) => {
+  await page.setContent(`<!doctype html><body style="margin:0"></body>`);
+  await page.evaluate(([picture, mask, admin]) => {
     customElements.define("tapo-rv30-card", class extends HTMLElement { setConfig(c) { this._config = c; } set hass(h) {} });
     const S = (id, attrs = {}, state = "unknown") => ({ entity_id: id, state, attributes: attrs });
+    const cells = [{ id: 1, name: "Left", bbox: [0, 0, 39, 39], centre: [10, 20], cells: 75 }, { id: 2, name: "Right <b>", bbox: [20, 0, 39, 19], centre: [30, 10], cells: 25 }];
     const states = {
-      "vacuum.robot": S("vacuum.robot", { friendly_name: "Robot", integration: "tapo_rv30" }, "docked"),
-      "camera.robot_map": S("camera.robot_map", { map_id: 1, maps: [{ id: 1, name: "Down", current: true }, { id: 2, name: "Up", current: false }] }),
+      "vacuum.robot": S("vacuum.robot", { friendly_name: "Robot", integration: "tapo_rv30", fan_speed: "Turbo", water_level: "low", clean_passes: 1 }, "docked"),
+      "camera.robot_map": S("camera.robot_map", { map_id: 1, room_geometry: cells, map_geometry: { resolution_mm: 50 },
+        maps: [{ id: 1, name: "Down", current: true }, { id: 2, name: "Up", current: false }] }),
       "sensor.robot_schedules": S("sensor.robot_schedules", { schedules: [] }),
       "button.robot_preset_mop": S("button.robot_preset_mop", { friendly_name: "Robot Preset Mop", preset_id: 3, preset_name: "Mop", rooms: ["Left"] }),
     };
     const entities = {}; for (const id in states) entities[id] = { entity_id: id, device_id: "d", platform: "tapo_rv30" };
     entities["button.robot_preset_mop"].translation_key = "preset";
-    window.ws = []; window.services = []; window.confirms = []; window.fail = null;
+    window.ws = []; window.services = []; window.confirms = []; window.fail = null; window.editFail = false;
+    // Preset 3 is on both maps: ids repeat across maps.
     window.presets = [
       { id: 3, map_id: 1, name: "Mop", clean_order: true, valid: true, rooms: [{ id: 1, name: "Left", suction: 1, water: 3, passes: 1 }, { id: 2, name: "Right <b>", suction: 1, water: 3, passes: 2 }],
         schedules: [{ id: 7, time: "08:00", days: ["Mon", "Tue"], enabled: true }] },
-      { id: 3, map_id: 2, name: "Upstairs mop", clean_order: false, valid: false, rooms: [{ id: 5, name: "Landing", suction: 5, water: 0, passes: 1 }], schedules: [] }];
+      { id: 3, map_id: 2, name: "Upstairs mop", clean_order: false, valid: false, schedules: [],
+        rooms: [{ id: 5, name: "Landing", suction: 5, water: null, passes: 1 }, { id: 6, name: "Stairs", suction: null, water: null, passes: null }] }];
     window.confirm = (t) => { window.confirms.push(t); return true; };
     window.hass = { states, entities, devices: { d: { name: "Robot" } }, user: { is_admin: admin === "1" },
       callService: async (d, s, data, target) => { window.services.push({ d, s, data, target }); },
       callWS: async (m) => {
         window.ws.push(m);
-        if (m.type === "tapo_rv30/preset/list") return { maps: [{ id: 1, name: "Down", current: true }, { id: 2, name: "Up", current: false }], presets: window.presets };
+        if (m.type === "tapo_rv30/preset/list") return { maps: [{ id: 1, name: "Down", current: true, saved: true }, { id: 2, name: "Up", current: false, saved: true },
+          { id: 4, name: "Being made", current: false, saved: false }], presets: window.presets };
         if (m.type === "tapo_rv30/history/list") return { runs: [{ area: 20, minutes: 10, map_id: 1 }, { area: 10, minutes: 3, map_id: 1 }] };
-        if (m.type === "tapo_rv30/map/edit_get") return { map_id: m.map_id, current: m.map_id === 1, picture,
-          geometry: { scale_px_per_cell: 4, resolution_mm: 50, real_origin_mm: [0, 0], grid_size: [10, 10], image_size: [40, 40], rotation: 0 },
-          rooms: [{ id: 1, name: "Left", vertexs: [[0, 0], [250, 0], [250, 500], [0, 500]] }, { id: 2, name: "Right <b>", vertexs: [[250, 0], [500, 0], [500, 500], [250, 500]] }] };
+        if (m.type === "tapo_rv30/map/edit_get") {
+          if (window.editFail) throw { message: "the robot is busy" };
+          return { map_id: m.map_id, current: m.map_id === 1, picture, room_mask: mask, room_geometry: cells,
+            geometry: { scale_px_per_cell: 4, resolution_mm: 50, real_origin_mm: [0, 0], grid_size: [10, 10], image_size: [40, 40], rotation: 0 },
+            rooms: [{ id: 1, name: "Left", vertexs: null }, { id: 2, name: "Right <b>", vertexs: null }] };
+        }
         if (m.type === "tapo_rv30/preset/save") { if (window.fail) throw { message: window.fail }; return { preset_id: 9, name: m.name, map_id: m.map_id }; }
         throw { message: "unknown " + m.type };
       },
       connection: { subscribeEvents: async () => () => {}, subscribeMessage: async () => () => {} } };
-  }, [picture, admin]);
+  }, [picture, mask, admin]);
   await page.addScriptTag({ content: fs.readFileSync(panelPath, "utf8") });
   const out = {};
-  const R = (sel) => page.evaluate((sel) => { const r = window.p.shadowRoot; return [...r.querySelectorAll(sel)].map((e) => e.textContent.trim()); }, sel);
+  const R = (sel) => page.evaluate((sel) => [...window.p.shadowRoot.querySelectorAll(sel)].map((e) => e.textContent.trim()), sel);
   const click = async (sel, i = 0) => { await page.evaluate(([sel, i]) => window.p.shadowRoot.querySelectorAll(sel)[i].click(), [sel, i]); await page.waitForTimeout(150); };
+  const lists = () => page.evaluate(() => window.ws.filter((m) => m.type === "tapo_rv30/preset/list").length);
   await page.evaluate(() => { const p = document.createElement("tapo-rv30-panel"); window.p = p; document.body.appendChild(p); p.narrow = false; p.hass = window.hass; });
   await page.waitForTimeout(200);
   out.tabs = await R(".tabs button");
   await click('.tabs [data-tab="presets"]'); await page.waitForTimeout(200);
-  out.listCalls = (await page.evaluate(() => window.ws.filter((m) => m.type === "tapo_rv30/preset/list").length));
+  out.listCalls = await lists();
   out.titles = await R(".prow .t"); out.groups = await R(".pane h5");
+  out.mapPicker = await R(".pmap option");
   out.rows = await page.evaluate(() => [...window.p.shadowRoot.querySelectorAll(".prow .s")].map((e) => e.innerHTML));
   out.delDisabled = await page.evaluate(() => [...window.p.shadowRoot.querySelectorAll('[data-act="del"]')].map((b) => b.disabled));
-  // A state update that leaves the preset buttons alone does not read the list again.
-  await page.evaluate(() => { window.hass = { ...window.hass, states: { ...window.hass.states, "vacuum.robot": { ...window.hass.states["vacuum.robot"], state: "cleaning" } } }; window.p.hass = window.hass; });
+  // A status change that leaves the preset buttons alone neither reads the list again nor redraws it.
+  await page.evaluate(() => { window.p.shadowRoot.querySelector(".prow").dataset.mark = "1";
+    window.hass = { ...window.hass, states: { ...window.hass.states, "vacuum.robot": { ...window.hass.states["vacuum.robot"], state: "cleaning" } } }; window.p.hass = window.hass; });
   await page.waitForTimeout(150);
-  out.listCallsAfterUpdate = (await page.evaluate(() => window.ws.filter((m) => m.type === "tapo_rv30/preset/list").length));
+  out.listCallsAfterUpdate = await lists();
+  out.notRedrawn = await page.evaluate(() => window.p.shadowRoot.querySelector(".prow").dataset.mark === "1");
   // Run and delete (with the schedules that run it named).
   await click('[data-act="run"]');
   if (admin === "1") await click('[data-act="del"]');
-  out.confirms = await page.evaluate(() => window.confirms); out.services = await page.evaluate(() => window.services);
-  // Duplicate: a free name and no preset id; tap the right room on the map to take it out.
+  out.confirms = await page.evaluate(() => window.confirms);
+  out.services = await page.evaluate(() => window.services.map((x) => [x.s, x.data]));
   await page.waitForTimeout(150);
+
+  // Levels the robot never set: filled from a neighbour or the robot's own setting, and marked.
+  await click('.prow [data-act="edit"]', 1); await page.waitForTimeout(400);
+  out.unset = await page.evaluate(() => [...window.p.shadowRoot.querySelectorAll(".pk:not(.all) select")].map((s) => [s.dataset.k, Number(s.value), s.classList.contains("unset")]));
+  out.unsetNote = (await R(".ppicked .warn"))[0] || "";
+  out.unsetLabel = await page.evaluate(() => window.p.shadowRoot.querySelector('.pk[data-id="6"] select[data-k="suction"]').getAttribute("aria-label"));
+  await page.evaluate(() => { const s = window.p.shadowRoot.querySelector('.pk[data-id="6"] select[data-k="suction"]'); s.value = "2"; s.dispatchEvent(new Event("change", { bubbles: true })); });
+  out.unsetAfterPick = await page.evaluate(() => window.p.shadowRoot.querySelector('.pk[data-id="6"] select[data-k="suction"]').classList.contains("unset"));
+  await click(".cancel");
+
+  // Duplicate: a free name and no preset id; rooms picked on the map by the room-id grid.
   await click('.prow [data-act="dup"]'); await page.waitForTimeout(400);
   out.dupName = await page.evaluate(() => window.p.shadowRoot.querySelector(".pname").value);
   out.picked = await R(".pk:not(.all) .nm");
   const box = await page.evaluate(() => { const r = window.p.shadowRoot.querySelector(".pcanvas").getBoundingClientRect(); return [r.left, r.top, r.width, r.height]; });
-  await page.mouse.click(box[0] + box[2] * 0.75, box[1] + box[3] * 0.5); await page.waitForTimeout(150);
-  out.afterTap = await R(".pk:not(.all) .nm");
-  await page.mouse.click(box[0] + box[2] * 0.75, box[1] + box[3] * 0.5); await page.waitForTimeout(150);
-  out.afterTap2 = await R(".pk:not(.all) .nm");
-  await click('.pk[data-id="2"] [data-mv="-1"]');
+  const tap = async (fx, fy) => { await page.mouse.click(box[0] + box[2] * fx, box[1] + box[3] * fy); await page.waitForTimeout(120); return R(".pk:not(.all) .nm"); };
+  out.tapRight = await tap(0.75, 0.25);         // room 2, inside room 1's box
+  out.tapRightAgain = await tap(0.75, 0.25);
+  out.tapArm = await tap(0.75, 0.75);           // room 1's arm under room 2
+  out.tapName = await tap(0.25, 0.5);           // room 1's name on the picture
+  out.tapFloor = await tap(0.05, 0.95);         // floor that is no room: nothing
+  await click('.pk[data-id="1"] [data-mv="-1"]');
   out.moved = await R(".pk:not(.all) .nm");
   out.badges = await R(".pk:not(.all) .num");
   out.estimate = (await R(".pest"))[0];
   out.fans = await page.evaluate(() => [...window.p.shadowRoot.querySelectorAll('.pk[data-id="1"] select[data-k="suction"] option')].map((o) => o.textContent));
+  // The tint follows the grid: a pixel of room 1's arm is tinted, the floor cell is not.
+  out.tint = await page.evaluate(() => { const c = window.p.shadowRoot.querySelector(".pcanvas").getContext("2d");
+    return { arm: [...c.getImageData(30, 30, 1, 1).data], floor: [...c.getImageData(1, 38, 1, 1).data] }; });
+  // Medium widths without the narrow layout: nothing runs off the side.
+  out.fit = {};
+  for (const w of [900, 760]) {
+    await page.setViewportSize({ width: w, height: 1400 }); await page.waitForTimeout(200);
+    out.fit[w] = await page.evaluate(() => { const s = window.p.shadowRoot.querySelector(".save").getBoundingClientRect();
+      return { scroll: document.documentElement.scrollWidth, inner: innerWidth, saveRight: s.right, twoLines: getComputedStyle(window.p.shadowRoot.querySelector(".pk:not(.all) .lv")).gridRowStart === "2" }; });
+  }
+  await page.setViewportSize({ width: 1100, height: 1400 });
   // An open editor survives a state update.
   await page.evaluate(() => { window.p.hass = { ...window.hass }; });
   out.stillOpen = await page.evaluate(() => !!window.p.shadowRoot.querySelector(".pname"));
@@ -248,11 +295,23 @@ const [panelPath, picture, admin] = process.argv.slice(1);
   await page.evaluate(() => { window.fail = null; }); await click(".save"); await page.waitForTimeout(300);
   out.saved = await page.evaluate(() => window.ws.filter((m) => m.type === "tapo_rv30/preset/save").pop());
   out.backToList = await page.evaluate(() => !window.p.shadowRoot.querySelector(".pname") && !!window.p.shadowRoot.querySelector(".prow"));
-  out.listCallsAfterSave = (await page.evaluate(() => window.ws.filter((m) => m.type === "tapo_rv30/preset/list").length));
-  // Schedule: hands over to a new schedule on the Schedules tab, set to this preset.
-  await click('.prow [data-act="sched"]'); await page.waitForTimeout(200);
-  out.sched = await page.evaluate(() => ({ tab: window.p._tab, title: window.p.shadowRoot.querySelector(".pane h3").textContent.trim(),
-    preset: window.p.shadowRoot.querySelector("select.preset").value, mode: window.p.shadowRoot.querySelector(".mode .on").dataset.mode }));
+  out.listCallsAfterSave = await lists();
+
+  // The map cannot be read: the current map's rooms still come from the camera.
+  await page.evaluate(() => { window.editFail = true; });
+  await click('.tabs [data-tab="presets"]'); await page.waitForTimeout(200);
+  await click('[data-act="new"]'); await page.waitForTimeout(300);
+  out.chipsNoMap = await R(".prooms .chip");
+  out.statusNoMap = (await R(".pstatus"))[0];
+  await click(".cancel");
+
+  // Schedule: hands over to a new schedule set to this preset, by map and id (3 is on both maps).
+  await click('.prow [data-act="sched"]', 1); await page.waitForTimeout(200);
+  out.sched = await page.evaluate(() => { const r = window.p.shadowRoot, sel = r.querySelector("select.preset");
+    return { tab: window.p._tab, title: r.querySelector(".pane h3").textContent.trim(), preset: sel.value,
+      label: sel.selectedOptions[0].textContent, mode: r.querySelector(".mode .on").dataset.mode, groups: [...sel.querySelectorAll("optgroup")].map((g) => g.label) }; });
+  await click('[data-quick="daily"]'); await click(".save");
+  out.schedCall = await page.evaluate(() => window.services.filter((x) => x.s === "add_schedule").map((x) => x.data).pop());
   out.errors = errors;
   console.log(JSON.stringify(out));
   await browser.close();
@@ -263,8 +322,9 @@ const [panelPath, picture, admin] = process.argv.slice(1);
 @pytest.mark.skipif(not _has_playwright(), reason="playwright for node not installed")
 @pytest.mark.parametrize("admin", [True, False])
 def test_presets_tab_renders_and_edits(admin):
+    picture, mask = _maps()
     try:
-        run = subprocess.run([NODE, "-e", SMOKE, str(PANEL), _picture(), "1" if admin else "0"],
+        run = subprocess.run([NODE, "-e", SMOKE, str(PANEL), picture, mask, "1" if admin else "0"],
                              capture_output=True, text=True, check=True, timeout=120)
     except subprocess.CalledProcessError as exc:
         if "Executable doesn't exist" in exc.stderr or "browserType.launch" in exc.stderr:
@@ -273,34 +333,53 @@ def test_presets_tab_renders_and_edits(admin):
     out = json.loads(run.stdout.strip().splitlines()[-1])
     assert out["errors"] == []
     assert out["tabs"][:3] == ["Schedules", "Presets", "Planner"]
-    assert out["listCalls"] == 1 and out["listCallsAfterUpdate"] == 1
+    assert out["listCalls"] == 1 and out["listCallsAfterUpdate"] == 1 and out["notRedrawn"] is True
     assert out["titles"] == ["Mop in order", "Upstairs mop"]
-    assert out["groups"] == ["Down (current map)", "Up"]
+    assert out["groups"] == ["Down (current map)", "Up"]           # the map being made is left out
+    assert out["mapPicker"] == ["Down", "Up"]
     # Room names are escaped, in order with arrows; levels and schedules summarised.
     assert out["rows"][0] == "Left \u2192 Right &lt;b&gt;"
     assert out["rows"][1].startswith("Quiet, water high, 1x/2x") and "1 schedule" in out["rows"][1]
     assert out["delDisabled"] == [not admin, not admin]
     assert out["confirms"][0] == "Start Mop now? The robot will leave the dock."
-    calls = [(s["s"], s["data"]) for s in out["services"]]
-    assert calls[0] == ("run_preset", {"preset": 3, "map": 1})
+    assert out["services"][0] == ["run_preset", {"preset": 3, "map": 1}]         # by map and id
     if admin:
         assert "Schedules that run it (08:00 Mon Tue) will be left pointing at nothing" in out["confirms"][1]
-        assert calls[1] == ("delete_preset", {"preset": 3, "map": 1, "confirm": True})
-    else:
-        assert len(calls) == 1
+        assert out["services"][1] == ["delete_preset", {"preset": 3, "map": 1, "confirm": True}]
+
+    # Landing: water unset -> the robot's own (low). Stairs: suction from Landing (Ultra), water
+    # from the robot, passes from Landing; every filled-in level marked until it is picked.
+    assert out["unset"] == [["suction", 5, False], ["water", 1, True], ["passes", 1, False],
+                            ["suction", 5, True], ["water", 1, True], ["passes", 1, True]]
+    assert "not set on the robot" in out["unsetNote"] and out["unsetLabel"] == "Suction for Stairs (was unset)"
+    assert out["unsetAfterPick"] is False
+
     assert out["dupName"] == "Mop copy"
     assert out["picked"] == ["Left", "Right <b>"]
-    assert out["afterTap"] == ["Left"] and out["afterTap2"] == ["Left", "Right <b>"]
-    assert out["moved"] == ["Right <b>", "Left"] and out["badges"] == ["1", "2"]
-    # 0.125 m2 per room; Right came back with the last row's levels when the editor opened (its
-    # own, 2 passes): 0.375 m2 at 2 m2 a minute, from the one run of 5 minutes or more.
-    assert out["estimate"].startswith("Estimate: about 0.4 m") and "counting every pass" in out["estimate"]
+    assert out["tapRight"] == ["Left"] and out["tapRightAgain"] == ["Left", "Right <b>"]
+    assert out["tapArm"] == ["Right <b>"] and out["tapName"] == ["Right <b>", "Left"]
+    assert out["tapFloor"] == ["Right <b>", "Left"]
+    assert out["moved"] == ["Left", "Right <b>"] and out["badges"] == ["1", "2"]
+    # Sizes from the room cells (75 and 25 of 0.0025 m2); both rooms came back with the last row's
+    # levels when the editor opened (2 passes): 0.5 m2 at 2 m2 a minute, from the one long run.
+    assert out["estimate"].startswith("Estimate: about 0.5 m") and "counting every pass" in out["estimate"]
     assert "around 1 min" in out["estimate"] and "(from 1 past clean)" in out["estimate"]
     assert out["fans"] == ["Quiet", "Standard", "Turbo", "Max", "Ultra"]       # Ultra: a preset already uses it
+    assert out["tint"]["arm"] != [255, 179, 186, 255] and out["tint"]["floor"] == [255, 179, 186, 255]
+    for w in ("900", "760"):
+        fit = out["fit"][w]
+        assert fit["scroll"] <= fit["inner"] and fit["saveRight"] <= fit["inner"], (w, fit)
+    assert out["fit"]["760"]["twoLines"] is True
     assert out["stillOpen"] is True
     assert out["err"] == "a preset called 'Mop copy' already exists on that map"
     saved = out["saved"]
     assert "preset_id" not in saved and saved["map_id"] == 1 and saved["name"] == "Mop copy" and saved["clean_order"] is True
-    assert saved["rooms"] == [{"id": 2, "suction": 1, "water": 3, "passes": 2}, {"id": 1, "suction": 1, "water": 3, "passes": 1}]
+    assert saved["rooms"] == [{"id": 1, "suction": 1, "water": 3, "passes": 2}, {"id": 2, "suction": 1, "water": 3, "passes": 2}]
     assert out["backToList"] is True and out["listCallsAfterSave"] >= 2
-    assert out["sched"] == {"tab": "schedules", "title": "New schedule", "preset": "3", "mode": "preset"}
+
+    assert out["chipsNoMap"] == ["Left", "Right <b>"] and out["statusNoMap"].startswith("Could not read the map (the robot is busy)")
+
+    assert out["sched"] == {"tab": "schedules", "title": "New schedule", "preset": "2:3", "label": "Upstairs mop",
+                            "mode": "preset", "groups": ["Down", "Up"]}
+    assert out["schedCall"]["preset"] == 3 and out["schedCall"]["map"] == "2"
+    assert "rooms" not in out["schedCall"] and "room_ids" not in out["schedCall"]
