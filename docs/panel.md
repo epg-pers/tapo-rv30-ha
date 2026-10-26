@@ -47,8 +47,9 @@ On top of the app:
 - **Delete** warns you when schedules run the preset, since the robot would leave them pointing at
   nothing.
 
-Saving writes to the robot the same way the app does, and the map's setup snapshot is updated
-straight away, so a later restore brings the preset back.
+Saving writes to the robot the same way the app does. For the map the robot is on, the map's setup
+snapshot is updated straight away, so a later restore brings the preset back; another map's
+snapshot catches up the next time the robot uses that map.
 
 ### Planner
 

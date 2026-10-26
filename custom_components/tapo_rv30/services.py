@@ -117,6 +117,13 @@ def _rooms_list(call: ServiceCall) -> list[str]:
     return rooms
 
 
+def _flag(value) -> bool:
+    """A yes/no field: true, 1, "true", "yes", "on" (no schema coerces it)."""
+    if isinstance(value, str):
+        return value.strip().lower() in ("true", "yes", "on", "1")
+    return bool(value)
+
+
 def _levels(call: ServiceCall) -> dict:
     out = {}
     try:
@@ -1089,6 +1096,7 @@ def async_setup_services(hass: HomeAssistant) -> None:
         process: dict = {}
         code = None
         tidy: dict | None = None
+        carry_why = None
         landed = None
         carrier = False
         map_id = backup_id
@@ -1124,8 +1132,9 @@ def async_setup_services(hass: HomeAssistant) -> None:
                 except Exception as exc:
                     raise HomeAssistantError(f"{call.service}: could not read the robot's restore progress: {exc}") from exc
                 # A new map takes the source map's presets (and its schedules, switched off, if asked).
-                carry = (await _carry_from(coord, src_id, any(m.get("map_id") == src_id for m in map_list),
-                                           bool(call.data.get("copy_schedules"))) if new_name else None)
+                carry, carry_why = ((await _carry_from(coord, src_id, any(m.get("map_id") == src_id for m in map_list),
+                                                       _flag(call.data.get("copy_schedules"))))
+                                    if new_name else (None, None))
                 if carrier:
                     # The robot writes the backup's room names, colours and furniture onto the carrier:
                     # keep the carrier's own, recorded before the robot is asked so that a Home
@@ -1220,6 +1229,8 @@ def async_setup_services(hass: HomeAssistant) -> None:
                 else "still applying when polling ended" if status in (2, None) else None)
         if tidy and tidy["errors"]:
             note = ((note + "; ") if note else "") + "after the restore: " + "; ".join(tidy["errors"])
+        if carry_why:
+            note = ((note + "; ") if note else "") + carry_why
         put_back = bool(tidy and tidy["carrier_ok"])
         next_steps = None
         finishing = False
@@ -1239,11 +1250,8 @@ def async_setup_services(hass: HomeAssistant) -> None:
                           + f" putting \"{carrier_name}\" back as it was) and lets you know when it is done.")
         elif status == 3 and new_name:
             if saved:
-                got = (tidy or {}).get("carried") or {}
-                took = [f"{got[k]} {k if got[k] != 1 else k[:-1]}" for k in ("presets", "schedules") if got.get(k)]
                 next_steps = (f"Restored as a new map, \"{new_name}\", with the backup's room names and furniture"
-                              + (f" and {' and '.join(took)}" + (" (switched off)" if got.get("schedules") else "")
-                                 if took else "") + "."
+                              + mapcopy.carried_text((tidy or {}).get("carried")) + "."
                               + (f" \"{carrier_name}\" was put back as it was" if put_back else "")
                               + (" and is the current map again." if put_back and tidy and tidy["switched"]
                                  else "." if put_back else ""))
@@ -1272,9 +1280,10 @@ def async_setup_services(hass: HomeAssistant) -> None:
                 "source": src, "md5": md5, "url": url, "error_code": code, "process": process,
                 "applied": status == 3, "finishing": finishing, "note": note, "next_steps": next_steps}
 
-    async def _carry_from(coord: TapoCoordinator, src_id: int, on_robot: bool, with_schedules: bool) -> dict | None:
+    async def _carry_from(coord: TapoCoordinator, src_id: int, on_robot: bool,
+                          with_schedules: bool) -> tuple[dict | None, str | None]:
         """What a new map made from map src_id takes with it (mapsnapshot.carry_setup): read from the
-        robot while it has that map, else from the map's saved setup. None when there is neither."""
+        robot while it has that map, else from the map's saved setup. With None, why not."""
         from . import mapsnapshot
         try:
             if on_robot:
@@ -1283,12 +1292,12 @@ def async_setup_services(hass: HomeAssistant) -> None:
                 snap = await hass.async_add_executor_job(
                     setup_apply.find_snapshot, setup_apply.snapshot_folders(hass, coord), src_id, None)
                 if snap is None:
-                    return None
+                    return None, "no saved setup for that map, so no presets came with it"
                 presets, schedules = snap.get("presets"), snap.get("schedules")
         except Exception as exc:     # the copy itself can still go ahead without them
             _LOGGER.warning("%s: could not read the presets of map %s to copy them: %s", coord.device_name, src_id, exc)
-            return None
-        return mapsnapshot.carry_setup(presets, schedules, src_id, with_schedules)
+            return None, f"could not read the map's presets to copy them ({exc})"
+        return mapsnapshot.carry_setup(presets, schedules, src_id, with_schedules), None
 
     async def _wait_br(coord: TapoCoordinator, kind: int, baseline: dict, src: int | None = None,
                        tries: int = 90, progress=None) -> dict:

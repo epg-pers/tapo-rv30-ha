@@ -34,7 +34,7 @@ WHOLE_HOUSE = {"id": "S2", "enable": True, "mode": "repeat", "week_day": 1, "s_m
 # ---- presetedit -----------------------------------------------------------------------------
 def test_view_lists_rooms_in_order_with_their_own_levels_and_the_schedules_that_run_it():
     rules = [{"rule_id": 2, "rule_name": _b64("All downstairs"), "mode": "room", "map_id": SRC, "invalid": 0}]
-    out = presetedit.view(rules, {2: APP_PRESET}, {SRC: {4: "Hallway", 5: "Lounge"}},
+    out = presetedit.view(rules, {(SRC, 2): APP_PRESET}, {SRC: {4: "Hallway", 5: "Lounge"}},
                           [{"id": "S1", "time": "08:30", "days": ["Mon"], "enabled": True, "preset_id": 2},
                            {"id": "S9", "time": "10:00", "days": [], "enabled": True, "preset_id": None}])
     assert out == [{"id": 2, "map_id": SRC, "name": "All downstairs", "clean_order": True, "valid": True,
@@ -76,6 +76,8 @@ def test_body_keeps_the_order_and_per_room_levels_and_edits_by_id():
     ("A", [{"id": 1, "suction": 9, "water": 1, "passes": 1}], [], "suction"),
     ("A", [{"id": 1, "suction": 2, "water": 1, "passes": 4}], [], "passes"),
     ("A", [{"id": 1, "suction": 2}], [], "missing"),
+    ("A", [{"id": 1, "suction": True, "water": 1, "passes": 1}], [], "whole numbers"),
+    ("A", [{"id": 1, "suction": 2.7, "water": 1, "passes": 1}], [], "whole numbers"),
 ])
 def test_body_refuses_what_the_robot_should_not_be_sent(name, rooms, others, why):
     with pytest.raises(presetedit.PresetError, match=why):
@@ -126,7 +128,7 @@ def test_carry_recreates_presets_on_the_new_map_and_points_schedules_at_them():
     robot = _Robot()
     setup = mapsnapshot.carry_setup([APP_PRESET], [SCHEDULE], SRC, with_schedules=True)
     out = mapcopy.carry(robot, NEW, setup)
-    assert out == {"presets": 1, "schedules": 1, "skipped": []}
+    assert out == {"presets": 1, "schedules": 1, "skipped": [], "failed": False}
     made = robot.rules[0]
     assert made["map_id"] == NEW and made["rule_name"] == APP_PRESET["rule_name"] and made["clean_order"] is True
     assert made["area_list"] == APP_PRESET["area_list"]                       # same order and levels
@@ -192,3 +194,30 @@ def test_tidy_without_carry_is_as_before():
     pend = {"map_id": NEW, "carrier": SRC, "name": "Copy", "copy": True, "done": {"carrier": True}}
     out = mapcopy.tidy(robot, pend)
     assert "carried" not in out and robot.rules == []
+
+
+def test_tidy_retries_a_carry_the_robot_refused_and_adds_it_once():
+    robot = _TidyRobot()
+    refuse = [True]
+    real_add = _Robot.add_preset
+
+    def flaky(self, body):              # refused once, then taken
+        if refuse[0]:
+            refuse[0] = False
+            raise RuntimeError("Device error -1")
+        return real_add(self, body)
+    robot.add_preset = flaky.__get__(robot)
+    pend = {"map_id": NEW, "carrier": SRC, "name": "Copy", "copy": True, "done": {"carrier": True},
+            "carry": mapsnapshot.carry_setup([APP_PRESET], [SCHEDULE], SRC, with_schedules=True)}
+    out = mapcopy.tidy(robot, pend)
+    assert out["carried"]["failed"] and not pend["done"].get("carry") and not pend["done"].get("finished")
+    out = mapcopy.tidy(robot, pend)
+    assert not out["carried"]["failed"] and pend["done"]["carry"] and pend["done"]["finished"]
+    assert len(robot.rules) == 1 and len(robot.schedules) == 1
+    assert robot.schedules[0]["clean_attr"]["custom_rule_id"] == robot.rules[0]["rule_id"]
+
+
+def test_carried_text():
+    assert mapcopy.carried_text({"presets": 2, "schedules": 1}) == ", plus 2 presets and 1 schedule (switched off)"
+    assert mapcopy.carried_text({"presets": 1, "schedules": 0}) == ", plus 1 preset"
+    assert mapcopy.carried_text(None) == ""

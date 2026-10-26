@@ -20,7 +20,7 @@ from homeassistant.helpers import entity_registry as er
 
 from . import presetedit
 from .const import DOMAIN
-from .mapdata import b64name
+from .mapdata import b64name, fold
 
 _LOGGER = logging.getLogger(__name__)
 _KEY = f"{DOMAIN}_preset_ws"
@@ -54,7 +54,7 @@ def _read(coord) -> tuple[list, dict, dict]:
     details = {}
     for r in rules:
         try:
-            details[r["rule_id"]] = coord.client.get_preset_detail(r.get("map_id"), r["rule_id"])
+            details[(r.get("map_id"), r["rule_id"])] = coord.client.get_preset_detail(r.get("map_id"), r["rule_id"])
         except Exception as exc:    # shown without its rooms rather than not at all
             _LOGGER.debug("Preset %s detail failed: %s", r.get("rule_id"), exc)
     names = {mid: _room_names(coord, mid) for mid in {r.get("map_id") for r in rules}}
@@ -98,8 +98,8 @@ async def ws_preset_save(hass: HomeAssistant, connection: websocket_api.ActiveCo
         connection.send_error(msg["id"], "not_found", f"No Tapo vacuum for {msg['entity_id']}")
         return
     map_id, preset_id = msg["map_id"], msg.get("preset_id")
-    if not any(m["id"] == map_id for m in coord.maps):
-        connection.send_error(msg["id"], "invalid", f"map {map_id} is not on {coord.device_name}")
+    if not any(m["id"] == map_id and m.get("saved", True) is not False for m in coord.maps):
+        connection.send_error(msg["id"], "invalid", f"map {map_id} is not a saved map on {coord.device_name}")
         return
 
     def _write() -> tuple[int, int | None]:
@@ -113,7 +113,6 @@ async def ws_preset_save(hass: HomeAssistant, connection: websocket_api.ActiveCo
         if code or preset_id is not None:
             return code, preset_id
         # A new preset: the robot picks its id; find it by its (unique) name.
-        from .mapdata import fold
         made = [r for r in coord.client.get_presets() if r.get("map_id") == map_id
                 and fold(b64name(r.get("rule_name", ""))) == fold(msg["name"].strip())]
         return code, made[0]["rule_id"] if made else None

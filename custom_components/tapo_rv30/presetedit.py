@@ -20,17 +20,18 @@ class PresetError(ValueError):
     """A preset the robot should not be sent, with a reason the user can act on."""
 
 
-def view(rules: list[dict], details: dict[int, dict], room_names: dict[int, dict[int, str]],
+def view(rules: list[dict], details: dict[tuple, dict], room_names: dict[int, dict[int, str]],
          schedules: list[dict]) -> list[dict]:
     """Presets as the editor lists them. rules: getCustomizationRulesInfo's rule_list;
-    details: rule_id -> getCustomizationRuleData; room_names: map_id -> {room id: name};
+    details: (map_id, rule_id) -> getCustomizationRuleData (presets are kept per map);
+    room_names: map_id -> {room id: name};
     schedules: decoded schedules (mapdata.decode_schedule), to show which run each preset."""
     out = []
     for rule in rules or []:
         rid = rule.get("rule_id")
         if rid is None:
             continue
-        detail = details.get(rid) or {}
+        detail = details.get((rule.get("map_id"), rid)) or {}
         names = room_names.get(rule.get("map_id")) or {}
         rooms = [{"id": a.get("id"), "name": names.get(a.get("id")) or f"Room {a.get('id')}",
                   "suction": a.get("suction"), "water": a.get("cistern"), "passes": a.get("clean_number")}
@@ -42,7 +43,8 @@ def view(rules: list[dict], details: dict[int, dict], room_names: dict[int, dict
             "rooms": rooms,
             "schedules": [{"id": s.get("id"), "time": s.get("time"), "days": s.get("days") or [],
                            "enabled": s.get("enabled", False)}
-                          for s in schedules or [] if s.get("preset_id") == rid],
+                          for s in schedules or [] if s.get("preset_id") == rid
+                          and s.get("map_id") in (rule.get("map_id"), None)],
         })
     return out
 
@@ -65,9 +67,11 @@ def body(name, map_id: int, rooms: list, clean_order: bool, map_rooms: list[dict
     seen, items = set(), []
     for r in rooms:
         try:
-            rid, su, wa, pa = (int(r["id"]), int(r["suction"]), int(r["water"]), int(r["passes"]))
-        except (KeyError, TypeError, ValueError) as exc:
+            rid, su, wa, pa = (r["id"], r["suction"], r["water"], r["passes"])
+        except (KeyError, TypeError) as exc:
             raise PresetError(f"a room is missing its settings ({exc})") from exc
+        if not all(isinstance(v, int) and not isinstance(v, bool) for v in (rid, su, wa, pa)):
+            raise PresetError("room ids and levels must be whole numbers")
         if rid not in carpet:
             raise PresetError(f"room {rid} is not on this map")
         if rid in seen:

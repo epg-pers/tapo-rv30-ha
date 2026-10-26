@@ -177,6 +177,7 @@ class TapoCoordinator(DataUpdateCoordinator):
         self._caps_attempts = 0
         self._last_record_ts: int | None = None   # newest getCleanRecords timestamp seen
         self.maps: list[dict] = []                 # [{id, name, current}] refreshed with the map
+        self._snapshot_lock = asyncio.Lock()       # one map setup snapshot write at a time
         self.path_points: list[tuple[int, int]] = []   # mm, current or last run
         self._path_id: int | None = None
         self._last_ok: float | None = None         # monotonic time of the last good poll
@@ -868,7 +869,8 @@ class TapoCoordinator(DataUpdateCoordinator):
                 msg, title = (f"The restore did not complete: the restored map never appeared. \"{carrier}\" "
                               f"was put back as it was.{problems}"), "map restore did not complete"
             elif pend.get("copy"):
-                msg = (f"The copy \"{pend.get('name')}\" is saved" if out["saved"] else
+                from .mapcopy import carried_text
+                msg = (f"The copy \"{pend.get('name')}\" is saved{carried_text(out.get('carried'))}" if out["saved"] else
                        f"The copy came back as map {pend['map_id']} but is not saved; save it in the Tapo app")
                 msg += f", and \"{carrier}\" was put back as it was.{problems}"
                 title = "map copied"
@@ -1125,6 +1127,11 @@ class TapoCoordinator(DataUpdateCoordinator):
         return out
 
     async def _auto_snapshot(self) -> None:
+        # A poll and a settings write can both get here; one snapshot write at a time.
+        async with self._snapshot_lock:
+            await self._auto_snapshot_now()
+
+    async def _auto_snapshot_now(self) -> None:
         """Keep config/tapo_rv30/map_setups/<map_id>.json in step with the map's layers,
         presets and schedules, from data already polled (no extra robot calls). A snapshot that
         looks like a lost or freshly restored map (no rooms, or fewer named rooms) never

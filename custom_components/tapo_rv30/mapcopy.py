@@ -117,7 +117,8 @@ def carry(client, map_id: int, setup: dict) -> dict:
     """Put a copied map's presets (and its schedules, switched off, if they came along) onto
     the new map (blocking). Presets keep their names, rooms, order and per-room settings; one
     whose name the map already has is left alone, so a retry adds only what is missing.
-    Schedules are pointed at the new presets' ids. Returns counts and what was skipped."""
+    Schedules are pointed at the new presets' ids. Returns counts, what was skipped, and
+    failed: a write the robot refused or did not answer (worth another go, unlike a skip)."""
     from . import mapsnapshot
     data = client.get_map_data(map_id)
 
@@ -127,15 +128,17 @@ def carry(client, map_id: int, setup: dict) -> dict:
 
     plan = mapsnapshot.plan(setup, map_id, data.get("area_list", []), data.get("furniture_list", []),
                             presets_now(), client.get_schedules())
-    out = {"presets": 0, "schedules": 0, "skipped": list(plan["skipped"])}
+    out = {"presets": 0, "schedules": 0, "skipped": list(plan["skipped"]), "failed": False}
     for body in plan["presets"]:
         try:
             if client.add_preset(body) == 0:
                 out["presets"] += 1
             else:
                 out["skipped"].append(f"preset {mapsnapshot._b64(body.get('rule_name'))!r}: refused")
+                out["failed"] = True
         except Exception as exc:
             out["skipped"].append(f"preset {mapsnapshot._b64(body.get('rule_name'))!r}: {exc}")
+            out["failed"] = True
     if plan["schedules"]:
         ready, why = mapsnapshot.resolve_schedules(plan["schedules"], presets_now(), map_id)
         out["skipped"] += why
@@ -145,7 +148,17 @@ def carry(client, map_id: int, setup: dict) -> dict:
                 out["schedules"] += 1
             except Exception as exc:
                 out["skipped"].append(f"schedule at {rule.get('s_min')} min: {exc}")
+                out["failed"] = True
     return out
+
+
+def carried_text(got: dict | None) -> str:
+    """", plus 2 presets and 1 schedule (switched off)" for a message, or "" for nothing."""
+    got = got or {}
+    took = [f"{got[k]} {k if got[k] != 1 else k[:-1]}" for k in ("presets", "schedules") if got.get(k)]
+    if not took:
+        return ""
+    return ", plus " + " and ".join(took) + (" (switched off)" if got.get("schedules") else "")
 
 
 ONE_OFF_TRIES = 3       # goes at saving the restored map / switching back before giving up on them
@@ -230,7 +243,10 @@ def tidy(client, pend: dict) -> dict:
             got = carry(client, landed, pend["carry"])
             out["carried"] = got
             out["errors"] += [f"map {landed}: {s}" for s in got["skipped"]]
-            done["carry"] = True
+            if got["failed"]:
+                retry = True        # a retry adds only what is still missing (matched by name)
+            else:
+                done["carry"] = True
         except Exception as exc:
             out["errors"].append(f"presets of map {landed}: {exc}")
             retry = True
