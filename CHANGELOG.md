@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.37.1
+
+### Fixed
+
+- **A copy could still say "saving failed" when it had worked.** If the robot stopped answering right after the restore, Home Assistant finished the copy in the background (saved it, brought its presets across and switched back) before the copy action answered, and the answer used the earlier reading. It now reports what was actually done. A copy whose save is still being retried now says it is being finished in the background, instead of reporting a failure.
+- The schedule editor's preset list now comes from the Presets tab only while that list is up to date.
+
 ## v0.37.0
 
 ### Added

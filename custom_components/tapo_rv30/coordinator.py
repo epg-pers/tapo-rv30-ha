@@ -178,6 +178,7 @@ class TapoCoordinator(DataUpdateCoordinator):
         self._last_record_ts: int | None = None   # newest getCleanRecords timestamp seen
         self.maps: list[dict] = []                 # [{id, name, current}] refreshed with the map
         self._snapshot_lock = asyncio.Lock()       # one map setup snapshot write at a time
+        self._last_tidy: dict | None = None        # {map_id, out}: the last restore tidy-up and what it did
         self.path_points: list[tuple[int, int]] = []   # mm, current or last run
         self._path_id: int | None = None
         self._last_ok: float | None = None         # monotonic time of the last good poll
@@ -806,6 +807,7 @@ class TapoCoordinator(DataUpdateCoordinator):
                                 "done": {}}
         if carry and (carry.get("presets") or carry.get("schedules")):
             self.pending_restore["carry"] = carry
+        self._last_tidy = None      # a tidy result never outlives the restore it belongs to
         self._save_restore()
 
     MAP_JOB_EVENT = f"{DOMAIN}_map_job"
@@ -819,6 +821,11 @@ class TapoCoordinator(DataUpdateCoordinator):
         self.hass.bus.async_fire(self.MAP_JOB_EVENT, {
             "entity_id": entity_id, "job": job, "stage": stage, "percent": max(0, min(100, round(percent))),
             "done": done, "error": error})
+
+    def last_tidy(self, map_id: int) -> dict | None:
+        """What the last tidy-up of the restore of map_id did (mapcopy.tidy's result), if any."""
+        last = self._last_tidy
+        return last["out"] if last and last["map_id"] == map_id else None
 
     def restore_unfinished(self) -> dict | None:
         """A restore whose carrier has not been put back yet. Copy, restore and delete wait for it;
@@ -894,6 +901,7 @@ class TapoCoordinator(DataUpdateCoordinator):
             if _opt_int(br.get("type")) == 2 and _opt_int(br.get("status")) == 2 and age < self.RESTORE_APPLYING_S:
                 return None
             out = await self.hass.async_add_executor_job(mapcopy.tidy, self.client, pend)
+            self._last_tidy = {"map_id": pend.get("map_id"), "out": out}
         except Exception as exc:
             _LOGGER.warning("%s: tidying up after the restore of map %s failed (%s); trying again later",
                             self.device_name, pend.get("map_id"), exc)

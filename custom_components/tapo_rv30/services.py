@@ -1228,6 +1228,11 @@ def async_setup_services(hass: HomeAssistant) -> None:
                         pass
                 hass.loop.call_later(600 if keep_url else 5, lambda: hass.async_add_executor_job(_rm))
         status = _opt_int(process.get("status"))
+        if tidy is None and new_name and code == 0 and (coord.pending_restore or {}).get("map_id") != backup_id:
+            # Letting go of the map lock above lets a poll's background tidy finish the copy (save it,
+            # its presets, the switch back) before this answers: report what that did, not the
+            # earlier read of a map not saved yet.
+            tidy = coord.last_tidy(backup_id)
         saved = bool(tidy and tidy["saved"]) or (bool(landed) and landed.get("is_saved", True) is not False)
         carrier_name = names.get(map_id)
         # The robot reports status 3 when the map is applied, 13 on failure, 2 while still working.
@@ -1251,7 +1256,7 @@ def async_setup_services(hass: HomeAssistant) -> None:
                           "back as it was" + (f" and saves the new map as \"{new_name}\"." if new_name else
                                               (f" and saves it as \"{label}\"." if label else
                                                "; then save the restored map in the Tapo app.")))
-        elif status == 3 and carrier and (tidy is None or not tidy.get("carrier_ok")) and coord.restore_unfinished():
+        elif status == 3 and carrier and coord.restore_unfinished():
             finishing = True
             next_steps = ("The map is on the robot; Home Assistant is finishing it in the background"
                           + (f" (saving it as \"{new_name or label}\" and" if (new_name or label) else " (")
