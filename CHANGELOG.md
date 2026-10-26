@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.39.1
+
+### Fixed
+
+- **Map editor edits could be lost while saving.** Edits made while a save was still with the robot were wiped when it finished, under "Saved.", and a save that finished after switching robots could wipe the other robot's unsaved edits. While a save runs the editor now takes no edits (Save, Undo, Discard, Turn and the map picker wait too); a reply only reloads the editor showing that robot; an editor reopened mid-save waits for it instead of loading the old zones; a result nobody saw is shown when that robot's editor next opens.
+
 ## v0.39.0
 
 ### Changed

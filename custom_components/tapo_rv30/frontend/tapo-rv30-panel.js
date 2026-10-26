@@ -1383,7 +1383,9 @@ class TapoRV30Panel extends HTMLElement {
     this._edit = { tool: "select", sel: null, areas: null, furniture: [], rooms: [], undo: [], img: null, geom: null, mapId: null,
       want: (this._editWant || {})[this._robot] || null, robot: this._robot };
     this._editEl.map = q(".emap"); this._editEl.use = q(".euse"); this._editEl.note = q(".enote");
+    this._editEl.save = q(".esave"); this._editEl.turns = [...pane.querySelectorAll(".eturn")];
     q(".emap").onchange = (e) => {
+      if (this._edit.saving) { if (this._edit.mapId != null) e.target.value = String(this._edit.mapId); return; }   // the save reloads this map
       if (this._edit.undo.length) {     // never drop unsaved edits by switching maps
         e.target.value = String(this._edit.mapId);
         this._editEl.status.textContent = "Save or discard your changes before editing another map.";
@@ -1394,17 +1396,17 @@ class TapoRV30Panel extends HTMLElement {
       this._editLoad();
     };
     pane.querySelectorAll(".eturn").forEach((b) => b.onclick = async () => {
-      if (this._edit.mapId == null || !this._edit.geom) return;
-      const to = ((this._edit.geom.rotation || 0) + Number(b.dataset.dir)) % 360;
-      const turns = pane.querySelectorAll(".eturn"), picker = this._editEl.map;
-      turns.forEach((x) => { x.disabled = true; }); picker.disabled = true;
-      this._editEl.status.textContent = "Turning the map...";
+      const ed = this._edit, el = this._editEl;
+      if (ed.mapId == null || !ed.geom || ed.saving || ed.turning) return;
+      const to = ((ed.geom.rotation || 0) + Number(b.dataset.dir)) % 360;
+      ed.turning = true; this._editLock(el, true);    // Save too: it would race the redraw
+      el.status.textContent = "Turning the map...";
       // Edits are kept in mm, so unsaved ones survive the turn: only the picture is redrawn.
       try {
-        if (await this._call(DOMAIN, "set_map_rotation", { map: String(this._edit.mapId), rotation: to }, { entity_id: this._robot }))
+        if (await this._call(DOMAIN, "set_map_rotation", { map: String(ed.mapId), rotation: to }, { entity_id: this._robot }))
           await this._editLoad(true);
-        else this._editEl.status.textContent = "";
-      } finally { turns.forEach((x) => { x.disabled = false; }); picker.disabled = false; }
+        else el.status.textContent = "";
+      } finally { ed.turning = false; this._editLock(el, false); }
     });
     q(".euse").onclick = async () => {
       const b = q(".euse"), id = this._edit.mapId, st = this._editEl.status;
@@ -1433,7 +1435,7 @@ class TapoRV30Panel extends HTMLElement {
     q(".etool").classList.add("on");
     q(".edel").onclick = () => this._editDelete();
     q(".eundo").onclick = () => this._editUndo();
-    q(".ecancel").onclick = () => this._editLoad();
+    q(".ecancel").onclick = () => { if (!this._edit.saving) this._editLoad(); };
     q(".esave").onclick = () => this._editSave();
     if (!this._isAdmin()) { q(".esave").disabled = true; q(".esave").title = "Only an administrator can save map changes"; }
     const c = this._editEl.canvas;
@@ -1479,6 +1481,14 @@ class TapoRV30Panel extends HTMLElement {
     if (want == null || !maps.some((m) => m.id === want)) want = cam ? cam.attributes.map_id : null;
     el.map.innerHTML = maps.map((m) => `<option value="${m.id}" ${m.id === want ? "selected" : ""}>${esc(m.name || `Map ${m.id}`)}${m.current ? " (current)" : ""}</option>`).join("");
     el.map.style.display = maps.length > 1 ? "" : "none";
+    // A save for this robot from an editor since closed is still with the robot: reading now would
+    // give the zones from before it, so wait (no edits, no Save); its reply loads this editor.
+    if ((this._editPend || {})[this._robot]) {
+      this._edit.saving = true; this._editLock(el, true); el.status.textContent = "Saving to robot..."; return;
+    }
+    // How a save that ended while nobody was looking went: told now.
+    const told = (this._editMsg || {})[this._robot];
+    if (told && !keep && after == null) { after = told; delete this._editMsg[this._robot]; }
     el.status.textContent = keep ? "Redrawing the map..." : "Loading map...";
     if (want == null) { el.status.textContent = "No map available yet."; return; }
     let res;
@@ -1486,9 +1496,12 @@ class TapoRV30Panel extends HTMLElement {
     catch (err) { if (this._editTok === tok) el.status.textContent = "Could not read the map: " + (err.message || err); return; }
     if (this._editTok !== tok) return;
     if (!res.picture || !res.geometry) { el.status.textContent = "Could not draw the map."; return; }
+    // Resolves once the picture is in (or failed), so a caller can wait for the whole reload.
     const img = new Image();
-    img.onerror = () => { if (this._editTok === tok) el.status.textContent = "Could not load the map picture."; };
+    let loaded; const done = new Promise((ok) => { loaded = ok; });
+    img.onerror = () => { loaded(); if (this._editTok === tok) el.status.textContent = "Could not load the map picture."; };
     img.onload = () => {
+      loaded();
       if (this._editTok !== tok) return;
       const c = this._editEl.canvas; c.width = img.naturalWidth; c.height = img.naturalHeight;
       // Edits are only carried over onto the same map of the same robot (a turn); anything else
@@ -1508,6 +1521,7 @@ class TapoRV30Panel extends HTMLElement {
         info.locked ? "This map is locked: cleans do not update it, but no-go zones, walls and furniture can still be edited." : ""].filter(Boolean).join(" ");
     };
     img.src = res.picture;
+    await done;
   }
 
   _editRenderRooms() {
@@ -1548,7 +1562,8 @@ class TapoRV30Panel extends HTMLElement {
   _editSelMatch(kind, i) { const s = this._edit.sel; return s && s.kind === kind && s.i === i; }
   _editSnapshot() { this._edit.undo.push(JSON.stringify({ areas: this._edit.areas, furniture: this._edit.furniture, rooms: this._edit.rooms })); if (this._edit.undo.length > 30) this._edit.undo.shift(); }
 
-  _editReady() { return !!(this._edit && this._edit.img && this._edit.geom && this._edit.areas); }
+  // No edits while a save is with the robot: the reload after it would throw them away.
+  _editReady() { return !!(this._edit && !this._edit.saving && this._edit.img && this._edit.geom && this._edit.areas); }
   _editDown(e) {
     if (!this._editReady()) return;     // nothing to draw on until the map has loaded
     try { this._editEl.canvas.setPointerCapture(e.pointerId); } catch (err) { /* the pointer is already gone */ }
@@ -1628,22 +1643,45 @@ class TapoRV30Panel extends HTMLElement {
   _editHandleR() { const c = this._editEl.canvas, w = c.getBoundingClientRect().width; return 14 * (w ? c.width / w : 1); }
   _editSelItem() { const s = this._edit.sel; if (!s) return null; return s.kind === "furniture" ? this._edit.furniture[s.i] : this._edit.areas[s.kind][s.i]; }
   _editDelete() { const s = this._edit.sel; if (!s || !this._editReady()) return; this._editSnapshot(); if (s.kind === "furniture") this._edit.furniture.splice(s.i, 1); else this._edit.areas[s.kind].splice(s.i, 1); this._edit.sel = null; this._editDraw(); }
-  _editUndo() { const u = this._edit.undo.pop(); if (!u) return; const o = JSON.parse(u); this._edit.areas = o.areas; this._edit.furniture = o.furniture; this._edit.rooms = o.rooms; this._edit.sel = null; this._editRenderRooms(); this._editDraw(); }
+  _editUndo() { if (!this._editReady()) return; const u = this._edit.undo.pop(); if (!u) return; const o = JSON.parse(u); this._edit.areas = o.areas; this._edit.furniture = o.furniture; this._edit.rooms = o.rooms; this._edit.sel = null; this._editRenderRooms(); this._editDraw(); }
 
   async _editSave() {
     // Only the verified-safe layers are written: no-go zones, virtual walls and furniture.
     // Carpets and rooms are left untouched (not sent), so they are preserved as-is.
-    if (!this._editReady() || this._edit.mapId == null) { this._editEl.status.textContent = "The map has not loaded yet, so there is nothing to save."; return; }
-    if (!this._isAdmin()) { this._editEl.status.textContent = "Only an administrator can save map changes."; return; }
-    const payload = { type: "tapo_rv30/map/edit_apply", entity_id: this._robot, map_id: this._edit.mapId,
-      areas: { forbid: this._edit.areas.forbid || [], virtual_wall: this._edit.areas.virtual_wall || [] },
-      furniture: this._edit.furniture };
-    this._editEl.status.textContent = "Saving to robot...";
-    try {
-      const r = await this._hass.callWS(payload), w = r && r.result && r.result.warning;
-      this._editLoad(false, w ? `Saved, but ${w}.` : "Saved.");
+    const ed = this._edit, el = this._editEl, robot = this._robot;
+    if (ed && (ed.saving || ed.turning)) return;
+    if (!this._editReady() || ed.mapId == null) { el.status.textContent = "The map has not loaded yet, so there is nothing to save."; return; }
+    if (!this._isAdmin()) { el.status.textContent = "Only an administrator can save map changes."; return; }
+    const payload = { type: "tapo_rv30/map/edit_apply", entity_id: robot, map_id: ed.mapId,
+      areas: { forbid: ed.areas.forbid || [], virtual_wall: ed.areas.virtual_wall || [] },
+      furniture: ed.furniture };
+    // One save per robot: an editor opened for this robot meanwhile (a robot or tab switch and
+    // back) waits for it in _editLoad instead of reading the zones from before it.
+    let msg, failed = false;
+    const job = this._hass.callWS(payload).then((r) => { const w = r && r.result && r.result.warning; msg = w ? `Saved, but ${w}.` : "Saved."; },
+      (err) => { failed = true; msg = "Save failed: " + (err.message || err); });
+    this._editPend = { ...(this._editPend || {}), [robot]: job };
+    ed.saving = true; ed.drag = null; this._editLock(el, true);
+    el.status.textContent = "Saving to robot...";
+    await job;
+    delete this._editPend[robot]; ed.saving = false;
+    // The editor showing this robot now: the one saved from, or one opened since and waiting.
+    const cur = this._edit, now = this._editEl;
+    if (this._robot !== robot || !cur || cur.robot !== robot || !now.status.isConnected) {
+      this._editMsg = { ...(this._editMsg || {}), [robot]: msg };   // told when its editor next opens
+      return;
     }
-    catch (err) { this._editEl.status.textContent = "Save failed: " + (err.message || err); }
+    cur.saving = true;    // until the reload is in, so nothing drawn meanwhile is wiped by it
+    try {
+      if (failed && cur === ed) now.status.textContent = msg;    // the edits are still there to try again
+      else await this._editLoad(false, msg);
+    } finally { cur.saving = false; this._editLock(now, false); }
+  }
+
+  // Holds the controls that change or reload the map while a save or a turn is with the robot.
+  _editLock(el, on) {
+    el.save.disabled = on || !this._isAdmin(); el.map.disabled = on;
+    el.turns.forEach((b) => { b.disabled = on; });
   }
 
   // ---- maintenance ---------------------------------------------------------------------
