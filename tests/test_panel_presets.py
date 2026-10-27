@@ -383,3 +383,76 @@ def test_presets_tab_renders_and_edits(admin):
                             "mode": "preset", "groups": ["Down", "Up"]}
     assert out["schedCall"]["preset"] == 3 and out["schedCall"]["map"] == "2"
     assert "rooms" not in out["schedCall"] and "room_ids" not in out["schedCall"]
+
+
+# The Schedules tab before the Presets tab is ever opened: its presets come from the preset buttons,
+# which name each preset's map. Preset 3 is on both maps (ids repeat); 7 is only upstairs; 8 is a
+# button from before buttons named their map.
+SCHED_FALLBACK = r"""
+const { chromium } = require("playwright"), fs = require("fs");
+const [panelPath] = process.argv.slice(1);
+(async () => {
+  const browser = await chromium.launch(), page = await browser.newPage({ viewport: { width: 1100, height: 1200 } });
+  const errors = []; page.on("pageerror", (e) => errors.push(e.message));
+  await page.setContent(`<!doctype html><body style="margin:0"></body>`);
+  await page.evaluate(() => {
+    customElements.define("tapo-rv30-card", class extends HTMLElement { setConfig(c) { this._config = c; } set hass(h) {} });
+    const S = (id, attrs = {}, state = "unknown") => ({ entity_id: id, state, attributes: attrs });
+    const B = (id, attrs) => S(`button.${id}`, { friendly_name: `Robot ${attrs.preset_name}`, ...attrs });
+    const states = {
+      "vacuum.robot": S("vacuum.robot", { friendly_name: "Robot", integration: "tapo_rv30" }, "docked"),
+      "camera.robot_map": S("camera.robot_map", { map_id: 1, maps: [{ id: 1, name: "Down", current: true }, { id: 2, name: "Up", current: false }] }),
+      "sensor.robot_schedules": S("sensor.robot_schedules", { schedules: [
+        { id: 5, time: "08:00", days: ["Mon"], enabled: true, preset_id: 3, map_id: 1 }] }),
+      "button.robot_preset_mop": B("robot_preset_mop", { preset_id: 3, preset_name: "Mop", map_id: 1, map_name: "Down" }),
+      "button.robot_preset_upstairs_mop": B("robot_preset_upstairs_mop", { preset_id: 3, preset_name: "Upstairs mop", map_id: 2, map_name: "Up" }),
+      "button.robot_preset_landing": B("robot_preset_landing", { preset_id: 7, preset_name: "Landing", map_id: 2, map_name: "Up" }),
+      "button.robot_preset_old": B("robot_preset_old", { preset_id: 8, preset_name: "Old" }),
+    };
+    const entities = {}; for (const id in states) entities[id] = { entity_id: id, device_id: "d", platform: "tapo_rv30" };
+    for (const id in states) if (id.startsWith("button.")) entities[id].translation_key = "preset";
+    window.ws = []; window.services = [];
+    window.hass = { states, entities, devices: { d: { name: "Robot" } }, user: { is_admin: true },
+      callService: async (d, s, data, target) => { window.services.push({ s, data }); },
+      callWS: async (m) => { window.ws.push(m); throw { message: "unknown " + m.type }; },
+      connection: { subscribeEvents: async () => () => {}, subscribeMessage: async () => () => {} } };
+  });
+  await page.addScriptTag({ content: fs.readFileSync(panelPath, "utf8") });
+  const out = { picked: {}, sent: {} };
+  const click = async (sel) => { await page.evaluate((sel) => window.p.shadowRoot.querySelector(sel).click(), sel); await page.waitForTimeout(150); };
+  await page.evaluate(() => { const p = document.createElement("tapo-rv30-panel"); window.p = p; document.body.appendChild(p); p.narrow = false; p.hass = window.hass; });
+  await page.waitForTimeout(200);
+  out.tab = await page.evaluate(() => window.p._tab);
+  for (const name of ["Landing", "Upstairs mop", "Old"]) {
+    await click('.row[data-id="5"] [data-act="edit"]');
+    out.selected = await page.evaluate(() => window.p.shadowRoot.querySelector("select.preset").selectedOptions[0].textContent);
+    out.picked[name] = await page.evaluate((name) => { const sel = window.p.shadowRoot.querySelector("select.preset");
+      sel.value = [...sel.options].find((o) => o.textContent === name).value; sel.dispatchEvent(new Event("change")); return sel.value; }, name);
+    await click(".save");
+    out.sent[name] = await page.evaluate(() => window.services.filter((x) => x.s === "set_schedule").map((x) => x.data).pop());
+  }
+  out.listCalls = await page.evaluate(() => window.ws.filter((m) => m.type === "tapo_rv30/preset/list").length);
+  out.errors = errors;
+  console.log(JSON.stringify(out));
+  await browser.close();
+})();
+"""
+
+
+@pytest.mark.skipif(not _has_playwright(), reason="playwright for node not installed")
+def test_schedule_to_another_maps_preset_before_the_presets_tab():
+    try:
+        run = subprocess.run([NODE, "-e", SCHED_FALLBACK, str(PANEL)], capture_output=True, text=True, check=True, timeout=120)
+    except subprocess.CalledProcessError as exc:
+        if "Executable doesn't exist" in exc.stderr or "browserType.launch" in exc.stderr:
+            pytest.skip("no browser for playwright")
+        raise
+    out = json.loads(run.stdout.strip().splitlines()[-1])
+    assert out["errors"] == [] and out["tab"] == "schedules" and out["listCalls"] == 0
+    assert out["selected"] == "Mop"                     # the schedule's own preset 3, not the upstairs one
+    assert out["picked"] == {"Landing": "2:7", "Upstairs mop": "2:3", "Old": "8"}
+    # The preset's own map, never the schedule's (map 1 has no preset 7: the integration would refuse).
+    assert out["sent"]["Landing"] == {"preset": 7, "map": "2", "schedule_id": 5}
+    assert out["sent"]["Upstairs mop"] == {"preset": 3, "map": "2", "schedule_id": 5}
+    # A button that does not name its map: no map, so the integration looks on every map.
+    assert out["sent"]["Old"] == {"preset": 8, "schedule_id": 5}

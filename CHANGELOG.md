@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.39.2
+
+### Fixed
+
+- **Switching a schedule to another floor's preset failed.** Until the Presets tab had been opened, the Schedules editor sent the schedule's own map with the preset, so a preset on another map was refused ("no preset with id 7 on map ..."). Preset buttons now carry their `map_id`, and the editor sends the preset's own map (or none, letting the integration find it).
+
 ## v0.39.1
 
 ### Fixed

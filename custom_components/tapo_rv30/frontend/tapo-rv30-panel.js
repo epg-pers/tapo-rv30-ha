@@ -464,7 +464,7 @@ class TapoRV30Panel extends HTMLElement {
   _schedules(r) { const s = this._st(r.schedules); return (s && s.attributes.schedules) || []; }
   _dnd(r) { const s = this._st(r.schedules); return (s && s.attributes.dnd) || null; }
   _rooms(vac) { return (this._st(vac).attributes.rooms || []); }
-  _presets(r) { return r.presets.map((id) => { const s = this._st(id); return { id: s.attributes.preset_id, name: s.attributes.preset_name || s.attributes.friendly_name, rooms: s.attributes.rooms }; }).filter((p) => p.id != null); }
+  _presets(r) { return r.presets.map((id) => { const s = this._st(id); return { id: s.attributes.preset_id, map_id: s.attributes.map_id ?? null, name: s.attributes.preset_name || s.attributes.friendly_name, rooms: s.attributes.rooms }; }).filter((p) => p.id != null); }
 
   async _call(domain, service, data, target) {
     try { await this._hass.callService(domain, service, data, target); return true; }
@@ -621,12 +621,13 @@ class TapoRV30Panel extends HTMLElement {
     const s = this._editing, isNew = s.id == null;
     const dnd = this._dnd(r);
     // Presets by map and id (ids repeat across maps): from the Presets tab's list when it has been
-    // read for this robot, with their real names and maps; else from the preset buttons (ids only).
+    // read for this robot, with their real names and maps; else from the preset buttons (ids, and
+    // maps where the button says).
     // The Presets tab's list, only while it is current (a preset made in the app since would be missing).
     const listed = this._pre && this._pre.for === this._robot && this._pre.data && this._preKey === this._presetKey(r) ? this._pre.data : null;
     const pkey = (mapId, id) => (mapId != null ? `${mapId}:${id}` : String(id));
     const presets = listed ? listed.presets.map((p) => ({ key: pkey(p.map_id, p.id), id: p.id, map_id: p.map_id, name: p.name }))
-      : this._presets(r).map((p) => ({ key: String(p.id), id: p.id, map_id: null, name: p.name }));
+      : this._presets(r).map((p) => ({ key: pkey(p.map_id, p.id), id: p.id, map_id: p.map_id, name: p.name }));
     // The schedule's preset: by its map and id where both are known, else the one preset with that id.
     const presetKey = () => {
       if (s.preset_id == null) return presets[0] ? presets[0].key : "";
@@ -747,7 +748,9 @@ class TapoRV30Panel extends HTMLElement {
         if (state.mode === "rooms") { data[byId ? "room_ids" : "rooms"] = [...state.rooms]; if (ownName && !isNew) data.map = ownName; }
         else if (state.mode === "preset") {
           // The preset's id, and its map where known: the same id can be a different preset on another map.
-          const pr = presets.find((p) => p.key === preset), mapId = pr && pr.map_id != null ? pr.map_id : s.map_id;
+          // A preset of unknown map goes without one (the integration finds it on any map); only a
+          // preset no longer there falls back to the schedule's own map.
+          const pr = presets.find((p) => p.key === preset), mapId = pr ? pr.map_id : s.map_id;
           data.preset = pr ? pr.id : Number(preset.split(":").pop());
           if (mapId != null) data.map = String(mapId);
         }
