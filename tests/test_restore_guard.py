@@ -68,6 +68,7 @@ class Coord(TapoCoordinator):
         self.map_lock = asyncio.Lock()
         self.pending_restore = None
         self._restore_store = None
+        self.snapshot_hold, self._snapshot_hash = {}, {}
         self._finishing = False
         self.asked = 0          # live asks of the robot whether it is working
         self.maps = [{"id": m, "name": f"Map {m}"} for m in (CARRIER, RESTORED, OTHER)]
@@ -181,3 +182,50 @@ def test_finish_restore_still_applies_the_saved_setup(monkeypatch):
     assert result and result["written"].get("room") == 0
     assert ("set_areas", RESTORED, "room") in coord.client.writes
     assert coord.pending_restore is None and notes and "is restored" in notes[0]
+
+
+def _snapshot_coord(monkeypatch, folder, area_list):
+    coord = Coord()
+    coord.map_id, coord._snapshot_hash, coord.snapshot_hold = OTHER, {}, {}
+    coord._map_layers = {"map_id": OTHER, "map_name": "Map", "area_list": area_list, "furniture_list": []}
+    coord._presets_raw, coord.settings = [], {"schedules": {"rule_list": []}}
+    monkeypatch.setattr(setup_apply, "snapshots_folder", lambda hass, c: str(folder))
+    return coord
+
+
+def test_a_map_restored_over_itself_keeps_its_saved_setup(monkeypatch, tmp_path):
+    """The restored map can lose zones yet keep its room names (so it does not look degraded):
+    until apply_map_setup or save_map_setup, or the hold runs out, it only goes to history."""
+    import json
+    import time
+    room = {"type": "room", "id": 1, "name": b64("Hall")}
+    zone = {"type": "forbid", "id": 301, "vertexs": [[0, 0], [9, 0], [9, 9], [0, 9]]}
+    coord = _snapshot_coord(monkeypatch, tmp_path, [room, zone])
+    asyncio.run(coord._auto_snapshot_now())
+    saved = tmp_path / f"{OTHER}.json"
+    assert json.loads(saved.read_text())["areas"].get("forbid")
+    assert coord.hold_snapshot(OTHER) and not coord.hold_snapshot(OTHER)
+    coord._map_layers["area_list"] = [room]          # restored: the zone is gone
+    asyncio.run(coord._auto_snapshot_now())
+    assert json.loads(saved.read_text())["areas"].get("forbid")
+    assert list((tmp_path / "history").iterdir())     # (history keeps it)
+    coord.release_snapshot(OTHER)                    # apply_map_setup / save_map_setup
+    asyncio.run(coord._auto_snapshot_now())
+    assert not json.loads(saved.read_text())["areas"].get("forbid")
+    # and a hold that is never released runs out
+    coord._map_layers["area_list"] = [room, zone]
+    coord.snapshot_hold[OTHER] = time.time() - coord.SNAPSHOT_HOLD_S - 1
+    asyncio.run(coord._auto_snapshot_now())
+    assert json.loads(saved.read_text())["areas"].get("forbid") and not coord.snapshot_hold
+
+
+def test_only_a_full_apply_of_the_maps_own_setup_releases_the_hold():
+    import time
+    coord = Coord()
+    coord._snapshot_hash, coord.snapshot_hold = {}, {OTHER: time.time()}
+    own, other = {"map_id": OTHER}, {"map_id": RESTORED}
+    coord.release_after_apply(OTHER, own, {"skipped": ["preset 'Daily': refused"]})
+    coord.release_after_apply(OTHER, other, {"skipped": []})
+    assert OTHER in coord.snapshot_hold
+    coord.release_after_apply(OTHER, own, {"skipped": []})
+    assert OTHER not in coord.snapshot_hold

@@ -907,6 +907,8 @@ def async_setup_services(hass: HomeAssistant) -> None:
             return keep_old
 
         kept = await hass.async_add_executor_job(_write)
+        if not kept:
+            coord.release_snapshot(map_id)      # the saved setup is now this map's own again
         if kept:
             raise ServiceValidationError(
                 f"{call.service}: map {names.get(map_id) or map_id} looks degraded (rooms missing or "
@@ -940,6 +942,10 @@ def async_setup_services(hass: HomeAssistant) -> None:
             raise HomeAssistantError(f"{call.service}: {exc}") from exc
         except Exception as exc:
             raise HomeAssistantError(f"{call.service}: could not read the map from the vacuum: {exc}") from exc
+        if not dry_run:
+            # Its own setup put back in full: the polls keep it in step again. A partial apply, or
+            # another map's setup, leaves the hold (and the saved setup) for another go.
+            coord.release_after_apply(map_id, snap, result)
         result["map_name"] = names.get(map_id)
         return result
 
@@ -1151,6 +1157,7 @@ def async_setup_services(hass: HomeAssistant) -> None:
         carry_why = None
         landed = None
         carrier = False
+        held = False
         map_id = backup_id
         keep_url = False
         try:
@@ -1194,6 +1201,10 @@ def async_setup_services(hass: HomeAssistant) -> None:
                     before = mapcopy.layers(await _read(hass, call, coord.client.get_map_data, map_id))
                     coord.expect_restore(backup_id, new_name or label, map_id, before,
                                          mapcopy.tail_subset(tail), copy=bool(new_name), carry=carry)
+                else:
+                    # Over itself: the restored map may lack zones or furniture the backup does not
+                    # carry, so keep its saved setup for apply_map_setup to put them back.
+                    held = coord.hold_snapshot(map_id)
                 pend = coord.pending_restore if carrier else None
                 lo, hi = span
                 applying = "Restoring the map on the robot"
@@ -1210,10 +1221,14 @@ def async_setup_services(hass: HomeAssistant) -> None:
                             f"\"{names.get(map_id)}\" back as it was once it lands") from exc
                     if pend is not None:
                         coord._drop_restore(pend)
+                    if held:
+                        coord.release_snapshot(map_id)
                     raise HomeAssistantError(f"{call.service}: {exc}") from exc
                 if code != 0:
                     if pend is not None:
                         coord._drop_restore(pend)
+                    if held:
+                        coord.release_snapshot(map_id)
                 else:
                     process = await _wait_br(coord, 2, baseline, progress=lambda pc: coord.map_job(
                         job, applying, lo + (hi - lo) * 0.85 * pc / 100))
@@ -1232,6 +1247,8 @@ def async_setup_services(hass: HomeAssistant) -> None:
                 # The restore can take minutes; if the entry was reloaded meanwhile, carry on with
                 # its new coordinator (the old one's client is closed).
                 live = hass.data.get(DOMAIN, {}).get(coord.entry.entry_id, coord) if coord.entry else coord
+                if held and code == 0 and status == 13:
+                    live.release_snapshot(map_id)       # failed on the robot: nothing was restored
                 if carrier and code == 0 and status in (3, 13) and live is coord:
                     # Done (or failed, when the carrier may still have been written to): tidy up now.
                     # (After a reload the new coordinator's own poll does it, under its own lock.)
@@ -1300,6 +1317,11 @@ def async_setup_services(hass: HomeAssistant) -> None:
                           "back as it was" + (f" and saves the new map as \"{new_name}\"." if new_name else
                                               (f" and saves it as \"{label}\"." if label else
                                                "; then save the restored map in the Tapo app.")))
+        elif status in (2, None) and held:
+            next_steps = ("The robot is still applying the backup. Once it lands, run apply_map_setup on this "
+                          "map (dry_run: true first to preview) to put back anything the backup does not carry. "
+                          "The map's saved setup is kept as it was until apply_map_setup or save_map_setup "
+                          "runs on it.")
         elif status == 3 and carrier and coord.restore_unfinished():
             finishing = True
             next_steps = ("The map is on the robot; Home Assistant is finishing it in the background"
@@ -1328,7 +1350,9 @@ def async_setup_services(hass: HomeAssistant) -> None:
                           "furniture, presets and schedules.")
         elif status == 3:
             next_steps = ("Run apply_map_setup on this map (dry_run: true first to preview) to put back anything "
-                          "the backup does not carry: room names, zones, furniture, presets, schedules.")
+                          "the backup does not carry: room names, zones, furniture, presets, schedules. "
+                          "The map's saved setup is kept as it was until apply_map_setup or save_map_setup "
+                          "runs on it.")
         return {"map_id": map_id, "map_name": carrier_name, "backup_map_id": backup_id,
                 "backup_map_name": new_name or label, "carrier": carrier, "as_new": bool(new_name),
                 "restored_map_saved": saved if status == 3 else None,
@@ -1532,6 +1556,7 @@ def async_setup_services(hass: HomeAssistant) -> None:
             raise HomeAssistantError(f"{call.service}: the robot did not delete '{names.get(map_id)}' (error {code})")
         if (coord.pending_restore or {}).get("map_id") == map_id:
             coord._drop_restore(coord.pending_restore)
+        coord.release_snapshot(map_id)
         return {"map_id": map_id, "map_name": names.get(map_id), "deleted": True, "backups_held": held}
 
     hass.services.async_register(DOMAIN, "restore_map_backup", _admin_only(hass, handle_restore_map_backup),

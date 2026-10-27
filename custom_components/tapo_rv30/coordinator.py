@@ -167,6 +167,7 @@ class TapoCoordinator(DataUpdateCoordinator):
         self._map_layers: dict | None = None           # {map_id, map_name, area_list, furniture_list}
         self._snapshot_hash: dict[int, str] = {}       # map_id -> content hash last written
         self.pending_restore: dict | None = None       # lost-map restore waiting to be saved in the app
+        self.snapshot_hold: dict[int, float] = {}      # map_id -> when a restore onto it began (saved setup kept)
         self._restore_store = Store(hass, 1, f"{DOMAIN}.{entry.entry_id}.restore") if entry else None
         self._restore_loaded = False
         self._update_lock = asyncio.Lock()             # one poll at a time (refresh_soon overlaps the timer)
@@ -802,13 +803,53 @@ class TapoCoordinator(DataUpdateCoordinator):
             return
         self._restore_loaded = True
         try:
-            self.pending_restore = (await self._restore_store.async_load() or {}).get("pending") or None
+            stored = await self._restore_store.async_load() or {}
+            self.pending_restore = stored.get("pending") or None
+            self.snapshot_hold = {int(k): float(v) for k, v in (stored.get("hold") or {}).items()}
+            self._prune_holds()
         except Exception as exc:
             _LOGGER.debug("Pending restore unreadable: %s", exc)
 
     def _save_restore(self) -> None:
         if self._restore_store is not None:
-            self.hass.async_create_task(self._restore_store.async_save({"pending": self.pending_restore}))
+            self.hass.async_create_task(self._restore_store.async_save(
+                {"pending": self.pending_restore, "hold": {str(k): v for k, v in self.snapshot_hold.items()}}))
+
+    # A map restored over itself keeps its saved setup until apply_map_setup or save_map_setup
+    # runs on it, or for this long at most.
+    SNAPSHOT_HOLD_S = 7 * 86400
+
+    def hold_snapshot(self, map_id: int) -> bool:
+        """A backup is about to be restored over map_id: until apply_map_setup or save_map_setup
+        runs on it, the polls must not replace its saved setup with the restored map's (which may
+        lack zones or furniture the backup does not carry). False if it was already held.
+        Kept across restarts."""
+        if self.snapshot_held(map_id):
+            return False
+        self.snapshot_hold[map_id] = time.time()
+        self._save_restore()
+        return True
+
+    def release_snapshot(self, map_id: int) -> None:
+        """Let the polls keep map_id's saved setup in step again (from the next poll)."""
+        if self.snapshot_hold.pop(map_id, None) is not None:
+            self._snapshot_hash.pop(map_id, None)
+            self._save_restore()
+
+    def release_after_apply(self, map_id: int, snap: dict | None, result: dict | None) -> None:
+        """Release map_id's hold once its own saved setup went back on in full (nothing skipped)."""
+        if snap and result and snap.get("map_id") == map_id and not result.get("skipped"):
+            self.release_snapshot(map_id)
+
+    def _prune_holds(self) -> None:
+        now = time.time()
+        for map_id, since in list(self.snapshot_hold.items()):
+            if now - since > self.SNAPSHOT_HOLD_S:
+                self.release_snapshot(map_id)
+
+    def snapshot_held(self, map_id: int) -> bool:
+        self._prune_holds()
+        return map_id in self.snapshot_hold
 
     # A restored map that has not shown up by then is not coming (longer than the backup stays
     # served after the service stops watching, plus time to apply it).
@@ -989,6 +1030,7 @@ class TapoCoordinator(DataUpdateCoordinator):
                     result = await setup_apply.apply_setup(self.hass, self, pend["map_id"], snap)
                 except setup_apply.MapBusy:
                     return None   # nothing written: another map write or a clean started meanwhile
+                self.release_after_apply(pend["map_id"], snap, result)
                 plan = result["plan"]
                 done = [f"{len(plan['room_names'])} room names" if plan["room_names"] else "",
                         ", ".join(f"{v} {k.replace('_', ' ')}" for k, v in plan["zones"].items()),
@@ -1177,7 +1219,8 @@ class TapoCoordinator(DataUpdateCoordinator):
         """Keep config/tapo_rv30/map_setups/<map_id>.json in step with the map's layers,
         presets and schedules, from data already polled (no extra robot calls). A snapshot that
         looks like a lost or freshly restored map (no rooms, or fewer named rooms) never
-        replaces a good one; every distinct snapshot is also kept in map_setups/history."""
+        replaces a good one, nor does any while a restore over the map holds it (hold_snapshot);
+        every distinct snapshot is also kept in map_setups/history."""
         layers = self._map_layers
         if not layers or self._presets_raw is None or layers.get("map_id") != self.map_id:
             return
@@ -1196,6 +1239,8 @@ class TapoCoordinator(DataUpdateCoordinator):
             return
         from . import setup_apply
         folder = setup_apply.snapshots_folder(self.hass, self)
+        # Restored over itself: history only, until apply_map_setup or save_map_setup.
+        held = self.snapshot_held(snap["map_id"])
 
         def _write() -> str:
             import json
@@ -1221,6 +1266,8 @@ class TapoCoordinator(DataUpdateCoordinator):
                           if f.startswith(f"{snap['map_id']}_"))
             for f in hist[:-30]:
                 os.remove(os.path.join(folder, "history", f))
+            if held:
+                return "held"
             if mapsnapshot.is_degraded(old, snap):
                 return "degraded"
             setup_apply.write_json(latest, snap)

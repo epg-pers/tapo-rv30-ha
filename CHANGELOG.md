@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.39.11
+
+### Fixed
+
+- **Restoring a backup over its own map could replace the good saved setup.** After the restore, the next automatic snapshot saved the restored map's setup over the old one, so zones, furniture, presets or schedules the backup lacked were gone and `apply_map_setup` had nothing to put back. The saved setup is now kept (for up to 7 days) until `apply_map_setup` puts it back cleanly or `save_map_setup` is run; snapshots in the meantime go to the history folder only.
+
 ## v0.39.10
 
 ### Fixed
