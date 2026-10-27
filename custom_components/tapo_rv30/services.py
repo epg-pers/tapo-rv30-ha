@@ -619,7 +619,7 @@ def async_setup_services(hass: HomeAssistant) -> None:
             out.append({"id": rid,
                         "suction": lv.get("suction", old.get("suction", _known(g.get("suction"), 2))),
                         "cistern": lv.get("cistern", old.get("cistern", _known(g.get("cistern"), 1))),
-                        "clean_number": lv.get("clean_number", old.get("clean_number", 1)),
+                        "clean_number": lv.get("clean_number", old.get("clean_number", _known(g.get("clean_number"), 1))),
                         "carpet_strategy": old.get("carpet_strategy", carpet.get(rid))})
         return out
 

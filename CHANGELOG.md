@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.39.9
+
+### Fixed
+
+- **New presets got one pass instead of the robot's current setting.** `create_preset` (and new rooms added with `update_preset`) without `passes` used 1, although suction and water already followed the robot's current settings and the docs said passes did too. Passes now default to the robot's current setting as documented.
+
 ## v0.39.8
 
 ### Fixed
