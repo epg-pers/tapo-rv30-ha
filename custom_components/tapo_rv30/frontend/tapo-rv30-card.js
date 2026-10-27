@@ -10,7 +10,7 @@
  * the vacuum's device automatically.
  */
 
-const CARD_VERSION = "0.39.3";
+const CARD_VERSION = "0.39.4";
 
 const ICONS = {
   start: "mdi:play", pause: "mdi:pause", stop: "mdi:stop", dock: "mdi:home-import-outline",
@@ -514,10 +514,11 @@ class TapoRV30Card extends HTMLElement {
   _renderControls(state) {
     const el = this._el.controls, r = this._related;
     if (!this._config.show_controls) { el.hidden = true; return; }
-    const cleaning = state === "cleaning", paused = state === "paused", docked = state === "docked";
+    const cleaning = state === "cleaning", paused = state === "paused", docked = state === "docked", returning = state === "returning";
+    // Returning: Stop (or Pause on the robot) cancels the trip home; Start would begin a new whole-home clean.
     const items = [
-      cleaning ? { k: "pause", i: ICONS.pause, l: "Pause", svc: "pause" } : { k: "start", i: ICONS.start, l: paused ? "Resume" : "Start", svc: "start", primary: !cleaning },
-      { k: "stop", i: ICONS.stop, l: "Stop", svc: "stop", dis: !(cleaning || paused || this._hass?.states[this._config.entity]?.attributes?.run_busy) },
+      cleaning ? { k: "pause", i: ICONS.pause, l: "Pause", svc: "pause" } : { k: "start", i: ICONS.start, l: paused ? "Resume" : "Start", svc: "start", primary: !returning },
+      { k: "stop", i: ICONS.stop, l: "Stop", svc: "stop", dis: !(cleaning || paused || returning || this._hass?.states[this._config.entity]?.attributes?.run_busy) },
       { k: "dock", i: ICONS.dock, l: "Dock", svc: "return_to_base", dis: docked },
       { k: "locate", i: ICONS.locate, l: "Locate", svc: "locate" },
     ];

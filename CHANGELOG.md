@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.39.4
+
+### Fixed
+
+- **The card could not stop a robot on its way home.** While returning to the dock the card's Stop was greyed out and Start was the highlighted button, which starts a new whole-home clean. Stop now cancels the trip home, and Start is no longer highlighted while returning.
+
 ## v0.39.3
 
 ### Fixed
