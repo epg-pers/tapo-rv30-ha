@@ -1495,9 +1495,20 @@ class TapoRV30Panel extends HTMLElement {
     if (told && !keep && after == null) { after = told; delete this._editMsg[this._robot]; }
     el.status.textContent = keep ? "Redrawing the map..." : "Loading map...";
     if (want == null) { el.status.textContent = "No map available yet."; return; }
+    // wait: a map write still with the robot (a save from another tab, a setup, restore or copy)
+    // is waited for, so the zones read are not the ones from before it. Still busy: asked once more.
     let res;
-    try { res = await this._hass.callWS({ type: "tapo_rv30/map/edit_get", entity_id: this._robot, map_id: want, picture: true }); }
-    catch (err) { if (this._editTok === tok) el.status.textContent = "Could not read the map: " + (err.message || err); return; }
+    for (let tries = 2; ; tries--) {
+      try { res = await this._hass.callWS({ type: "tapo_rv30/map/edit_get", entity_id: this._robot, map_id: want, picture: true, wait: true }); break; }
+      catch (err) {
+        if (this._editTok !== tok) return;
+        if (err && err.code === "busy" && tries > 1) continue;
+        el.status.textContent = err && err.code === "busy"
+          ? "The robot's map is still being written; press Discard to try again."
+          : "Could not read the map: " + ((err && err.message) || err);
+        return;
+      }
+    }
     if (this._editTok !== tok) return;
     if (!res.picture || !res.geometry) { el.status.textContent = "Could not draw the map."; return; }
     // Resolves once the picture is in (or failed), so a caller can wait for the whole reload.

@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.39.10
+
+### Fixed
+
+- **A map editor opened during a save could undo it.** An editor opened while another one's save was still with the robot (a second browser tab, or the sidebar page rebuilt after visiting another page) loaded the zones from before that save; saving from it later put them back. The editor now waits for a running map write before it reads the map, tries once more if the write is long, and otherwise says to press Discard to try again. Other map views still read straight away.
+
 ## v0.39.9
 
 ### Fixed

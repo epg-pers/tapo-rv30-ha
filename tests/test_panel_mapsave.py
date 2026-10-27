@@ -62,7 +62,10 @@ const panelPath = process.argv[1];
       window.hass = { states, entities, devices: { da: { name: "Alpha" }, db: { name: "Beta" } }, user: { is_admin: true },
         callService: (d, s) => { window.svc.push(s); return new Promise((ok) => { window.turned = ok; }); },
         callWS: (m) => {
-          window.ws.push({ type: m.type, entity_id: m.entity_id });
+          window.ws.push({ type: m.type, entity_id: m.entity_id, wait: m.wait });
+          if (m.type === "tapo_rv30/map/edit_get" && window.busyGets > 0) {
+            window.busyGets--; return Promise.reject({ code: "busy", message: "A map write to Alpha is still running" });
+          }
           if (m.type === "tapo_rv30/map/edit_get") return Promise.resolve({ map_id: m.map_id, current: true, picture: `http://pic.test/map.png?n=${++n}`,
             geometry: { scale_px_per_cell: 4, resolution_mm: 50, real_origin_mm: [0, 0], grid_size: [50, 50], image_size: [200, 200], rotation: 0 },
             areas: JSON.parse(JSON.stringify(window.store[m.entity_id])), furniture: [], rooms: [] });
@@ -94,6 +97,7 @@ const panelPath = process.argv[1];
         save: r.querySelector(".esave").disabled, picker: r.querySelector(".emap").value, pickerOff: r.querySelector(".emap").disabled,
         turnOff: [...r.querySelectorAll(".eturn")].every((b) => b.disabled),
         gets: window.ws.filter((m) => m.type === "tapo_rv30/map/edit_get").map((m) => m.entity_id),
+        waits: window.ws.filter((m) => m.type === "tapo_rv30/map/edit_get").map((m) => m.wait === true),
         applies: window.ws.filter((m) => m.type === "tapo_rv30/map/edit_apply").length, svc: window.svc }; });
     const r = {};
     await body({ ev, settle, click, tab, robot, zone, editor, pics, page, r });
@@ -183,6 +187,19 @@ const panelPath = process.argv[1];
     await ev(() => window.turned(true)); await settle();
     r.after = await editor();
   });
+  // The editor opened while a map write holds the robot past the backend's wait: asked once more;
+  // still busy, it says so and Discard tries again.
+  await scenario("busy_load", async ({ ev, settle, tab, editor, click, r }) => {
+    await ev(() => { window.busyGets = 1; });
+    await tab("edit");
+    r.retried = await editor();
+    await tab("schedules");
+    await ev(() => { window.busyGets = 2; });
+    await tab("edit");
+    r.busy = await editor();
+    await click(".ecancel");
+    r.again = await editor();
+  });
   console.log(JSON.stringify(out));
   await browser.close();
 })();
@@ -259,3 +276,13 @@ def test_save_refused_while_turning(out):
     assert t["svc"] == ["set_map_rotation"] and t["applies"] == 0 and _held(t) and t["status"] == "Turning the map..."
     a = r["after"]
     assert a["save"] is False and a["pickerOff"] is False and a["zones"] == 1 and a["applies"] == 0
+
+
+def test_editor_load_waits_and_retries_once_when_busy(out):
+    r = out["busy_load"]
+    t = r["retried"]
+    assert t["gets"] == ["vacuum.alpha", "vacuum.alpha"] and all(t["waits"]) and t["zones"] == 0 and t["status"] == ""
+    b = r["busy"]
+    assert b["gets"].count("vacuum.alpha") == 4 and b["status"] == "The robot's map is still being written; press Discard to try again."
+    a = r["again"]
+    assert a["gets"].count("vacuum.alpha") == 5 and a["zones"] == 0 and a["status"] == ""

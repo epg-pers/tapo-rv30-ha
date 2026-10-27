@@ -1,8 +1,9 @@
 """Websocket commands for the sidebar page's map editor.
 
-tapo_rv30/map/edit_get    {entity_id, map_id?, picture?} -> the editable layers of a map (world mm),
-                          and with picture: true its drawing, geometry and where each room is on
-                          it (any saved map, not just the current one)
+tapo_rv30/map/edit_get    {entity_id, map_id?, picture?, wait?} -> the editable layers of a map (world
+                          mm), and with picture: true its drawing, geometry and where each room is
+                          on it (any saved map, not just the current one); with wait: true, read
+                          only once a running map write has ended
 tapo_rv30/map/edit_apply  {entity_id, map_id, areas?, furniture?, rooms?, order?} -> write them
 
 Only the editable layers are touched (no-go zones, virtual walls, carpets, furniture, room
@@ -10,6 +11,7 @@ names and order). The map's shape (grid) is the robot's own and is never written
 """
 from __future__ import annotations
 
+import asyncio
 import base64
 import logging
 from typing import Any
@@ -28,6 +30,9 @@ _KEY = f"{DOMAIN}_map_edit_ws"
 _AREA_TYPES = ("forbid", "virtual_wall", "carpet_rectangle", "carpet_round")
 _KEEP = ("label", "define_type", "carpet_strategy")   # robot fields the editor does not round-trip
 _ROOM_KEEP = ("color", "define_type", "floor_material", "floor_texture", "carpet_strategy", "label")
+# How long a read waits for a map write (an editor save, setup apply, restore or copy) to finish.
+_LOCK_WAIT = 60.0
+_LOCK_POLL = 0.5
 
 
 def _coord(hass: HomeAssistant, entity_id: str):
@@ -50,6 +55,9 @@ def async_setup_map_edit_ws(hass: HomeAssistant) -> None:
     vol.Required("entity_id"): str,
     vol.Optional("map_id"): int,
     vol.Optional("picture", default=False): bool,
+    # The editor's own load: wait for a map write still running (see below). Other reads (a
+    # preview) do not, as a backup, copy or restore can hold the lock for minutes.
+    vol.Optional("wait", default=False): bool,
 })
 @websocket_api.async_response
 async def ws_edit_get(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
@@ -57,6 +65,17 @@ async def ws_edit_get(hass: HomeAssistant, connection: websocket_api.ActiveConne
     if coord is None:
         connection.send_error(msg["id"], "not_found", f"No Tapo vacuum for {msg['entity_id']}")
         return
+    # A map write still running would give the zones from before it, and an editor saving those
+    # later would undo that write: the editor waits for it to end (without taking the lock), and
+    # shows "Loading map..." meanwhile.
+    waited = 0.0
+    while msg.get("wait") and coord.map_lock.locked():
+        if waited >= _LOCK_WAIT:
+            connection.send_error(msg["id"], "busy", f"A map write to {coord.device_name} is still running; "
+                                  "try again once it has finished")
+            return
+        await asyncio.sleep(_LOCK_POLL)
+        waited += _LOCK_POLL
     map_id = msg.get("map_id") or coord.map_id
     try:
         data = await hass.async_add_executor_job(coord.client.get_map_data, map_id)
