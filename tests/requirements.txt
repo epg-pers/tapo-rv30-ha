@@ -6,3 +6,4 @@ pyflakes==4.0.3
 pillow
 numpy
 ruff==0.16.9
+pyyaml>=6.0
