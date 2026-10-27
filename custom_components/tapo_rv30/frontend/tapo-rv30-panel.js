@@ -1636,7 +1636,13 @@ class TapoRV30Panel extends HTMLElement {
 
   _editHit(x, y) {
     const inside = (verts) => inPoly(x, y, verts.map((p) => this._editMm2Px(p[0], p[1])));
-    const near = (verts) => { const [x0, y0] = this._editMm2Px(verts[0][0], verts[0][1]), [x1, y1] = this._editMm2Px(verts[1][0], verts[1][1]); const L = Math.hypot(x1 - x0, y1 - y0) || 1; return Math.abs((y1 - y0) * x - (x1 - x0) * y + x1 * y0 - y1 * x0) / L < 8; };
+    // Within 8 px of the wall itself (each segment, not the endless line through its ends).
+    const near = (verts) => verts.slice(1).some((v, k) => {
+      const [x0, y0] = this._editMm2Px(verts[k][0], verts[k][1]), [x1, y1] = this._editMm2Px(v[0], v[1]);
+      const L2 = (x1 - x0) ** 2 + (y1 - y0) ** 2;
+      const t = L2 ? Math.max(0, Math.min(1, ((x - x0) * (x1 - x0) + (y - y0) * (y1 - y0)) / L2)) : 0;
+      return Math.hypot(x - (x0 + t * (x1 - x0)), y - (y0 + t * (y1 - y0))) < 8;
+    });
     // The smallest item under the pointer wins, so a zone inside a furniture box stays selectable
     // (a wall counts as no area: it is hit only near its line).
     const area = polyArea;

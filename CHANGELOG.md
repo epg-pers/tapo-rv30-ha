@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.39.12
+
+### Fixed
+
+- **The map editor's Select picked a virtual wall from far away.** A wall counted as clicked anywhere along the endless line through its ends, so clicking a no-go zone or furniture in line with a wall selected the wall, and moving or deleting then changed the wrong item. A wall is now selected only near the wall itself (every segment of a bent wall).
+
 ## v0.39.11
 
 ### Fixed
