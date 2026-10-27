@@ -1334,7 +1334,7 @@ def async_setup_services(hass: HomeAssistant) -> None:
                 "restored_map_saved": saved if status == 3 else None,
                 "carrier_repaired": tidy["carrier"] if put_back else None,
                 "carried": tidy.get("carried") if tidy else None,
-                "source": src, "md5": md5, "url": url, "error_code": code, "process": process,
+                "source": src, "md5": md5, "error_code": code, "process": process,
                 "applied": status == 3, "finishing": finishing, "note": note, "next_steps": next_steps}
 
     async def _carry_from(coord: TapoCoordinator, src_id: int, on_robot: bool,

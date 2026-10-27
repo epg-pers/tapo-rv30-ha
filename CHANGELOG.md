@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.39.6
+
+### Fixed
+
+- **A map backup's download link was handed back in replies.** `restore_map_backup` returned the link it restored from, which with `use_cloud_url` is TP-Link's signed link that anyone can download the backup with, and a failed download in `fetch_cloud_map_backups` could show the signed link in its error. The restore reply no longer includes the link, and download errors hide its signature. Safe to paste replies when asking for help.
+
 ## v0.39.5
 
 ### Fixed

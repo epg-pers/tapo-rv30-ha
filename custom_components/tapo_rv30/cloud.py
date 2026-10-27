@@ -16,6 +16,7 @@ import hmac
 import json
 import logging
 import os
+import re
 import ssl
 import uuid
 from typing import Any
@@ -281,7 +282,8 @@ def fetch_backups(client, username: str, password: str, terminal_uuid: str, fold
                 with open(os.path.join(folder, f"cloud_{map_id}_{ts}_snapshot.{ext}"), "wb") as fh:
                     fh.write(snap)
         except (CloudError, requests.RequestException, OSError, KeyError) as exc:
-            entry["error"] = str(exc)
+            # A failed connection names the presigned link in full; its query string is the key to it.
+            entry["error"] = re.sub(r"(?<=[^\s?])\?[^\s'\")]+", "?<redacted>", str(exc))
         out["backups"].append(entry)
     if local_reads:
         for map_id in sorted({b.get("mapId") for b in backups if b.get("mapId") is not None}):
