@@ -64,7 +64,9 @@ It starts off and in preview mode. Everything about it is on [the planner](plann
 ### History
 
 Lifetime totals, cleans per day for the last 30 days, minutes per week for the last 8
-weeks, and the recent runs with how they were started.
+weeks, and the recent runs with how they were started. The charts and the list count the same
+runs: the kept ones (see below) and those still on the robot, so they reach back further than
+the robot's own short list, as far as the Keep setting allows (forgotten runs drop out).
 
 **Clean map history.** Press **Map** on a run to see where the robot went on it: the map as
 the Tapo app draws the run, the path, start, end and dock. **Download** saves it as a PNG; **Forget** deletes a kept

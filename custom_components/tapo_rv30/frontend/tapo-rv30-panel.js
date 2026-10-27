@@ -1211,8 +1211,8 @@ class TapoRV30Panel extends HTMLElement {
     if (!this._records || this._recordsKey !== key) {
       const tok = this._recTok = {};
       let recs = null, hist = null;
-      // The robot's records feed the charts; the kept clean maps (and the robot's runs not kept)
-      // feed the list. An integration without clean map history just lists the records.
+      // The kept clean maps and the robot's runs not kept (de-duplicated by start) feed the charts
+      // and the list: the robot holds only its last few runs. Without clean map history, the records.
       const [recResp, histResp] = await Promise.allSettled([
         this._hass.connection.sendMessagePromise({ type: "call_service", domain: DOMAIN, service: "get_clean_records",
           service_data: { entity_id: robot, limit: 100 }, return_response: true }),
@@ -1233,8 +1233,9 @@ class TapoRV30Panel extends HTMLElement {
     const runs = pane.querySelector(".runs");
     if (!runs) return;     // the tab changed while the records were loading
     this._renderRuns(pane, r, recs);
-    this._chart(pane.querySelector("canvas.days"), this._perDay(recs, 30), (i) => (i % 7 === 0 ? `${29 - i}d` : ""));
-    this._chart(pane.querySelector("canvas.weeks"), this._perWeek(recs, 8), (i) => (i === 7 ? "this wk" : `-${7 - i}`));
+    const all = this._hist && Array.isArray(this._hist.runs) ? this._hist.runs : recs;
+    this._chart(pane.querySelector("canvas.days"), this._perDay(all, 30), (i) => (i % 7 === 0 ? `${29 - i}d` : ""));
+    this._chart(pane.querySelector("canvas.weeks"), this._perWeek(all, 8), (i) => (i === 7 ? "this wk" : `-${7 - i}`));
   }
 
   _renderRuns(pane, r, recs) {
@@ -1314,7 +1315,7 @@ class TapoRV30Panel extends HTMLElement {
     // Weeks start on Monday, local time (day 0, 1 Jan 1970, was a Thursday).
     const wk = (day) => Math.floor((day + 3) / 7);
     const out = new Array(n).fill(0), now = wk(localDay(Date.now()));
-    for (const x of recs) { if (!x.started) continue; const w = now - wk(localDay(x.started * 1000)); if (w >= 0 && w < n) out[n - 1 - w] += x.minutes || 0; }
+    for (const x of recs) { if (!x.started) continue; const w = now - wk(localDay(x.started * 1000)); if (w >= 0 && w < n) out[n - 1 - w] += Number(x.minutes) || 0; }
     return out;
   }
   _chart(canvas, values, label) {

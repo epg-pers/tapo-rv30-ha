@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.39.5
+
+### Fixed
+
+- **History charts only counted the runs still on the robot.** The robot keeps few runs, so "Cleans per day" and "Minutes per week" showed empty days and weeks while the Recent runs list below still had runs on them. The charts now count the same runs as the list: the kept ones and those still on the robot.
+
 ## v0.39.4
 
 ### Fixed
