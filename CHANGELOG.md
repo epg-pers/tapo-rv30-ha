@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.39.8
+
+### Fixed
+
+- **An offline robot held up Home Assistant's start for minutes.** With the robot not answering, the first poll still tried a dozen feature checks one after another, each waiting out a connection timeout (up to about 4.5 minutes, on every retry). The checks are now skipped while the robot cannot be reached and run once it answers; setup gives up after a few attempts instead.
+
 ## v0.39.7
 
 ### Fixed

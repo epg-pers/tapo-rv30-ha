@@ -60,7 +60,7 @@ from .mapdata import (
 )
 from .maprender import _dot, _png, _px_transform, render_map, render_record, room_mask_png, rotation_of
 from .setup_apply import robot_key
-from .tpap import AuthError, TapoVacuumClient, WrongDevice, _opt_int
+from .tpap import AuthError, TapoVacuumClient, WrongDevice, _is_dropout, _opt_int
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -390,6 +390,7 @@ class TapoCoordinator(DataUpdateCoordinator):
 
     async def _update_once(self) -> dict[str, Any]:
         await self._load_restore()
+        unreachable = False
         if not self._info_fetched:
             try:
                 info = await self.hass.async_add_executor_job(self.client.get_device_info)
@@ -401,12 +402,22 @@ class TapoCoordinator(DataUpdateCoordinator):
             except AuthError as exc:
                 raise ConfigEntryAuthFailed(str(exc)) from exc
             except Exception as exc:
+                unreachable = _is_dropout(exc)
                 _LOGGER.debug("Device info fetch failed: %s", exc)
 
+        # An unreachable robot (offline at a Home Assistant start, say) is not probed: each
+        # getter would wait out its own connect timeout before the status read fails. The
+        # probe waits until the status read shows the robot answering, on this poll or later.
+        deferred = False
         if not self._caps_fetched:
-            await self._fetch_capabilities()
+            deferred = unreachable or not await self._fetch_capabilities()
 
         data = await self._fetch_status()
+        if deferred and not self._caps_fetched:
+            # The robot answers status, so a failed component list here is not the robot
+            # being away (a reply it cannot read, say): probe anyway and count the attempt,
+            # so CAPS_ATTEMPTS still ends the probing.
+            await self._fetch_capabilities(skip_unreachable=False)
 
         # Full map render + settings on first load and every MAP_INTERVAL; in
         # between, re-read the map data so position and current room track.
@@ -1046,12 +1057,14 @@ class TapoCoordinator(DataUpdateCoordinator):
 
     CAPS_ATTEMPTS = 5
 
-    async def _fetch_capabilities(self) -> None:
+    async def _fetch_capabilities(self, skip_unreachable: bool = True) -> bool:
         """Component list and which optional settings and dock actions answer. Read
         once, but a probe that ended in a transport error (the robot's Wi-Fi still
         waking after a Home Assistant restart, say) is inconclusive and is repeated on
         a later poll, up to CAPS_ATTEMPTS, so an entity is not missing until the next
-        restart just because one request timed out."""
+        restart just because one request timed out. With skip_unreachable, returns False,
+        without counting an attempt, when the robot does not answer the component list at
+        all: probing an unreachable robot would only wait out a connect timeout per getter."""
         complete = True
         before_bool, before_dock = set(self.bool_settings_supported), set(self.dock_actions)
         try:
@@ -1059,8 +1072,10 @@ class TapoCoordinator(DataUpdateCoordinator):
         except AuthError as exc:
             raise ConfigEntryAuthFailed(str(exc)) from exc
         except Exception as exc:
-            complete = False
             _LOGGER.debug("getComponentList failed: %s", exc)
+            if skip_unreachable and _is_dropout(exc):
+                return False
+            complete = False
         try:
             probed, ok = await self.hass.async_add_executor_job(self.client.probe_bool_settings)
             complete = complete and ok
@@ -1080,7 +1095,7 @@ class TapoCoordinator(DataUpdateCoordinator):
             _LOGGER.debug("Dock probe failed: %s", exc)
         self._caps_attempts += 1
         found = (set(self.bool_settings_supported) - before_bool) | (set(self.dock_actions) - before_dock)
-        if self._caps_attempts > 1 and self.data is not None and found:
+        if self.data is not None and found:     # entities already set up without these
             self._ask_reload("a later capability probe found more settings or dock actions", found)
         if complete or self._caps_attempts >= self.CAPS_ATTEMPTS:
             if not complete:
@@ -1089,6 +1104,7 @@ class TapoCoordinator(DataUpdateCoordinator):
             self._caps_fetched = True
         else:
             _LOGGER.debug("%s: capability probe inconclusive, trying again next poll", self.device_name)
+        return True
 
     async def _refresh_settings(self) -> None:
         # A getter that failed this time is simply missing from the reply: keep its last
