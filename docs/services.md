@@ -44,7 +44,7 @@ names in it, so it shows in the UI and in automation traces.
 | Event | When | Data |
 |---|---|---|
 | `tapo_rv30_clean_started` | a clean begins | `device`, `status_code`, `current_room` |
-| `tapo_rv30_clean_finished` | a running or paused clean ends (stopped, docking) | `device`, `status_code`, `record` (area, minutes, bin emptied, preset name) when the robot logged one |
+| `tapo_rv30_clean_finished` | a running or paused clean ends: when the robot stops cleaning and heads home (before it docks), or is stopped. With a mop-wash dock, or after docking part way to recharge, it fires once the robot is docked instead. The Last Clean Map image is only redrawn once the robot is docked and has logged the run, so it can lag this event by a minute or more | `device`, `status_code`, `record` (area, minutes, bin emptied, preset name) when the robot logged one by then |
 | `tapo_rv30_planner` | the planner starts a run, or in preview would have | `device`, `kind` (`start` or `preview`), `rooms`, `by` |
 | `tapo_rv30_error` | the robot reports a new error | `device`, `code`, `error`, `current_room` |
 | `tapo_rv30_prompt` | the robot raises a notice (dust bag full, area unreachable, cleaning finished, water tank empty and others), once each time | `device`, `code`, `prompt` (for example `dust_bag_full`), `description`, `prompt_id`, `current_room`. Codes in [protocol.md](protocol.md#status-prompts) |

@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.39.3
+
+### Fixed
+
+- **The "Notify with the last clean map" blueprint could send the previous run's map.** `clean_finished` fires when the robot heads home, but the Last Clean Map is redrawn once it docks; the blueprint's fixed 45 s wait was often too short. It now waits (10 minutes at most) until the image shows this run's own record, takes the figures from the same record, and sends the text without a picture rather than an older map when it cannot tell. Re-import the blueprint to pick this up; its inputs are unchanged.
+
 ## v0.39.2
 
 ### Fixed

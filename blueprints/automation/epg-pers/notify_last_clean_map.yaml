@@ -2,8 +2,11 @@ blueprint:
   name: Tapo vacuum - notify with the last clean map
   description: >-
     When a Tapo robot vacuum finishes a run, send a phone notification with the area and
-    time cleaned and the Last Clean Map image attached. Needs the Tapo Robot Vacuum
-    integration (0.13 or newer) and the Home Assistant companion app.
+    time cleaned and the Last Clean Map image attached. The robot reports the run finished
+    as it stops cleaning and heads home, but the map is only redrawn once it is docked, so
+    this waits (10 minutes at most) for the Last Clean Map image to show this run's record
+    and attaches it only then. Needs the Tapo Robot Vacuum integration (0.13 or
+    newer) and the Home Assistant companion app.
   domain: automation
   source_url: https://github.com/epg-pers/tapo-rv30-ha/blob/main/blueprints/automation/epg-pers/notify_last_clean_map.yaml
   input:
@@ -37,19 +40,60 @@ triggers:
     domain: tapo_rv30
     device_id: !input vacuum_device
     type: clean_finished
+variables:
+  last_clean_image: !input last_clean_image
+  # Rendered when the event fires (before a queued run starts): the run's own record if the
+  # robot had logged it by then, and which record the Last Clean Map image showed at that point.
+  event_record: "{{ trigger.event.data.get('record') or {} }}"
+  event_started: "{{ event_record.get('started') }}"
+  shown_at_trigger: "{{ state_attr(last_clean_image, 'started') }}"
 actions:
-  - delay:
-      seconds: 45
+  # The image is redrawn once the robot is docked, and a redraw is not always this run's
+  # record (after a restart or a rotation change it can redraw the previous one), so wait for
+  # the image to show this run's record: the event's record if it had one, otherwise a record
+  # newer than the one shown when the event fired. True at once if it already does. With
+  # neither (a restart during the run), the next redraw could be the previous run's: no wait,
+  # and the notification goes as text only.
+  - wait_template: >-
+      {% set shown = state_attr(last_clean_image, 'started') %}
+      {% if event_started is not none %}
+      {{ shown is not none and shown | int(-1) == event_started | int(-2) }}
+      {% else %}
+      {{ shown_at_trigger is none
+         or (shown is not none and shown | int(0) > shown_at_trigger | int(0)) }}
+      {% endif %}
+    timeout:
+      minutes: 10
+    continue_on_timeout: true
+  - variables:
+      fresh: "{{ wait.completed and (event_started is not none or shown_at_trigger is not none) }}"
+      # The event's own record when it had one; otherwise the image's attributes, which are
+      # then this run's record (the wait matched it). Neither: no figures.
+      clean_record: >-
+        {% if event_record %}
+        {{ {'area': event_record.get('area'), 'minutes': event_record.get('minutes'),
+            'error': event_record.get('error')} }}
+        {% elif fresh %}
+        {{ {'area': state_attr(last_clean_image, 'area'),
+            'minutes': state_attr(last_clean_image, 'minutes'),
+            'error': state_attr(last_clean_image, 'error')} }}
+        {% else %}
+        {{ {} }}
+        {% endif %}
   - action: !input notify_service
     data:
       title: !input title
       message: >-
-        {% set r = trigger.event.data.get('record') or {} %}
-        {{ trigger.event.data.device }} cleaned
-        {% if r.get('area') is not none %}{{ r.area }} m2{% endif %}
-        {% if r.get('minutes') is not none %} in {{ r.minutes }} min{% endif %}
-        {% if r.get('error') %} and reported error {{ r.error }}{% endif %}.
-      data:
-        image: "/api/image_proxy/{{ last_clean_image }}"
-variables:
-  last_clean_image: !input last_clean_image
+        {%- set r = clean_record if clean_record is mapping else {} -%}
+        {%- set device = trigger.event.data.device -%}
+        {%- if r.get('area') is not none or r.get('minutes') is not none -%}
+        {{ device }} cleaned
+        {%- if r.get('area') is not none %} {{ r.area }} m2{% endif -%}
+        {%- if r.get('minutes') is not none %} in {{ r.minutes }} min{% endif -%}
+        {%- else -%}
+        {{ device }} finished cleaning
+        {%- endif -%}
+        {%- if r.get('error') %} and reported error {{ r.error }}{% endif -%}.
+      # The picture only once it shows this run's record, never the previous run's.
+      data: >-
+        {{ {'image': '/api/image_proxy/' ~ last_clean_image} if fresh else {} }}
