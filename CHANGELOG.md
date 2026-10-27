@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.39.7
+
+### Fixed
+
+- **The planner could clean the same rooms again straight after another run.** When a clean started from the card, the app or the robot's own schedule ended inside the planner's window, the planner saw the robot docked before that run's record had been counted, still found its rooms due, and started them again. The new record is now counted in the same poll the run ends, and the planner waits while a finished run's record is still on its way.
+
 ## v0.39.6
 
 ### Fixed

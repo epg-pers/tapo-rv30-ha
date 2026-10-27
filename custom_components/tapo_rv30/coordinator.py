@@ -461,7 +461,6 @@ class TapoCoordinator(DataUpdateCoordinator):
         data["settings"] = self.settings
         data["settings_read_at"] = self.settings_read_at
         data["schedules"] = self.schedules
-        await self._maybe_render_last_clean(data.get("status_code"))
         data["bool_settings"] = self.bool_settings
         data["presets"] = self.presets
         data["current_room"] = self.current_room
@@ -473,6 +472,9 @@ class TapoCoordinator(DataUpdateCoordinator):
         data["signal_level"] = dev.get("signal_level")
         data["firmware"] = self.settings.get("firmware") or {}
         await self._fire_events(self.data, data)
+        # After the events: a run ending this poll reads the record it left (_end_run), which
+        # is then folded into room freshness before listeners (the planner) see the dock.
+        await self._maybe_render_last_clean(data.get("status_code"))
         return data
 
     # ---- events ------------------------------------------------------------------

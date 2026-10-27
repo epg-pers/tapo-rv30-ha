@@ -307,7 +307,9 @@ class TapoPlanner:
         return Snapshot(
             # The last good poll is not the robot now: while it does not answer, nothing is started.
             now=now, robot_docked=code in DOCKED_CODES and self.coordinator.last_update_success,
-            robot_busy=self.coordinator.busy,
+            # map_busy also counts a run just over whose record is not in yet: until it is, the
+            # rooms it cleaned still look due, whoever started it (card, app, robot schedule).
+            robot_busy=self.coordinator.map_busy,
             robot_error=(data.get("error_codes") or [0])[0] not in (0, None),
             battery=data.get("battery"), dnd=self.coordinator.settings.get("dnd"),
             people_home=home, schedules=list(self.coordinator.schedules or []),
