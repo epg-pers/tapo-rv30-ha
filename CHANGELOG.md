@@ -1,11 +1,5 @@
 # Changelog
 
-## v0.40.1
-
-### Fixed
-
-- **"Config entry ... has version 2 which is higher than the current version 1" after switching from a fork** ([#28](https://github.com/epg-pers/tapo-rv30-ha/issues/28)). A fork with the same `tapo_rv30` domain saves its config entries as version 2, so after switching to this integration Home Assistant refused to start the robot. Entries are now version 2 here too (the saved data has not changed), so those entries load as they are; version 1 entries are moved to 2 on the next start. Going back to a release before 0.40.1 afterwards shows the same message.
-
 ## v0.40.0
 
 ### Added

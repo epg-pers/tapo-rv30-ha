@@ -140,17 +140,6 @@ async def _async_options_updated(hass: HomeAssistant, entry: ConfigEntry) -> Non
     await _async_apply_panel_option(hass, integration.version or "0")
 
 
-async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Version 2 only marks entries a fork may also have written (same data); 1 needs nothing."""
-    if entry.version > 2:
-        _LOGGER.error("%s was set up by a newer integration (entry version %s); remove and add it again",
-                      entry.title, entry.version)
-        return False
-    if entry.version < 2:
-        hass.config_entries.async_update_entry(entry, version=2)
-    return True
-
-
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Stop the planner first, so it cannot start a clean while the entities go away.
     planner = getattr((hass.data.get(DOMAIN) or {}).get(entry.entry_id), "planner", None)

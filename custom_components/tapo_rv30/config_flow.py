@@ -90,9 +90,7 @@ async def _tpap_port_open(host: str, port: int = 4433, timeout: float = 3.0) -> 
 
 
 class TapoRV30ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
-    # 2: other integrations with this domain (a fork) save their entries as version 2 with the
-    # same data, and Home Assistant refuses an entry newer than this. No data changed from 1.
-    VERSION = 2
+    VERSION = 1
 
     @staticmethod
     @callback
