@@ -14,6 +14,7 @@ from homeassistant.loader import async_get_integration
 
 from .aes import AesVacuumClient
 from .backup_ws import async_setup_backup_ws
+from .config_flow import TapoRV30ConfigFlow
 from .const import (
     CONF_MAC,
     CONF_SECURITY,
@@ -23,6 +24,7 @@ from .const import (
     ISSUE_UNREACHABLE,
     OPT_SHOW_PANEL,
     TRANSPORT_AES,
+    TRANSPORT_TPAP,
 )
 from .coordinator import TapoCoordinator
 from .frontend import async_remove_panel_if_present, async_setup_frontend, async_setup_panel
@@ -48,8 +50,27 @@ PLATFORMS = [Platform.VACUUM, Platform.SENSOR, Platform.BINARY_SENSOR, Platform.
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     """Services are registered once, for the whole run: automations calling them while a robot
     is still being set up (or retrying) get a clear error instead of "action not found"."""
+    _accept_fork_entries(hass)
     async_setup_services(hass)
     return True
+
+
+def _accept_fork_entries(hass: HomeAssistant) -> None:
+    """A fork with this domain saves its entries as version 2 with the same data. Home Assistant
+    refuses an entry newer than ours before asking us, so such entries are put back to our version
+    here, before any entry is set up; ours are not changed. Only entries whose data reads as ours."""
+    ours = TapoRV30ConfigFlow.VERSION
+    for entry in hass.config_entries.async_entries(DOMAIN):
+        if entry.version <= ours or not _readable(entry.data):
+            continue
+        _LOGGER.warning("%s was saved as version %s by another integration with this domain; "
+                        "reading it as version %s", entry.title, entry.version, ours)
+        hass.config_entries.async_update_entry(entry, version=ours, minor_version=1)
+
+
+def _readable(data) -> bool:
+    return (all(isinstance(data.get(k), str) and data.get(k) for k in (CONF_HOST, CONF_USERNAME, CONF_PASSWORD))
+            and data.get(CONF_TRANSPORT, TRANSPORT_TPAP) in (TRANSPORT_TPAP, TRANSPORT_AES))
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

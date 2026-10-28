@@ -127,6 +127,12 @@ over. Entities the fork had and this project does not stay behind as "no longer 
 delete them from the entity list. Entities new here appear. If the fork used a different domain, set the robot up again
 here and remove the old entry afterwards.
 
+Some forks save their config entry as version 2. Home Assistant 2026.10 refuses such an entry
+with "Config entry ... has version 2 which is higher than the current version 1". From 0.40.2
+this integration reads those entries as version 1 when Home Assistant starts (the saved data is
+the same), so they load without removing anything. Your own entries are not changed. Going back
+to such a fork afterwards needs the integration removed and added again there.
+
 ## Still stuck
 
 Download diagnostics (Settings, Devices and services, Tapo Robot Vacuum, three-dot menu),
