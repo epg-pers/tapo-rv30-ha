@@ -25,6 +25,9 @@ there.
   `rooms`, `room_geometry`, `map_geometry` (grid, mm to px transform, saved zones, furniture),
   `calibration_points`, `rooms_mask_url`, `path_points`, `rooms_last_cleaned` (per room: last cleaned
   timestamp and coverage percent, from the robot's own run maps), `last_clean`, `last_clean_url`.
+  Each `room_geometry` entry carries the room's cleaning direction, when the robot reports one:
+  `floor_texture` (the robot's value: -1 its own pattern, 0 or 90) and `cleaning_direction`
+  (`default`, `horizontal` or `vertical` as the map is shown, following its rotation).
   Each entry of `maps` is one map on the robot: `id`, `name`, `current`, `saved`, `rotation`
   (degrees, clockwise) and, on robots that support locking, `locked` and `auto_locked` (locked by
   the robot itself).

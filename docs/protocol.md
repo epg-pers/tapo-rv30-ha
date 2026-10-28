@@ -235,6 +235,19 @@ writing and clearing `forbid` and `virtual_wall` round-trips exactly (the robot 
 but keeps the polygons). Per-room clean settings (suction/water/passes) are not here; those go
 through `setCleanAttr`, preset-only on 1.3.3 (see Room cleaning).
 
+**Cleaning direction per room.** A room's `floor_texture` is its cleaning direction (the app's
+map management "Cleaning Direction", shown when the component list has `clean_angle` at
+version 1 or later; an RV30 Max Plus reports 1): `-1` the robot's own pattern (Default), `0` or
+`90` the two directions in the robot's map frame. One value per room for vacuuming and mopping
+together; presets send `null` for it and there is no global one (the separate "clean along the
+wood grain" switch is **Clean Along Floor**). The app labels them as the map is displayed:
+at `rotate_angle` 0 or 180, Horizontal is `0` and Vertical `90`; at 90 or 270 they swap.
+Home Assistant does the same with the map's rotation. The app writes it with `setAreaInfo`,
+`type_list` `["room"]` and every room (`name`, `color`, `carpet_strategy`, `floor_texture`,
+`floor_material`, `label`; no `vertexs`), changing only the target room's `floor_texture`.
+Since `["room"]` replaces all rooms, the integration always builds that list from a fresh
+`getMapData` read, as its other room writes do; the service reads the map back to confirm.
+
 `tapo_rv30.save_map_setup` / `apply_map_setup` build on this: snapshot the `area_list` to a file
 and write it back, restoring no-go zones, virtual walls, carpets and room names after a remap -
 the practical recovery the cloud restore refuses - entirely over the local API. The grid itself

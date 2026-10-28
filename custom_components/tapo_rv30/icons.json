@@ -60,6 +60,9 @@
     "set_map_rotation": {
       "service": "mdi:rotate-right"
     },
+    "set_room_cleaning_direction": {
+      "service": "mdi:arrow-split-horizontal"
+    },
     "go_to": {
       "service": "mdi:map-marker-right"
     },

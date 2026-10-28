@@ -25,7 +25,7 @@ from .const import (
     ZONE_OUTLINE,
 )
 from .mapclean import NULL, clean_grid, grid_values, room_colours
-from .mapdata import b64name, decode_path, lz4_block_decompress, mm_to_grid, validate_map
+from .mapdata import b64name, decode_path, lz4_block_decompress, mm_to_grid, texture_direction, validate_map
 
 MAP_SCALE = 4   # px per vacuum grid cell -> ~700x700 output image
 FONT_SIZE = 14
@@ -337,7 +337,11 @@ def render_map(map_data: dict, rotation: int = 0) -> tuple[Image.Image, list[dic
         geometry.append({"id": rid, "name": name, "bbox": [min(ax, bx), min(ay, by), max(ax, bx), max(ay, by)],
                          "centre": [cx, cy],
                          "cells": len(pts), "suction": _num(room.get("suction")),
-                         "water_level": _num(room.get("cistern")), "passes": _num(room.get("clean_number"))})
+                         "water_level": _num(room.get("cistern")), "passes": _num(room.get("clean_number")),
+                         # The room's cleaning direction: raw, and as the picture is turned
+                         **({"floor_texture": _num(room["floor_texture"]),
+                             "cleaning_direction": texture_direction(_num(room["floor_texture"]), rotation)}
+                            if "floor_texture" in room else {})})
         draw.text((cx + 1, cy + 1), name, fill=(0, 0, 0), font=font, anchor="mm")
         draw.text((cx, cy), name, fill=(255, 255, 255), font=font, anchor="mm")
 

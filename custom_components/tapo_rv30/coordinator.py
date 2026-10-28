@@ -50,13 +50,16 @@ from .mapdata import (
     decode_path,
     decode_preset,
     decode_schedule,
+    direction_texture,
     fold,
     grid_pixels,
     new_prompts,
     preset_ref_id,
     resolve_rooms,
+    room_areas,
     room_at_vac,
     room_coverage,
+    texture_direction,
 )
 from .maprender import _dot, _png, _px_transform, render_map, render_record, room_mask_png, rotation_of
 from .setup_apply import robot_key
@@ -211,6 +214,15 @@ class TapoCoordinator(DataUpdateCoordinator):
     def has(self, component: str) -> bool:
         """True if the robot lists this component (or the list was unavailable)."""
         return component in self.components if self.components else True
+
+    @property
+    def clean_direction_supported(self) -> bool:
+        """A cleaning direction per room (the app's isSupportCleanDirection: clean_angle 1 or later).
+        False while the component list is unknown: a room write is not risked on a guess."""
+        try:
+            return int(self.components.get("clean_angle", 0)) >= 1
+        except (TypeError, ValueError, AttributeError):
+            return False
 
     def has_part(self, field: str) -> bool:
         """True if getConsumablesInfo reports this part's time (or it was not read): a robot
@@ -1589,6 +1601,65 @@ class TapoCoordinator(DataUpdateCoordinator):
         got = next((_opt_int(m.get("map_locked")) for m in after if m.get("map_id") == int(map_id)), None)
         if (got in (1, 2)) != bool(locked):
             raise ValueError(f"the robot accepted the change but still reports map_locked {got}")
+
+    async def async_set_room_directions(self, map_id: int, room_ids: list[int], direction: str) -> list[dict]:
+        """Set the cleaning direction (default, horizontal, vertical as the map is shown here) of
+        rooms on a saved map, the editor's way: every room written back as just read, with only
+        their floor_texture changed. Returns each room with its old and new direction; ValueError
+        when refused before anything was written."""
+        if not self.clean_direction_supported:
+            raise ValueError("has no per-room cleaning direction")
+        direction_texture(direction)        # a bad name is refused before anything else
+        if why := self.map_busy:
+            raise ValueError(f"is {why}; change the map once it is docked and idle")
+        if self.map_lock.locked():
+            raise ValueError("is having its map written; try again shortly")
+        async with self.map_lock:
+            # As the editor: tidying a restore writes the carrier (and the restored map) back.
+            if (pend := self.restore_unfinished()) is not None and map_id in (pend.get("carrier"), pend.get("map_id")):
+                raise ValueError("has this map in a restore that is still being tidied up; try again once "
+                                 "the restore has finished")
+            _, map_list = await self.hass.async_add_executor_job(self.client.get_map_info)
+            entry = next((m for m in map_list if m.get("map_id") == int(map_id)), None)
+            if entry is None:
+                raise ValueError(f"has no map {map_id}")
+            if entry.get("is_saved") is not True:
+                raise ValueError("has not saved that map yet; save it in the Tapo app first")
+            if await self._robot_working():
+                raise ValueError("is working; change the map once it is docked and idle")
+            # Horizontal and vertical as the map is shown, from the angle just read.
+            turn = rotation_of(entry.get("rotate_angle"))
+            texture = direction_texture(direction, turn)
+            data = await self.hass.async_add_executor_job(self.client.get_map_data, int(map_id))
+            rooms = {a.get("id"): a for a in data.get("area_list") or [] if a.get("type") == "room"}
+            if not rooms:
+                raise ValueError("returned no rooms for that map, so nothing was written; try again")
+            if missing := [r for r in room_ids if r not in rooms]:
+                raise ValueError(f"has no room {missing} on that map")
+            areas = room_areas(data.get("area_list"), {r: {"floor_texture": texture} for r in room_ids})
+            out = [{"id": r, "name": b64name(rooms[r].get("name", "")),
+                    "old": texture_direction(rooms[r].get("floor_texture"), turn), "new": str(direction).strip().lower(),
+                    "old_floor_texture": rooms[r].get("floor_texture"), "floor_texture": texture} for r in room_ids]
+            try:
+                if any(o["old_floor_texture"] != texture for o in out):
+                    code = await self.hass.async_add_executor_job(self.client.set_areas, int(map_id), "room", areas)
+                    if code:
+                        raise RuntimeError(f"the robot refused the change (error {code})")
+                    after = await self.hass.async_add_executor_job(self.client.get_map_data, int(map_id))
+                    now = {a.get("id"): a for a in after.get("area_list") or [] if a.get("type") == "room"}
+                    if wrong := [r for r in room_ids if (now.get(r) or {}).get("floor_texture") != texture]:
+                        raise RuntimeError(f"the robot accepted the change but rooms {wrong} still have their "
+                                           "old direction")
+                    # Nothing else may have moved: the same rooms, names and colours as before.
+                    keys = ("name", "color")
+                    if set(now) != set(rooms) or any(
+                            [now[r].get(k) for k in keys] != [rooms[r].get(k) for k in keys] for r in rooms):
+                        raise RuntimeError("the robot took the change but now reports different rooms, names or "
+                                           "colours than before; check the map in the Tapo app (run "
+                                           "tapo_rv30.apply_map_setup to put the saved setup back)")
+            finally:
+                await self.async_request_map_refresh()
+        return out
 
     def rotation_for(self, map_id) -> int:
         """A map's rotate_angle as last read (0 for a map not on the robot any more)."""

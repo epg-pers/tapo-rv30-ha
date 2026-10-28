@@ -5,9 +5,12 @@ tapo_rv30/map/edit_get    {entity_id, map_id?, picture?, wait?} -> the editable 
                           on it (any saved map, not just the current one); with wait: true, read
                           only once a running map write has ended
 tapo_rv30/map/edit_apply  {entity_id, map_id, areas?, furniture?, rooms?, order?} -> write them
+                          rooms: [{id, name?, floor_texture?}], the rooms to change; every
+                          other room is written back as the robot has it
 
 Only the editable layers are touched (no-go zones, virtual walls, carpets, furniture, room
-names and order). The map's shape (grid) is the robot's own and is never written.
+names, cleaning directions and order). The map's shape (grid) is the robot's own and is never
+written.
 """
 from __future__ import annotations
 
@@ -22,14 +25,13 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 
 from .const import DOMAIN, FURNITURE_TYPES
-from .mapdata import b64name
+from .mapdata import b64name, room_areas, valid_texture
 
 _LOGGER = logging.getLogger(__name__)
 
 _KEY = f"{DOMAIN}_map_edit_ws"
 _AREA_TYPES = ("forbid", "virtual_wall", "carpet_rectangle", "carpet_round")
 _KEEP = ("label", "define_type", "carpet_strategy")   # robot fields the editor does not round-trip
-_ROOM_KEEP = ("color", "define_type", "floor_material", "floor_texture", "carpet_strategy", "label")
 # How long a read waits for a map write (an editor save, setup apply, restore or copy) to finish.
 _LOCK_WAIT = 60.0
 _LOCK_POLL = 0.5
@@ -89,8 +91,9 @@ async def ws_edit_get(hass: HomeAssistant, connection: websocket_api.ActiveConne
         if t in areas:
             areas[t].append({"id": a.get("id"), "vertexs": a.get("vertexs")})
         elif t == "room":
+            # floor_texture: the room's cleaning direction (-1 default, 0 or 90 in the map's frame)
             rooms.append({"id": a.get("id"), "name": b64name(a.get("name", "")),
-                          "vertexs": a.get("vertexs")})
+                          "vertexs": a.get("vertexs"), "floor_texture": a.get("floor_texture")})
     picture = geometry = room_geometry = room_mask = None
     if msg.get("picture"):
         # Drawn here rather than taken from the camera, which only shows the current map: the
@@ -127,7 +130,22 @@ async def ws_edit_get(hass: HomeAssistant, connection: websocket_api.ActiveConne
         "furniture": data.get("furniture_list", []),
         "furniture_types": {str(k): v for k, v in FURNITURE_TYPES.items()},
         "rooms": rooms,
+        # Whether the robot takes a cleaning direction per room (component clean_angle).
+        "clean_direction": coord.clean_direction_supported,
     })
+
+
+def _bad_rooms(coord, rooms) -> tuple[str, str] | None:
+    """(code, message) when the rooms to write are not well formed, else None."""
+    for r in rooms or []:
+        if not isinstance(r, dict) or not isinstance(r.get("id"), int):
+            return "invalid", "Each room needs its id"
+        if "floor_texture" in r:
+            if not valid_texture(r["floor_texture"]):
+                return "invalid", f"A room's direction (floor_texture) must be -1, 0 or 90, not {r['floor_texture']!r}"
+            if not coord.clean_direction_supported:
+                return "not_supported", f"{coord.device_name} has no per-room cleaning direction"
+    return None
 
 
 @websocket_api.websocket_command({
@@ -145,6 +163,9 @@ async def ws_edit_apply(hass: HomeAssistant, connection: websocket_api.ActiveCon
     coord = _coord(hass, msg["entity_id"])
     if coord is None:
         connection.send_error(msg["id"], "not_found", f"No Tapo vacuum for {msg['entity_id']}")
+        return
+    if (bad := _bad_rooms(coord, msg.get("rooms"))) is not None:
+        connection.send_error(msg["id"], *bad)
         return
     if coord.map_busy:
         connection.send_error(msg["id"], "busy", f"{coord.device_name} must be docked and idle to edit the map")
@@ -179,9 +200,16 @@ async def ws_edit_apply(hass: HomeAssistant, connection: websocket_api.ActiveCon
             # The editor only round-trips id and shape; keep the robot's own fields (label,
             # define_type, carpet handling) on zones it already has, or the save would drop them.
             existing = {}
+            rooms = None
             if msg.get("areas") or msg.get("rooms"):
                 data = await hass.async_add_executor_job(coord.client.get_map_data, map_id)
                 existing = {(a.get("type"), a.get("id")): a for a in data.get("area_list", [])}
+            if msg.get("rooms"):
+                # setAreaInfo replaces every room: all of them go back as just read, with only the
+                # names and directions given changed. Built before any write, so a read with no
+                # rooms (or without a room to change) refuses the whole save.
+                changes = {r["id"]: {k: r[k] for k in ("name", "floor_texture") if k in r} for r in msg["rooms"]}
+                rooms = room_areas(data.get("area_list"), changes)
             for t, items in (msg.get("areas") or {}).items():
                 if t in _AREA_TYPES:
                     items = [{**{k: old[k] for k in _KEEP if k in old}, **item}
@@ -191,15 +219,8 @@ async def ws_edit_apply(hass: HomeAssistant, connection: websocket_api.ActiveCon
             if "furniture" in msg:
                 result["furniture"] = await hass.async_add_executor_job(
                     coord.client.set_furniture, map_id, msg["furniture"])
-            if msg.get("rooms"):
-                # Only the name changes: the rest of each room (colour, floor, carpet handling) is
-                # kept as the robot has it, since setAreaInfo replaces every room.
-                room_areas = [{**{k: old[k] for k in _ROOM_KEEP if k in old}, "type": "room", "id": r["id"],
-                               "name": base64.b64encode(str(r.get("name", "")).encode()).decode()}
-                              for r in msg["rooms"] if r.get("id") is not None
-                              for old in [existing.get(("room", r["id"]), {})]]
-                result["rooms"] = await hass.async_add_executor_job(
-                    coord.client.set_areas, map_id, "room", room_areas)
+            if rooms:
+                result["rooms"] = await hass.async_add_executor_job(coord.client.set_areas, map_id, "room", rooms)
             if msg.get("order"):
                 result["order"] = await hass.async_add_executor_job(
                     coord.client.set_clean_order, map_id, msg["order"])

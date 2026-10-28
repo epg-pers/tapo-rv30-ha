@@ -32,7 +32,8 @@ SERVICES = ("clean_rooms", "set_room_settings", "clean_zone", "run_schedule", "s
             "add_schedule", "set_schedule", "remove_schedule", "remove_matter_fabric", "get_matter_setup_code",
             "rename_map", "set_map_rotation", "set_map_lock",
             "fetch_cloud_map_backups", "save_map_setup", "apply_map_setup", "restore_map_backup", "copy_map", "delete_map",
-            "backup_map", "create_preset", "update_preset", "delete_preset", "remote_drive")
+            "backup_map", "create_preset", "update_preset", "delete_preset", "remote_drive",
+            "set_room_cleaning_direction")
 
 
 # Methods the integration itself calls while the robot is working.
@@ -251,7 +252,7 @@ async def _read(hass: HomeAssistant, call: ServiceCall, fn, *args):
 ADMIN_SERVICES = frozenset({"send_raw", "restore_map_backup", "apply_map_setup", "save_map_setup",
                             "fetch_cloud_map_backups", "delete_preset", "remove_schedule",
                             "remove_matter_fabric", "rename_map", "copy_map", "delete_map", "set_map_lock",
-                            "backup_map"})
+                            "backup_map", "set_room_cleaning_direction"})
 
 
 def _admin_only(hass: HomeAssistant, handler):
@@ -776,6 +777,28 @@ def async_setup_services(hass: HomeAssistant) -> None:
         except Exception as exc:
             raise HomeAssistantError(f"{call.service}: the robot refused the change: {exc}") from exc
         return {"map_id": map_id, "name": names.get(map_id), "locked": locked}
+
+    async def handle_set_room_cleaning_direction(call: ServiceCall) -> ServiceResponse:
+        """Each room's cleaning direction, as in the app: default (the robot's own pattern), or
+        horizontal / vertical as the map is shown here (its rotation), written like the editor."""
+        from .mapdata import DIRECTION_NAMES
+        coord = _one(hass, call)
+        if not coord.clean_direction_supported:
+            raise ServiceValidationError(f"{call.service}: {coord.device_name} has no per-room cleaning direction")
+        direction = str(call.data.get("direction") or "").strip().lower()
+        if direction not in DIRECTION_NAMES:
+            raise ServiceValidationError(f"{call.service}: 'direction' must be one of {list(DIRECTION_NAMES)}")
+        names = await _read(hass, call, coord.map_names)
+        ref = call.data.get("map")
+        map_id = coord.map_id if ref in (None, "") else _match_map(call, names, ref, exact=True)
+        room_ids, map_id = await _resolve(hass, call, coord, map_id=map_id)
+        try:
+            rooms = await coord.async_set_room_directions(map_id, room_ids, direction)
+        except ValueError as exc:
+            raise ServiceValidationError(f"{call.service}: {coord.device_name} {exc}") from exc
+        except Exception as exc:
+            raise HomeAssistantError(f"{call.service}: {exc}") from exc
+        return {"map_id": map_id, "map_name": names.get(map_id), "direction": direction, "rooms": rooms}
 
     async def handle_rename_map(call: ServiceCall) -> ServiceResponse:
         """Rename a saved map. Everything in this integration (schedules, presets, room freshness,
@@ -1587,6 +1610,9 @@ def async_setup_services(hass: HomeAssistant) -> None:
     hass.services.async_register(DOMAIN, "set_map_rotation", handle_set_map_rotation,
                                  supports_response=SupportsResponse.OPTIONAL)
     hass.services.async_register(DOMAIN, "set_map_lock", _admin_only(hass, handle_set_map_lock),
+                                 supports_response=SupportsResponse.OPTIONAL)
+    hass.services.async_register(DOMAIN, "set_room_cleaning_direction",
+                                 _admin_only(hass, handle_set_room_cleaning_direction),
                                  supports_response=SupportsResponse.OPTIONAL)
     hass.services.async_register(DOMAIN, "go_to", handle_go_to)
     hass.services.async_register(DOMAIN, "remote_drive", handle_remote_drive,

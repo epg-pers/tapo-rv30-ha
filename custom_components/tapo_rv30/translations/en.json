@@ -236,6 +236,28 @@
         }
       }
     },
+    "set_room_cleaning_direction": {
+      "name": "Set room cleaning direction",
+      "description": "Admin only. The way the robot drives its lines in each room, as the Tapo app's Cleaning Direction: default (the robot's own pattern), horizontal or vertical. Horizontal and vertical follow the map as Home Assistant shows it (its rotation). One direction per room, for vacuuming and mopping alike. The robot must be docked and idle; the map must be saved.",
+      "fields": {
+        "rooms": {
+          "name": "Rooms",
+          "description": "Room names on the map."
+        },
+        "room_ids": {
+          "name": "Room ids",
+          "description": "Room ids instead of names (unnamed or same-named rooms)."
+        },
+        "direction": {
+          "name": "Direction",
+          "description": "default, horizontal or vertical (as the map is shown in Home Assistant)."
+        },
+        "map": {
+          "name": "Map",
+          "description": "Its id or full name. Defaults to the current map."
+        }
+      }
+    },
     "go_to": {
       "name": "Go to point",
       "description": "Drive the robot to a point given in the map's real coordinates (mm, same frame as the vacuum's position_mm attribute and tapo_rv30.clean_zone). Stop it with vacuum.stop; vacuum.return_to_base sends it home.",

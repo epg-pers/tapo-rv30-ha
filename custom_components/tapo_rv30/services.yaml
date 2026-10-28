@@ -393,6 +393,36 @@ set_map_rotation:
         select:
           options: ["0", "90", "180", "270"]
 
+set_room_cleaning_direction:
+  target:
+    entity:
+      domain: vacuum
+      integration: tapo_rv30
+  fields:
+    rooms:
+      required: false
+      example:
+      - Kitchen
+      selector:
+        object: {}
+    room_ids:
+      required: false
+      example:
+      - 2
+      selector:
+        object: {}
+    direction:
+      required: true
+      example: horizontal
+      selector:
+        select:
+          options: ["default", "horizontal", "vertical"]
+    map:
+      required: false
+      example: Downstairs
+      selector:
+        text: {}
+
 go_to:
   target:
     entity:

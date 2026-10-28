@@ -31,6 +31,11 @@ const unturnPx = (x, y, g) => {
   return r === 90 ? [y, H - x] : r === 180 ? [W - x, H - y] : r === 270 ? [W - y, x] : [x, y];
 };
 // A box in world mm (y up) in the robot's corner order: top left, top right, bottom right, bottom left.
+// A room's cleaning direction (floor_texture: -1 the robot's own pattern, 0 or 90 in the map's frame)
+// as the map is shown: turned a quarter, horizontal and vertical swap, as in the Tapo app.
+const quarter = (turn) => ((Number(turn) || 0) / 90) % 2 === 1;
+const texDir = (t, turn) => (t == null || t === -1 ? "default" : t === 0 || t === 90 ? ((t === 0) !== quarter(turn) ? "horizontal" : "vertical") : null);
+const dirTex = (d, turn) => (d === "default" ? -1 : (d === "horizontal") !== quarter(turn) ? 0 : 90);
 const mmBox = (x0, y0, x1, y1) => { const l = Math.min(x0, x1), r = Math.max(x0, x1), b = Math.min(y0, y1), t = Math.max(y0, y1); return [[l, t], [r, t], [r, b], [l, b]]; };
 // Minutes after midnight inside the robot's Do Not Disturb window? Windows cross midnight.
 const toMin = (hhmm) => { const [h, m] = String(hhmm || "0:0").split(":").map(Number); return h * 60 + m; };
@@ -216,6 +221,7 @@ canvas.chart { width: 100%; height: 140px; display: block; }
 .estage { background: #1b1b1b; border-radius: 10px; overflow: hidden; line-height: 0; }
 .ecanvas { width: 100%; height: auto; display: block; touch-action: none; cursor: crosshair; }
 .erooms { margin-top: 10px; } .erooms h5 { margin: 6px 0; }
+.erooms select { padding: 5px 8px; border-radius: 8px; border: 1px solid var(--divider-color); background: var(--card-background-color); color: var(--primary-text-color); }
 .erooms input { width: 150px; padding: 5px 8px; border-radius: 8px; border: 1px solid var(--divider-color); background: var(--card-background-color); color: var(--primary-text-color); }
 .ebtns { display: flex; gap: 8px; margin-top: 12px; align-items: center; flex-wrap: wrap; }
 .estatus { margin-top: 8px; min-height: 1.2em; }
@@ -1359,8 +1365,8 @@ class TapoRV30Panel extends HTMLElement {
 
   // ---- map editor ----------------------------------------------------------------------
   _paneEdit(pane) {
-    // Carpets and room renaming are read-only for now: carpet writes do not persist
-    // standalone, and setAreaInfo "room" can disturb room geometry; both pending safe testing.
+    // Carpets and room renaming are read-only for now: carpet writes do not persist standalone,
+    // and names pending safe testing. A room's cleaning direction is saved (with every room kept).
     const tools = [["select", "mdi:cursor-move", "Select"], ["forbid", "mdi:cancel", "No-go"],
       ["virtual_wall", "mdi:wall", "Wall"], ["furniture", "mdi:sofa", "Furniture"]];
     pane.innerHTML = `<ha-card><div class="card">
@@ -1527,7 +1533,10 @@ class TapoRV30Panel extends HTMLElement {
       if (!same) {
         this._edit.areas = res.areas || {}; this._edit.furniture = res.furniture || []; this._edit.rooms = res.rooms || [];
         this._edit.sel = null; this._edit.undo = [];
+        // Each room's direction as the robot has it: Save sends only the ones changed since.
+        this._edit.roomsSaved = Object.fromEntries(this._edit.rooms.map((rm) => [rm.id, rm.floor_texture]));
       }
+      this._edit.dirOk = res.clean_direction === true; this._edit.mask = null;
       this._editFurnTypes(res.furniture_types);
       this._editRenderRooms(); this._editDraw();
       const info = maps.find((m) => m.id === res.map_id) || {};
@@ -1537,19 +1546,80 @@ class TapoRV30Panel extends HTMLElement {
     };
     img.src = res.picture;
     await done;
+    // The room-id grid, for the direction stripes only: drawn once it is in.
+    if (res.room_mask && this._editTok === tok && this._edit.geom === res.geometry) {
+      const m = await new Promise((ok) => { const i = new Image(); i.onload = () => ok(i); i.onerror = () => ok(null); i.src = res.room_mask; });
+      if (this._editTok === tok && this._edit.geom === res.geometry) { this._edit.mask = this._editMaskOf(m); this._editDraw(); }
+    }
+  }
+
+  // The room-id grid as { w, h, ids }: the room id per cell (0 for walls, floor and unknown).
+  _editMaskOf(img) {
+    if (!img || !img.naturalWidth) return null;
+    const w = img.naturalWidth, h = img.naturalHeight, c = document.createElement("canvas");
+    c.width = w; c.height = h;
+    const ctx = c.getContext("2d"); ctx.drawImage(img, 0, 0);
+    let px; try { px = ctx.getImageData(0, 0, w, h).data; } catch (e) { return null; }
+    const ids = new Uint8Array(w * h);
+    for (let i = 0; i < w * h; i++) { const v = px[i * 4]; if (v !== 0 && v !== 127 && v !== 255) ids[i] = v; }
+    return { w, h, ids };
   }
 
   _editRenderRooms() {
-    const el = this._editEl.rooms;
-    if (!this._edit.rooms.length) { el.innerHTML = ""; return; }
-    el.innerHTML = `<h5>Rooms</h5>` + this._edit.rooms.map((rm) =>
-      `<div class="row"><div class="main"><div class="t">${esc(rm.name || ("Room " + rm.id))}</div></div></div>`).join("") +
-      `<div class="ehint">Carpets and room renaming are view-only for now.</div>`;
+    const el = this._editEl.rooms, ed = this._edit;
+    if (!ed.rooms.length) { el.innerHTML = ""; return; }
+    const turn = (ed.geom && ed.geom.rotation) || 0;
+    const dirs = [["default", "Default"], ["horizontal", "Horizontal"], ["vertical", "Vertical"]];
+    // The cleaning direction, where the robot has one per room: a value it reports that is none of the
+    // three is shown as it is and kept unless changed.
+    const pick = (rm, i) => {
+      if (!ed.dirOk) return "";
+      const cur = texDir(rm.floor_texture, turn);
+      return `<select class="edir" data-i="${i}" aria-label="Cleaning direction of ${esc(rm.name || ("Room " + rm.id))}" title="Cleaning direction">`
+        + dirs.map(([v, l]) => `<option value="${v}" ${v === cur ? "selected" : ""}>${l}</option>`).join("")
+        + (cur ? "" : `<option selected disabled>Other (${esc(String(rm.floor_texture))})</option>`) + `</select>`;
+    };
+    el.innerHTML = `<h5>Rooms${ed.dirOk ? " and cleaning direction" : ""}</h5>` + ed.rooms.map((rm, i) =>
+      `<div class="row"><div class="main"><div class="t">${esc(rm.name || ("Room " + rm.id))}</div></div>${pick(rm, i)}</div>`).join("") +
+      `<div class="ehint">${ed.dirOk ? "Horizontal and vertical are as the map is shown here; Default leaves the way to the robot. " : ""}Carpets and room names are view-only for now.</div>`;
+    el.querySelectorAll(".edir").forEach((sel) => sel.onchange = () => {
+      const e = this._edit, rm = e.rooms[Number(sel.dataset.i)];
+      if (!this._editReady() || !rm) { this._editRenderRooms(); return; }
+      this._editSnapshot();
+      rm.floor_texture = dirTex(sel.value, (e.geom && e.geom.rotation) || 0);
+      this._editDraw();
+    });
+  }
+
+  // Thin stripes along each room's cleaning direction (none for the robot's own pattern), from the
+  // room-id grid so they stay inside the room, darkening its colour.
+  _editStripes(ctx) {
+    const ed = this._edit, m = ed.mask; if (!ed.dirOk || !m) return;
+    const turn = (ed.geom && ed.geom.rotation) || 0, flat = new Map();
+    for (const rm of ed.rooms) { const d = texDir(rm.floor_texture, turn); if (d === "horizontal" || d === "vertical") flat.set(Number(rm.id), d === "horizontal"); }
+    if (!flat.size) return;
+    const s = ctx.canvas.width / m.w, gap = 6, lw = 1.5;
+    ctx.fillStyle = "rgba(0,0,0,.22)";
+    for (const across of [true, false]) {
+      // across: stripes left to right, one every gap cell rows; else top to bottom, every gap columns
+      const lines = across ? m.h : m.w, len = across ? m.w : m.h;
+      for (let a = gap >> 1; a < lines; a += gap) {
+        let start = 0, id = 0;
+        for (let b = 0; b <= len; b++) {
+          const v = b < len ? m.ids[across ? a * m.w + b : b * m.w + a] : 0;
+          const on = v && flat.get(v) === across ? v : 0;
+          if (on === id) continue;
+          if (id) { if (across) ctx.fillRect(start * s, (a + 0.5) * s - lw / 2, (b - start) * s, lw); else ctx.fillRect((a + 0.5) * s - lw / 2, start * s, lw, (b - start) * s); }
+          id = on; start = b;
+        }
+      }
+    }
   }
 
   _editDraw() {
     const c = this._editEl.canvas, ctx = c.getContext("2d"); if (!this._edit.img) return;
     ctx.clearRect(0, 0, c.width, c.height); ctx.drawImage(this._edit.img, 0, 0);
+    this._editStripes(ctx);
     const poly = (verts) => { ctx.beginPath(); verts.forEach((p, i) => { const [x, y] = this._editMm2Px(p[0], p[1]); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }); };
     const styles = { forbid: ["rgba(219,68,55,.22)", "rgba(219,68,55,.95)"], carpet_rectangle: ["rgba(186,140,90,.30)", "rgba(150,100,55,.95)"], carpet_round: ["rgba(186,140,90,.30)", "rgba(150,100,55,.95)"] };
     for (const [i, f] of (this._edit.furniture || []).entries()) {
@@ -1667,8 +1737,9 @@ class TapoRV30Panel extends HTMLElement {
   _editUndo() { if (!this._editReady()) return; const u = this._edit.undo.pop(); if (!u) return; const o = JSON.parse(u); this._edit.areas = o.areas; this._edit.furniture = o.furniture; this._edit.rooms = o.rooms; this._edit.sel = null; this._editRenderRooms(); this._editDraw(); }
 
   async _editSave() {
-    // Only the verified-safe layers are written: no-go zones, virtual walls and furniture.
-    // Carpets and rooms are left untouched (not sent), so they are preserved as-is.
+    // Only the verified-safe layers are written: no-go zones, virtual walls and furniture, and the
+    // rooms whose cleaning direction changed (in the same save; the integration writes every room
+    // back as the robot has it, with only those directions changed). Carpets are left as they are.
     const ed = this._edit, el = this._editEl, robot = this._robot;
     if (ed && (ed.saving || ed.turning)) return;
     if (!this._editReady() || ed.mapId == null) { el.status.textContent = "The map has not loaded yet, so there is nothing to save."; return; }
@@ -1676,10 +1747,17 @@ class TapoRV30Panel extends HTMLElement {
     const payload = { type: "tapo_rv30/map/edit_apply", entity_id: robot, map_id: ed.mapId,
       areas: { forbid: ed.areas.forbid || [], virtual_wall: ed.areas.virtual_wall || [] },
       furniture: ed.furniture };
+    const was = ed.roomsSaved || {};
+    const turned = ed.dirOk ? ed.rooms.filter((rm) => [-1, 0, 90].includes(rm.floor_texture) && rm.floor_texture !== was[rm.id]) : [];
+    if (turned.length) payload.rooms = turned.map((rm) => ({ id: rm.id, floor_texture: rm.floor_texture }));
     // One save per robot: an editor opened for this robot meanwhile (a robot or tab switch and
     // back) waits for it in _editLoad instead of reading the zones from before it.
     let msg, failed = false;
-    const job = this._hass.callWS(payload).then((r) => { const w = r && r.result && r.result.warning; msg = w ? `Saved, but ${w}.` : "Saved."; },
+    // A non-zero code for the rooms: the robot refused the direction change (the rest may be saved).
+    const job = this._hass.callWS(payload).then((r) => {
+      const res = (r && r.result) || {}, w = res.warning, code = Number(res.rooms) || 0;
+      msg = code ? `Saved, but the robot refused the cleaning direction change (error ${code}).${w ? ` Also ${w}.` : ""}` : w ? `Saved, but ${w}.` : "Saved.";
+    },
       (err) => { failed = true; msg = "Save failed: " + (err.message || err); });
     this._editPend = { ...(this._editPend || {}), [robot]: job };
     ed.saving = true; ed.drag = null; this._editLock(el, true);

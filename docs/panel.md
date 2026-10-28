@@ -113,6 +113,16 @@ are view-only for now. Taps find rooms on the robot's own room grid, while the p
 app's tidied map, so right at a room's edge a tap can pick the room next door. Behind the scenes this is the robot's own editing API (`setAreaInfo` /
 `setFurnitureInfo`), the same one the Tapo app uses.
 
+**Cleaning direction.** On robots that support it (as the Tapo app's map management "Cleaning
+Direction"), each room in the list under the map has a **Default** / **Horizontal** /
+**Vertical** choice: Default leaves the pattern to the robot, the other two make it drive its
+lines that way. **Horizontal and vertical are as the map is shown here**, so they follow the
+map's rotation (turned a quarter, they swap, as in the app). Rooms with a direction get thin
+stripes along it. A change is held with the other edits (**Undo**, **Discard**) and written by the
+same **Save to robot**; only the rooms whose direction changed are sent, and every other room
+goes back to the robot as it was. One direction per room covers vacuuming and mopping. Also
+available as [`tapo_rv30.set_room_cleaning_direction`](services.md).
+
 ![The Edit map tab](panel-edit.png){ width="760" }
 
 ### Backups

@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.40.0
+
+### Added
+
+- **Cleaning direction per room, as in the Tapo app.** Each room can clean in the robot's default pattern, horizontally or vertically (for vacuuming and mopping alike; the robot keeps it on the map, not in presets). Set it in the sidebar page's Edit tab (rooms with a direction show stripes) or with the new `tapo_rv30.set_room_cleaning_direction` action. Horizontal and vertical follow the map as Home Assistant shows it, turned or not. Each room's direction is also in the map camera's room details. Needs a robot that reports cleaning direction support (`clean_angle`), as the RV30 Max Plus does.
+
+### Changed
+
+- The editor's room write now always sends every room from a fresh read of the map, and refuses before writing anything if that read has no rooms or lacks a room being changed.
+
 ## v0.39.12
 
 ### Fixed

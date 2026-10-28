@@ -678,3 +678,70 @@ def pick_segments(segment_ids: list[str], known: dict[int, set[int]], active: in
         by_map = {active: by_map[active]}
     (map_id, rooms), = by_map.items()
     return map_id, rooms, dropped
+
+
+# Per-room cleaning direction (the app's "Cleaning Direction"; component clean_angle 1 or later):
+# a room's floor_texture, -1 the robot's own pattern, 0 and 90 the two ways in the robot's map frame.
+# One value per room, for vacuuming and mopping alike.
+CLEAN_DIRECTIONS = (-1, 0, 90)
+DIRECTION_NAMES = ("default", "horizontal", "vertical")
+# What setAreaInfo takes back for a room besides type, id and name; no vertexs (rooms are cells in
+# the grid), as the editor, setups and restores write them.
+ROOM_KEEP = ("color", "define_type", "floor_material", "floor_texture", "carpet_strategy", "label")
+
+
+def _across(rotation) -> bool:
+    """The map is shown turned a quarter (90 or 270): its sides swap on screen."""
+    try:
+        return (int(rotation) // 90) % 2 == 1
+    except (TypeError, ValueError, OverflowError):
+        return False
+
+
+def direction_texture(direction, rotation=0) -> int:
+    """default / horizontal / vertical, as the map is shown turned by rotation -> floor_texture.
+    As in the app: unturned (or upside down) horizontal is 0; turned a quarter the two swap."""
+    d = str(direction or "").strip().lower()
+    if d == "default":
+        return -1
+    if d not in ("horizontal", "vertical"):
+        raise ValueError(f"direction must be one of {list(DIRECTION_NAMES)}, not {direction!r}")
+    return 0 if (d == "horizontal") != _across(rotation) else 90
+
+
+def texture_direction(texture, rotation=0) -> str | None:
+    """A room's floor_texture as the map is shown: default, horizontal or vertical (None when the
+    robot reports something else)."""
+    if texture is None or texture == -1:
+        return "default"
+    if isinstance(texture, bool) or texture not in (0, 90):
+        return None
+    return "horizontal" if (texture == 0) != _across(rotation) else "vertical"
+
+
+def valid_texture(value) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value in CLEAN_DIRECTIONS
+
+
+def room_areas(area_list, changes: dict | None = None) -> list[dict]:
+    """Every room of a map as setAreaInfo takes them back (type_list ["room"] replaces them all),
+    each as the robot has it, with changes applied: {room_id: {"name": text, "floor_texture": n}}.
+    Rooms not in changes go back exactly as read. ValueError when the read has no rooms or lacks a
+    room to change: the write would clear or drop rooms the robot has."""
+    changes = changes or {}
+    out = []
+    for a in area_list or []:
+        if not isinstance(a, dict) or a.get("type") != "room" or a.get("id") is None:
+            continue
+        entry = {"type": "room", "id": a["id"], **{k: a[k] for k in ("name", *ROOM_KEEP) if k in a}}
+        change = changes.get(a["id"]) or {}
+        if "name" in change:
+            entry["name"] = base64.b64encode(str(change["name"]).encode()).decode()
+        if "floor_texture" in change:
+            entry["floor_texture"] = change["floor_texture"]
+        out.append(entry)
+    if not out:
+        raise ValueError("the map read has no rooms, so nothing was written")
+    if missing := sorted(set(changes) - {a["id"] for a in out}, key=str):
+        raise ValueError(f"no room {missing} on the map, so nothing was written")
+    return out

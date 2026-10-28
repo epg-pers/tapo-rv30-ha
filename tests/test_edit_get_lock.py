@@ -29,6 +29,7 @@ class Coord:
     def __init__(self):
         self.hass, self.client, self.device_name, self.map_id = Hass(), Client(), "Jarvis", 100
         self.map_lock = asyncio.Lock()
+        self.clean_direction_supported = True
 
 
 class Conn:
