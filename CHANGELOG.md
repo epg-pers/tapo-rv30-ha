@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.40.2
+
+### Fixed
+
+- **"Config entry ... has version 2 which is higher than the current version 1" after switching from a fork** ([#28](https://github.com/epg-pers/tapo-rv30-ha/issues/28)). A fork with the same `tapo_rv30` domain saves its config entry as version 2, which Home Assistant 2026.10 refuses before the integration can read it. Such entries, when their saved data matches this integration's, are now read as version 1 when Home Assistant starts, so they load without removing anything. Entries saved by this integration are not changed.
+
 ## v0.40.0
 
 ### Added

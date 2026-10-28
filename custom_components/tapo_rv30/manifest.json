@@ -36,5 +36,5 @@
     "numpy>=1.26",
     "python-kasa>=0.10.0"
   ],
-  "version": "0.40.0"
+  "version": "0.40.2"
 }
