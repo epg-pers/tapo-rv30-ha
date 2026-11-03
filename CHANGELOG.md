@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.40.3
+
+### Fixed
+
+- **"Detected that custom integration 'tapo_rv30' calls device_registry.async_get_device, which is deprecated".** On Home Assistant 2026.8 and newer the integration now uses the newer device lookups when it adds the device to its events and when it recognises a robot that has moved to a new IP address (the old call stops working in Home Assistant 2027.8). Older Home Assistant versions keep using the old calls.
+
 ## v0.40.2
 
 ### Fixed
