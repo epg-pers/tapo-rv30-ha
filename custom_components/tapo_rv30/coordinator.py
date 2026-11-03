@@ -505,7 +505,11 @@ class TapoCoordinator(DataUpdateCoordinator):
     def _event_base(self) -> dict:
         device_id = None
         if self.entry:
-            dev = dr.async_get(self.hass).async_get_device(identifiers={(DOMAIN, self.entry.entry_id)})
+            reg, ident = dr.async_get(self.hass), (DOMAIN, self.entry.entry_id)
+            if hasattr(reg, "async_get_device_by_identifier"):     # HA 2026.8+
+                dev = reg.async_get_device_by_identifier(ident, self.entry.entry_id)
+            else:
+                dev = reg.async_get_device(identifiers={ident})
             device_id = dev.id if dev else None
         return {"entry_id": self.entry.entry_id if self.entry else None, "device_id": device_id,
                 "device": self.device_name, "model": self.device_model}

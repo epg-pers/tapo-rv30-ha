@@ -127,9 +127,14 @@ class TapoRV30ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         # The MAC decides which robot this is; the address alone can belong to another robot
         # that had it before (two robots swapping leases).
         dev_reg = dr.async_get(self.hass)
-        device = dev_reg.async_get_device(connections={(dr.CONNECTION_NETWORK_MAC, mac)})
+        conn = {(dr.CONNECTION_NETWORK_MAC, mac)}
+        if hasattr(dev_reg, "async_get_devices"):      # HA 2026.8+: one device per config entry
+            entry_ids = {d.config_entry_id for d in dev_reg.async_get_devices(connections=conn)}
+        else:
+            device = dev_reg.async_get_device(connections=conn)
+            entry_ids = set(device.config_entries) if device else set()
         # Only our own entries count: the same MAC can be a device of another integration.
-        ours = [e for e in (self.hass.config_entries.async_get_entry(i) for i in (device.config_entries if device else ()))
+        ours = [e for e in (self.hass.config_entries.async_get_entry(i) for i in entry_ids)
                 if e is not None and e.domain == DOMAIN]
         if ours:
             for entry in ours:
